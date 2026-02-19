@@ -55,10 +55,15 @@ class DuckDBAdapter(IDRAdapter):
     def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
         """Execute SQL and return results as list of dicts."""
         if params:
-            result = self.conn.execute(sql, params).fetchdf()
+            cursor = self.conn.execute(sql, params)
         else:
-            result = self.conn.execute(sql).fetchdf()
-        return result.to_dict("records")
+            cursor = self.conn.execute(sql)
+
+        # Use DB-API style row/column extraction to avoid hard dependency on
+        # pandas/numpy for core query behavior.
+        rows = cursor.fetchall()
+        columns = [col[0] for col in (cursor.description or [])]
+        return [dict(zip(columns, row)) for row in rows]
 
     def query_one(self, sql: str, params: Optional[List[Any]] = None) -> Any:
         """Execute SQL and return first value of first row."""
