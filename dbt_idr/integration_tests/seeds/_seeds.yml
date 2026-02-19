@@ -1,0 +1,45 @@
+version: 2
+
+seeds:
+  - name: sample_crm_customers
+    description: "Sample CRM customer data for testing"
+    config:
+      column_types:
+        customer_id: varchar
+        email: varchar
+        phone: varchar
+        first_name: varchar
+        last_name: varchar
+        loyalty_id: varchar
+        updated_at: varchar
+
+  - name: sample_orders
+    description: "Sample order data for testing"
+    config:
+      column_types:
+        order_id: varchar
+        customer_email: varchar
+        contact_phone: varchar
+        order_date: varchar
+
+  - name: sample_pos_transactions
+    description: "Sample POS transaction data for testing"
+    config:
+      column_types:
+        transaction_id: varchar
+        loyalty_card_id: varchar
+        contact_phone: varchar
+        transaction_date: varchar
+
+  - name: idr_sources
+    description: "IDR source configuration for test data"
+  - name: idr_identifier_mappings
+    description: "IDR identifier mappings for test data"
+  - name: idr_rules
+    description: "IDR matching rules for test"
+  - name: idr_exclusions
+    description: "IDR exclusion patterns for test"
+  - name: idr_attribute_mappings
+    description: "IDR attribute mappings for golden profiles"
+  - name: idr_survivorship_rules
+    description: "IDR survivorship rules for golden profiles"

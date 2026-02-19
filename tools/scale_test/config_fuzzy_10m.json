@@ -1,0 +1,38 @@
+{
+    "global": {
+        "seed": 12345,
+        "out_dir": "test_data/fuzzy_10m",
+        "start_date": "2024-01-01",
+        "days": 180,
+        "chunk_rows": 500000,
+        "write_truth_links": true
+    },
+    "scale": {
+        "n_persons": 10000000,
+        "n_households": 8000000,
+        "n_addresses": 9000000,
+        "n_products": 50000
+    },
+    "rows": {
+        "digital_customer_account": 10000000,
+        "pos_customer": 6000000,
+        "ecom_order": 20000000
+    },
+    "country_mix": {
+        "US": 0.6,
+        "UK": 0.2,
+        "CA": 0.2
+    },
+    "channel_mix": {
+        "digital_account": { "web": 0.8, "app": 0.2 },
+        "ecom_order": { "web": 0.8, "app": 0.2 }
+    },
+    "identity_noise": {
+        "p_typo": 0.05,
+        "p_nickname": 0.20,
+        "p_email_plus_alias": 0.05
+    },
+    "address_rules": {},
+    "sdk_rules": {},
+    "bazaarvoice_rules": {}
+}

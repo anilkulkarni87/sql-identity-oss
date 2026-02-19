@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: stg_identifiers
+    description: |
+      Staging model that extracts identifiers from all configured source tables.
+
+      **Customization Required**: Users must modify this model to union their actual
+      source tables based on the configuration in `idr_identifier_mappings`.
+
+      Each row represents one identifier extracted from a source entity.
+
+    columns:
+      - name: source_id
+        description: "Identifier for the source table"
+        tests:
+          - not_null
+
+      - name: entity_key
+        description: "Composite key: source_id:raw_entity_key"
+        tests:
+          - not_null
+
+      - name: identifier_type
+        description: "Type of identifier (EMAIL, PHONE, LOYALTY, etc.)"
+        tests:
+          - not_null
+
+      - name: identifier_value_raw
+        description: "Original identifier value before normalization"
+
+      - name: identifier_value_norm
+        description: "Normalized identifier value (lowercased, formatted, etc.)"
+        tests:
+          - not_null
+
+      - name: is_hashed
+        description: "Whether the identifier value is already hashed"
+
+      - name: priority
+        description: "Rule priority for this identifier type"
+
+      - name: max_group_size
+        description: "Maximum entities that can share this identifier value"
+
+      - name: extracted_at
+        description: "Timestamp when this record was extracted"

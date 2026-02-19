@@ -1,0 +1,4 @@
+source_id,source_name,database,schema,table_name,entity_key_column,watermark_column,is_active,description
+crm_customers,CRM Customers,analytics,crm,customers,customer_id,updated_at,true,Main CRM customer table
+ecommerce_orders,E-commerce Orders,analytics,ecommerce,orders,customer_id,order_date,true,Online order transactions
+pos_transactions,POS Transactions,analytics,retail,transactions,loyalty_id,transaction_date,true,In-store POS data

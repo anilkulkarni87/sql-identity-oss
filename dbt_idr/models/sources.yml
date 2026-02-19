@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: idr_seeds
+    description: "IDR configuration seeds"
+    schema: "{{ target.schema }}"
+    tables:
+      - name: idr_rules
+        description: "Matching rules defining identifier types and priorities"
+      - name: idr_sources
+        description: "Source table registry"
+      - name: idr_identifier_mappings
+        description: "Maps source columns to identifier types"
+      - name: idr_exclusions
+        description: "Identifier values to exclude from matching"
+      - name: idr_attribute_mappings
+        description: "Maps source columns to profile attributes"
+      - name: idr_survivorship_rules
+        description: "Defines how to pick winning values for golden profiles"

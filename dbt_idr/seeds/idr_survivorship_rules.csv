@@ -1,0 +1,6 @@
+attribute_name,strategy,source_priority_list,recency_field,description
+email,MOST_RECENT,,record_updated_at,Use most recent email
+phone,MOST_RECENT,,record_updated_at,Use most recent phone
+first_name,MOST_RECENT,,record_updated_at,Use most recent first name
+last_name,MOST_RECENT,,record_updated_at,Use most recent last name
+loyalty_id,SOURCE_PRIORITY,pos_transactions,record_updated_at,Prefer POS for loyalty

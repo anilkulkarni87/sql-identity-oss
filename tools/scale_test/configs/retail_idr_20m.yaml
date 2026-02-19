@@ -1,0 +1,69 @@
+name: 20m
+seed: 42
+batch_size: 100000
+format: parquet
+time:
+  start_date: "2021-01-01"
+  end_date: "2024-12-31"
+scale:
+  total_customers: 20000000
+  total_products: 200000
+  total_stores: 500
+  totals:
+    total_orders: null
+    total_pos_txns: null
+    total_web_events: null
+    total_app_events: null
+    total_support_tickets: null
+ratios:
+  orders_per_customer: 2.5
+  pos_txns_per_customer: 3.0
+  web_events_per_customer: 30
+  app_events_per_customer: 12
+  support_tickets_per_customer: 0.2
+membership:
+  loyalty_rate: 0.6
+  account_rate: 0.7
+overlap:
+  ecom:
+    email_present: 0.92
+    phone_present: 0.45
+    customer_id_present: 0.70
+  pos:
+    loyalty_id_present: 0.35
+    receipt_email_present: 0.18
+    receipt_phone_present: 0.12
+  web:
+    account_id_present: 0.55
+    email_present: 0.08
+  app:
+    account_id_present: 0.60
+  support:
+    email_present: 0.70
+    phone_present: 0.45
+    order_id_present: 0.40
+noise:
+  email_case_variation: 0.10
+  email_typo_rate: 0.02
+  phone_missing_country_code: 0.20
+  phone_format_variation: 0.25
+  address_line2_missing: 0.65
+email_domains:
+  - domain: gmail.com
+    weight: 0.35
+  - domain: outlook.com
+    weight: 0.20
+  - domain: yahoo.com
+    weight: 0.15
+  - domain: icloud.com
+    weight: 0.10
+  - domain: hotmail.com
+    weight: 0.05
+  - domain: nike.com
+    weight: 0.05
+  - domain: adidas.com
+    weight: 0.05
+  - domain: lululemon.com
+    weight: 0.03
+  - domain: pokemon.com
+    weight: 0.02

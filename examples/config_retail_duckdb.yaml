@@ -1,0 +1,194 @@
+sources:
+  - id: DIGITAL
+    table: idr_input.digital_customer_account
+    entity_key: DIGITAL_CUSTOMER_ID
+    entity_type: CUSTOMER
+    watermark_column: UPDATED_AT
+    identifiers:
+      - type: EMAIL
+        expr: EMAIL_NORM
+      - type: PHONE
+        expr: PHONE_NORM
+    attributes:
+      - name: first_name
+        expr: FIRST_NAME
+      - name: last_name
+        expr: LAST_NAME
+      - name: email_raw
+        expr: EMAIL_NORM
+      - name: phone_raw
+        expr: PHONE_NORM
+      - name: record_updated_at
+        expr: UPDATED_AT
+    trust_rank: 1
+
+  - id: POS
+    table: idr_input.pos_customer
+    entity_key: POS_CUSTOMER_ID
+    entity_type: CUSTOMER
+    watermark_column: UPDATED_AT
+    identifiers:
+      - type: EMAIL
+        expr: EMAIL_NORM
+      - type: PHONE
+        expr: PHONE_NORM
+    attributes:
+      - name: first_name
+        expr: FIRST_NAME
+      - name: last_name
+        expr: LAST_NAME
+      - name: email_raw
+        expr: EMAIL_NORM
+      - name: phone_raw
+        expr: PHONE_NORM
+      - name: record_updated_at
+        expr: UPDATED_AT
+    trust_rank: 2
+
+  - id: ECOM
+    table: idr_input.ecom_order
+    entity_key: ORDER_ID
+    entity_type: ORDER
+    watermark_column: UPDATED_AT
+    identifiers:
+      - type: EMAIL
+        expr: EMAIL_NORM
+      - type: PHONE
+        expr: PHONE_NORM
+      - type: CUSTOMER_ID
+        expr: DIGITAL_CUSTOMER_ID
+    attributes:
+      - name: email_raw
+        expr: EMAIL_NORM
+      - name: phone_raw
+        expr: PHONE_NORM
+      - name: record_updated_at
+        expr: UPDATED_AT
+    trust_rank: 3
+
+  - id: STORE
+    table: idr_input.store_order
+    entity_key: STORE_ORDER_ID
+    entity_type: ORDER
+    watermark_column: UPDATED_AT
+    identifiers:
+      - type: CUSTOMER_ID
+        expr: POS_CUSTOMER_ID
+    trust_rank: 4
+
+  - id: SDK
+    table: idr_input.sdk_event
+    entity_key: EVENT_ID
+    entity_type: EVENT
+    watermark_column: CREATED_AT
+    identifiers:
+      - type: CUSTOMER_ID
+        expr: DIGITAL_CUSTOMER_ID
+    trust_rank: 5
+
+  - id: SURVEY
+    table: idr_input.bazaarvoice_survey
+    entity_key: SURVEY_RESPONSE_ID
+    entity_type: FEEDBACK
+    watermark_column: UPDATED_AT
+    identifiers:
+      - type: EMAIL
+        expr: EMAIL_NORM
+      - type: PHONE
+        expr: PHONE_NORM
+    attributes:
+      - name: email_raw
+        expr: EMAIL_NORM
+      - name: record_updated_at
+        expr: UPDATED_AT
+    trust_rank: 6
+
+  - id: REVIEW
+    table: idr_input.product_review
+    entity_key: REVIEW_ID
+    entity_type: FEEDBACK
+    watermark_column: UPDATED_AT
+    identifiers:
+      - type: EMAIL
+        expr: EMAIL_NORM
+      - type: CUSTOMER_ID
+        expr: DIGITAL_CUSTOMER_ID
+    attributes:
+      - name: email_raw
+        expr: EMAIL_NORM
+      - name: record_updated_at
+        expr: UPDATED_AT
+    trust_rank: 7
+
+rules:
+  - id: R_EMAIL
+    type: EMAIL
+    priority: 1
+    canonicalize: LOWERCASE
+
+  - id: R_PHONE
+    type: PHONE
+    priority: 2
+    canonicalize: NONE
+
+  - id: R_CUSTOMER_ID
+    type: CUSTOMER_ID
+    priority: 3
+    canonicalize: NONE
+    max_group_size: 5000
+
+# ==========================================
+# DUCKDB FUZZY RULES (Local Verification)
+# ==========================================
+fuzzy_rules:
+  - id: FR_NAME_DUCKDB
+    name: "Name Fuzzy Match"
+    # Blocking: DuckDB doesn't have SOUNDEX by default, using SUBSTR
+    blocking_key: "CASE WHEN first_name IS NOT NULL THEN SUBSTRING(first_name, 1, 1) ELSE '' END"
+    # Scoring: jaro_winkler_similarity returns 0.0-1.0 natively
+    score_expr: "jaro_winkler_similarity(<a>, <b>)"
+    threshold: 0.90
+    priority: 100
+
+survivorship:
+  - attribute: first_name
+    strategy: PRIORITY
+    order: [DIGITAL, POS]
+  - attribute: last_name
+    strategy: PRIORITY
+    order: [DIGITAL, POS]
+  - attribute: email_raw
+    strategy: PRIORITY
+    order: [DIGITAL, ECOM, SURVEY, REVIEW, POS]
+  - attribute: phone_raw
+    strategy: PRIORITY
+    order: [DIGITAL, ECOM, POS]
+  - attribute: country_code
+    strategy: PRIORITY
+    order: [DIGITAL]
+
+exclusions:
+  - type: EMAIL
+    value: "test@test.com"
+    match: EXACT
+    reason: "Test email"
+  - type: EMAIL
+    value: "noreply@%"
+    match: LIKE
+    reason: "No-reply emails"
+  - type: EMAIL
+    value: "%@example.com"
+    match: LIKE
+    reason: "Example domain"
+  - type: PHONE
+    value: "0000000000"
+    match: EXACT
+    reason: "Placeholder phone"
+  - type: PHONE
+    value: "1111111111"
+    match: EXACT
+    reason: "Placeholder phone"
+  - type: PHONE
+    value: "1234567890"
+    match: EXACT
+    reason: "Test phone"

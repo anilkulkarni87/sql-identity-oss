@@ -1,0 +1,4 @@
+rule_id,identifier_type,priority,is_active,canonicalize,max_group_size,description
+email_exact,EMAIL,1,true,LOWERCASE,100,Email matching
+phone_exact,PHONE,2,true,NONE,100,Phone matching
+loyalty_exact,LOYALTY,3,true,NONE,10,Loyalty ID matching

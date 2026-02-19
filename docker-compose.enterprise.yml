@@ -1,0 +1,122 @@
+services:
+  # --- IDR Core Services ---
+  api:
+    build:
+      context: .
+      dockerfile: idr_api/Dockerfile
+      args:
+        - IDR_PIP_EXTRAS=${IDR_PIP_EXTRAS:-api,duckdb,enterprise}
+    container_name: idr-api-ent
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - IDR_DATABASE=/data/idr.duckdb
+      - IDR_DB_PATH=/data/idr.duckdb
+      - IDR_CORS_ORIGINS=http://localhost:3000
+      - IDR_AUTH_ISSUER=http://localhost:8080/realms/idr-realm
+      - IDR_AUTH_AUDIENCE=account
+      - IDR_AUTH_JWKS_URL=http://keycloak:8080/realms/idr-realm/protocol/openid-connect/certs
+      - IDR_AUTH_JWKS_TTL_SECONDS=300
+      - IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS=5
+      - IDR_ALLOW_INSECURE_DEV_AUTH=false
+      - IDR_CONNECTION_IDLE_TTL_SECONDS=3600
+      - IDR_SESSION_STORE_CLASS=${IDR_SESSION_STORE_CLASS:-idr_enterprise.session_store.RedisConnectionSessionStore}
+      - IDR_REDIS_URL=${IDR_REDIS_URL:-redis://redis:6379/0}
+      - IDR_REDIS_NAMESPACE=${IDR_REDIS_NAMESPACE:-idr:session_store}
+      # OpenTelemetry / Metrics (Placeholder for future instrumentation)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://prometheus:9090
+    volumes:
+      - idr-data:/data
+    networks:
+      - idr-ent-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  ui:
+    build:
+      context: ./idr_ui
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=/api
+        - VITE_AUTH_AUTHORITY=http://localhost:8080/realms/idr-realm
+        - VITE_AUTH_CLIENT_ID=idr-web
+        - VITE_ALLOW_INSECURE_DEV_AUTH=false
+    container_name: idr-ui-ent
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - idr-ent-net
+
+  # --- Identity Provider (SSO) ---
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0.0
+    container_name: idr-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    volumes:
+      - ./deployment/keycloak/idr-realm.json:/opt/keycloak/data/import/idr-realm.json:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - idr-ent-net
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: idr-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - idr-ent-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # --- Observability ---
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: idr-prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - idr-ent-net
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: idr-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards
+      - grafana-storage:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - idr-ent-net
+    depends_on:
+      - prometheus
+
+volumes:
+  idr-data:
+  grafana-storage:
+
+networks:
+  idr-ent-net:
+    driver: bridge

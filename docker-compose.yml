@@ -1,0 +1,58 @@
+services:
+  # Backend API
+  api:
+    build:
+      context: .
+      dockerfile: idr_api/Dockerfile
+      args:
+        - IDR_PIP_EXTRAS=${IDR_PIP_EXTRAS:-api,duckdb}
+    container_name: idr-api
+    ports:
+      - "${IDR_API_PORT:-8000}:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - IDR_DATABASE=${IDR_DATABASE:-/data/idr.duckdb}
+      - IDR_DB_PATH=${IDR_DB_PATH:-/data/idr.duckdb}
+      - IDR_CORS_ORIGINS=${IDR_CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      - IDR_ALLOW_INSECURE_DEV_AUTH=${IDR_ALLOW_INSECURE_DEV_AUTH:-true}
+      - IDR_CONNECTION_IDLE_TTL_SECONDS=${IDR_CONNECTION_IDLE_TTL_SECONDS:-3600}
+      - IDR_SESSION_STORE_CLASS=${IDR_SESSION_STORE_CLASS:-}
+    volumes:
+      - idr-data:/data
+    networks:
+      - idr-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start-period: 10s
+      retries: 3
+
+  # Frontend UI
+  ui:
+    build:
+      context: ./idr_ui
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-/api}
+        - VITE_AUTH_AUTHORITY=${VITE_AUTH_AUTHORITY:-}
+        - VITE_AUTH_CLIENT_ID=${VITE_AUTH_CLIENT_ID:-}
+        - VITE_ALLOW_INSECURE_DEV_AUTH=${VITE_ALLOW_INSECURE_DEV_AUTH:-true}
+    container_name: idr-ui
+    ports:
+      - "${IDR_UI_PORT:-3000}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - idr-net
+    restart: unless-stopped
+
+volumes:
+  idr-data:
+    driver: local
+
+networks:
+  idr-net:
+    driver: bridge

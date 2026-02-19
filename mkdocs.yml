@@ -1,0 +1,83 @@
+site_name: SQL Identity Resolution
+site_description: Production-grade deterministic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks
+site_url: https://anilkulkarni87.github.io/sql-identity-resolution/
+repo_url: https://github.com/anilkulkarni87/sql-identity-resolution
+repo_name: sql-identity-resolution
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mermaid2
+  - tags
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - tables
+  - attr_list
+
+nav:
+  - 'Act I: The Vision':
+    - Overview: 01-overview.md
+    - Architecture: 18-architecture.md
+    - How It Works: 21-how-it-works.md
+    - Data Model: 20-data-model.md
+  - 'Act II: Start Here':
+    - Installation: 02-installation.md
+    - Distribution Paths: 27-distribution.md
+    - Quickstart: 03-quickstart.md
+    - Walkthrough: 21-how-it-works.md # Reusing simple guide as walkthrough concept
+  - 'Act III: Configuration':
+    - Configuration: 04-configuration.md
+    - Schema Reference: 08-schema.md
+    - Matching Algorithm: 19-matching-algorithm.md
+  - 'Act IV: Operations':
+    - CLI Reference: 05-cli.md
+    - Platforms: 06-platforms.md
+    - Pipeline Details: 07-pipeline.md
+    - Scaling & Sizing: 25-scaling.md
+    - Security: 16-security.md
+    - CI/CD: 15-ci-cd.md
+    - Troubleshooting: 14-troubleshooting.md
+    - Production Hardening: 26-production-hardening.md
+  - 'Act V: Advanced':
+    - API: 10-api.md
+    - MCP Server: 11-mcp.md
+    - DBT Integration: 12-dbt.md
+    - Web UI: 09-ui.md
+    - Metrics: 22-metrics.md
+    - Benchmarks: 23-benchmarks.md

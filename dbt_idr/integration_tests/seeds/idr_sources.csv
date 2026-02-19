@@ -1,0 +1,4 @@
+source_id,source_name,database,schema,table_name,entity_key_column,watermark_column,is_active,description
+crm,CRM Customers,,main,sample_crm_customers,customer_id,updated_at,true,Sample CRM data
+orders,E-commerce Orders,,main,sample_orders,order_id,order_date,true,Sample order data
+pos,POS Transactions,,main,sample_pos_transactions,transaction_id,transaction_date,true,Sample POS data

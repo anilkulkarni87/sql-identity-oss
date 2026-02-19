@@ -1,0 +1,88 @@
+name: idr-mcp
+version: 0.1
+purpose: Read-only access to IDR outputs (deterministic + fuzzy) for agents.
+security:
+  pii_access: masked_by_default
+  require_roles_for_full_pii: true
+  datasets: ["idr_out", "idr_meta"]
+  notes:
+    - MCP should query views that apply row/column masking.
+    - If encrypted PII is used, identifier_value is optional.
+
+resources:
+  - idr_out.identity_resolved_membership_current
+  - idr_out.identity_clusters_current
+  - idr_out.identity_edges_current
+  - idr_out.edge_evidence
+  - idr_out.run_history
+  - idr_out.config_snapshot
+  - idr_out.skipped_identifier_groups
+  - idr_out.golden_profiles
+  - idr_meta.rule
+  - idr_meta.source_table
+
+tools:
+  - name: get_cluster
+    input: { resolved_id: string, include_edges?: boolean, include_entities?: boolean }
+    output:
+      resolved_id: string
+      cluster_size: number
+      run_id: string
+      super_cluster_id?: string
+      entities?: [{ entity_key, resolved_id, run_id, updated_at }]
+      edges?: [{ left_entity_key, right_entity_key, identifier_type, identifier_value_norm?, run_id }]
+      pii_access_level: "none|masked|full"
+
+  - name: get_golden_profile
+    description: Retrieve the resolved golden profile attributes for a cluster (e.g. name, email, phone) based on survivorship rules.
+    input: { resolved_id: string }
+    output:
+      resolved_id: string
+      attributes: { first_name?, last_name?, email?, phone?, ... } # Dynamic keys
+      pii_access_level: "none|masked|full"
+
+  - name: search_identifier
+    input: { value: string, identifier_type?: string, limit?: number }
+    output:
+      matches: [{ resolved_id, cluster_size, confidence_score? }]
+      pii_access_level: "none|masked|full"
+
+  - name: list_edges_for_cluster
+    input: { resolved_id: string, limit?: number }
+    output:
+      edges: [{ left_entity_key, right_entity_key, identifier_type, identifier_value_norm?, run_id }]
+
+  - name: explain_edge
+    input: { entity_key_a: string, entity_key_b: string }
+    output:
+      evidence: [{ rule_id, identifier_type, match_value?, score?, created_at }]
+      pii_access_level: "none|masked|full"
+
+  - name: run_history
+    input: { limit?: number }
+    output:
+      runs: [{ run_id, run_mode, status, started_at, ended_at, duration_seconds, config_hash? }]
+
+  - name: latest_run
+    input: {}
+    output:
+      run_id: string
+      status: string
+      config_hash?: string
+
+  - name: config_snapshot
+    input: { config_hash: string }
+    output:
+      sources_json: string
+      rules_json: string
+      mappings_json: string
+
+  - name: list_rules
+    input: {}
+    output:
+      rules: [{ rule_id, identifier_type, priority, is_active }]
+
+  - name: list_sources
+    input: {}
+    output:
+      sources: [{ table_id, table_fqn, entity_type, is_active }]

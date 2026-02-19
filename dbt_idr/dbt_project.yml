@@ -1,0 +1,53 @@
+name: 'dbt_idr'
+version: '0.5.0'
+config-version: 2
+
+# Default profile - users override in their project
+profile: 'default'
+
+# File paths
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+
+# Target schema configuration
+# When idr_dry_run=true, models write to preview schema instead of production
+models:
+  dbt_idr:
+    +schema: "{{ 'idr_preview' if var('idr_dry_run', false) else 'idr' }}"
+    staging:
+      +schema: "{{ 'idr_preview_staging' if var('idr_dry_run', false) else 'idr_staging' }}"
+      +materialized: view
+    intermediate:
+      +schema: "{{ 'idr_preview_work' if var('idr_dry_run', false) else 'idr_work' }}"
+      +materialized: table
+    marts:
+      +schema: "{{ 'idr_preview_out' if var('idr_dry_run', false) else 'idr_out' }}"
+      +materialized: table
+
+seeds:
+  dbt_idr:
+    +schema: idr_meta
+
+# Package variables - users can override in their dbt_project.yml
+vars:
+  # DRY RUN MODE - set to true to preview changes without affecting production
+  idr_dry_run: false
+
+  # Maximum label propagation iterations
+  idr_max_lp_iterations: 30
+
+  # Cluster size threshold for warnings
+  idr_large_cluster_threshold: 5000
+
+  # Default max group size (can be overridden per rule)
+  idr_default_max_group_size: 10000
+
+  # Enable confidence scoring
+  idr_enable_confidence_scoring: true
+
+# Clean targets
+clean-targets:
+  - "target"
+  - "dbt_packages"

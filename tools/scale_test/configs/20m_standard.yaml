@@ -1,0 +1,24 @@
+# Scale Test Configuration
+# Standard 20M row test with retail industry distribution
+
+rows: 20000000
+seed: 42
+
+# Cluster Distribution (size_min, size_max, percentage)
+distributions:
+  - [1, 1, 0.35]       # 35% singletons (new/one-time customers)
+  - [2, 2, 0.25]       # 25% pairs (customer + one alt identity)
+  - [3, 5, 0.20]       # 20% small (family accounts, gift purchases)
+  - [6, 15, 0.12]      # 12% medium (frequent buyers, multiple addresses)
+  - [16, 50, 0.05]     # 5% large (business accounts, resellers)
+  - [51, 200, 0.02]    # 2% very large (corporate accounts)
+  - [201, 1000, 0.01]  # 1% massive (fraud rings, data quality issues)
+
+# Identifier Match Rates
+email_match_rate: 0.55    # 55% of clusters connected via email
+phone_match_rate: 0.25    # 25% via phone
+loyalty_match_rate: 0.10  # 10% via loyalty ID
+address_match_rate: 0.10  # 10% via address
+
+# Chain patterns (A-B + B-C = A-B-C)
+chain_rate: 0.15          # 15% of clusters have chain patterns

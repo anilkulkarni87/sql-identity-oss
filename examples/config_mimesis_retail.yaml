@@ -1,0 +1,245 @@
+# IDR Configuration for Mimesis Retail Dataset
+# Matches: tools/scale_test/generate_retail_idr_mimesis.py
+# Load with: python tools/scale_test/load_duckdb.py --input-dir ... --db retail.duckdb
+
+sources:
+  # CRM Master Customer Records (Golden Source)
+  - id: CRM
+    table: main.crm_customers
+    entity_key: customer_id
+    entity_type: CUSTOMER
+    watermark_column: updated_at
+    identifiers:
+      - type: EMAIL
+        expr: email
+#      - type: PHONE
+#        expr: phone
+#      - type: CUSTOMER_ID
+#        expr: customer_id
+    attributes:
+      - name: first_name
+        expr: first_name
+      - name: last_name
+        expr: last_name
+      - name: email
+        expr: email
+      - name: phone
+        expr: phone
+      - name: dob
+        expr: dob
+      - name: gender
+        expr: gender
+      - name: country
+        expr: country
+    trust_rank: 1
+
+  # Loyalty Program Members
+  - id: LOYALTY
+    table: main.loyalty_members
+    entity_key: loyalty_id
+    entity_type: CUSTOMER
+    watermark_column: updated_at
+    identifiers:
+      - type: EMAIL
+        expr: email
+      - type: PHONE
+        expr: phone
+      - type: LOYALTY_ID
+        expr: loyalty_id
+      - type: CUSTOMER_ID
+        expr: customer_id
+    attributes:
+      - name: email
+        expr: email
+      - name: phone
+        expr: phone
+      - name: tier
+        expr: tier
+      - name: country
+        expr: country
+    trust_rank: 2
+
+  # Web Account Records
+  - id: WEB_ACCT
+    table: main.web_accounts
+    entity_key: account_id
+    entity_type: CUSTOMER
+    watermark_column: updated_at
+    identifiers:
+      - type: EMAIL
+        expr: email
+#      - type: PHONE
+#        expr: phone
+#      - type: ACCOUNT_ID
+#        expr: account_id
+#      - type: CUSTOMER_ID
+#        expr: customer_id
+    attributes:
+      - name: email
+        expr: email
+      - name: phone
+        expr: phone
+      - name: country
+        expr: country
+    trust_rank: 3
+
+  # E-commerce Orders
+  - id: ECOM
+    table: main.ecom_orders
+    entity_key: order_id
+    entity_type: ORDER
+    watermark_column: updated_at
+    identifiers:
+      - type: EMAIL
+        expr: email
+      - type: PHONE
+        expr: phone
+      - type: CUSTOMER_ID
+        expr: customer_id
+    attributes:
+      - name: email
+        expr: email
+      - name: phone
+        expr: phone
+    trust_rank: 4
+
+  # POS (In-Store) Transactions
+  - id: POS
+    table: main.pos_transactions
+    entity_key: txn_id
+    entity_type: TRANSACTION
+    watermark_column: updated_at
+    identifiers:
+      - type: LOYALTY_ID
+        expr: loyalty_id
+      - type: EMAIL
+        expr: receipt_email
+      - type: PHONE
+        expr: receipt_phone
+    attributes:
+      - name: email
+        expr: receipt_email
+      - name: phone
+        expr: receipt_phone
+    trust_rank: 5
+
+  # Customer Support Tickets
+  - id: SUPPORT
+    table: main.customer_support_tickets
+    entity_key: ticket_id
+    entity_type: TICKET
+    watermark_column: updated_at
+    identifiers:
+      - type: EMAIL
+        expr: email
+      - type: PHONE
+        expr: phone
+    attributes:
+      - name: email
+        expr: email
+      - name: phone
+        expr: phone
+    trust_rank: 6
+
+  # Web Events (Clickstream)
+  - id: WEB_EVENT
+    table: main.web_events
+    entity_key: event_id
+    entity_type: EVENT
+    watermark_column: updated_at
+    identifiers:
+      - type: ACCOUNT_ID
+        expr: account_id
+      - type: DEVICE_ID
+        expr: device_id
+      - type: EMAIL
+        expr: email
+    trust_rank: 7
+
+  # App Events (Mobile)
+  - id: APP_EVENT
+    table: main.app_events
+    entity_key: event_id
+    entity_type: EVENT
+    watermark_column: updated_at
+    identifiers:
+      - type: ACCOUNT_ID
+        expr: account_id
+      - type: DEVICE_ID
+        expr: device_id
+    trust_rank: 8
+
+# Exact Match Rules
+rules:
+  - id: R_EMAIL
+    type: EMAIL
+    priority: 1
+    canonicalize: LOWERCASE
+
+  - id: R_PHONE
+    type: PHONE
+    priority: 2
+    canonicalize: DIGITS_ONLY
+
+  - id: R_CUSTOMER_ID
+    type: CUSTOMER_ID
+    priority: 3
+    canonicalize: NONE
+    max_group_size: 10000
+
+  - id: R_LOYALTY_ID
+    type: LOYALTY_ID
+    priority: 4
+    canonicalize: NONE
+
+  - id: R_ACCOUNT_ID
+    type: ACCOUNT_ID
+    priority: 5
+    canonicalize: NONE
+
+  - id: R_DEVICE_ID
+    type: DEVICE_ID
+    priority: 6
+    canonicalize: NONE
+
+# Fuzzy Match Rules (Optional - for typo resolution)
+fuzzy_rules:
+  - id: FR_EMAIL_TYPO
+    name: "Email Typo Match"
+    blocking_key: "SUBSTRING(email, 1, 1)"
+    score_expr: "jaro_winkler_similarity(<a>.email, <b>.email)"
+    threshold: 0.90
+    priority: 100
+
+# Survivorship Rules (Golden Profile)
+survivorship:
+  - attribute: first_name
+    strategy: PRIORITY
+    order: [CRM, LOYALTY, WEB_ACCT]
+  - attribute: last_name
+    strategy: PRIORITY
+    order: [CRM, LOYALTY, WEB_ACCT]
+  - attribute: email
+    strategy: PRIORITY
+    order: [CRM, WEB_ACCT, LOYALTY, ECOM, SUPPORT]
+  - attribute: phone
+    strategy: PRIORITY
+    order: [CRM, LOYALTY, WEB_ACCT, ECOM, SUPPORT]
+  - attribute: country
+    strategy: PRIORITY
+    order: [CRM, LOYALTY, WEB_ACCT]
+
+# Exclusions (Common test/placeholder values)
+exclusions:
+  - type: EMAIL
+    value: "test@test.com"
+    match: EXACT
+    reason: "Test email"
+  - type: EMAIL
+    value: "%@example.com"
+    match: LIKE
+    reason: "Example domain"
+  - type: PHONE
+    value: "0000000000"
+    match: EXACT
+    reason: "Placeholder phone"

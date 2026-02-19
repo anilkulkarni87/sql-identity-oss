@@ -1,0 +1,11 @@
+-- FULL rerun driver (template).
+-- Rebuild identifiers_all and entities_all, rebuild edges_current from scratch, then compute full clustering and rebuild outputs.
+-- Platform adapters should implement concrete full graph clustering (full subgraph = all nodes).
+-- In V1, you can:
+--  1) TRUNCATE edges_current
+--  2) Build edges for ALL identifier groups (anchor strategy)
+--  3) Initialize lp_labels for ALL nodes and loop label propagation until convergence
+--  4) Replace membership_current and clusters_current
+--  5) Replace golden_profile_current
+
+-- This file is intentionally high-level; run examples show the sequence.

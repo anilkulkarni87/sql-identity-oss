@@ -1,0 +1,11 @@
+order_id,customer_email,contact_phone,order_date
+101,alice@example.com,,2024-01-15
+102,bob@example.com,5559876543,2024-01-16
+103,newcustomer@example.com,5555555555,2024-01-17
+104,charlie@example.com,5556666666,2024-01-18
+105,david@example.com,,2024-01-19
+106,alice@example.com,,2024-01-20
+107,eve@example.com,,2024-01-21
+108,frank@example.com,5557777777,2024-01-22
+109,,5554444444,2024-01-23
+110,grace@example.com,,2024-01-24

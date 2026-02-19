@@ -1,0 +1,94 @@
+# IDR Configuration Sample
+# This file is parsed by config.py and loaded into idr_meta tables.
+
+# -----------------------------------------------------------------------------
+# 1. Source Tables
+# Where data comes from.
+# -----------------------------------------------------------------------------
+sources:
+  - id: customers
+    table: analytics.crm.customers  # maps to table_fqn
+    entity_key: customer_id         # maps to entity_key_expr
+    watermark_column: updated_at
+
+    # Identifiers to extract
+    identifiers:
+      - type: EMAIL
+        expr: lower(email_address)
+      - type: PHONE
+        expr: REGEXP_REPLACE(phone, '[^0-9]', '')
+
+    # Golden Profile Attributes
+    attributes:
+      - name: first_name
+        expr: fname
+      - name: email
+        expr: email_address
+
+  - id: transactions
+    table: analytics.pos.orders
+    entity_key: order_id
+    watermark_column: created_at
+    identifiers:
+      - type: EMAIL
+        expr: customer_email
+    attributes:
+      - name: email
+        expr: customer_email
+
+# -----------------------------------------------------------------------------
+# 2. Matching Rules
+# How strict matches are made.
+# -----------------------------------------------------------------------------
+rules:
+  - id: email_exact
+    type: EXACT
+    match_keys: [EMAIL]
+    priority: 1
+    max_group_size: 10000
+    canonicalize: LOWERCASE
+
+  - id: phone_exact
+    type: EXACT
+    match_keys: [PHONE]
+    priority: 2
+    max_group_size: 5000
+
+# -----------------------------------------------------------------------------
+# 3. Fuzzy Rules (Optional)
+# For probabilistic matching.
+# -----------------------------------------------------------------------------
+fuzzy_rules:
+  - id: name_fuzzy
+    name: "Name Jaro-Winkler"
+    blocking_key: "soundex(last_name)"
+    # Score expression must be valid SQL for your platform
+    score_expr: "jaro_winkler_similarity(<a>, <b>)"
+    threshold: 0.85
+    priority: 100
+
+# -----------------------------------------------------------------------------
+# 4. Survivorship Rules
+# How to select best values for the Golden Profile.
+# -----------------------------------------------------------------------------
+survivorship:
+  - attribute: email
+    strategy: PRIORITY
+    source_priority: [customers, transactions]
+
+  - attribute: first_name
+    strategy: RECENCY
+    recency_field: updated_at
+
+# -----------------------------------------------------------------------------
+# 5. Exclusions
+# Blocklist for specific values.
+# -----------------------------------------------------------------------------
+exclusions:
+  - type: EMAIL
+    value: "test@test.com"
+    match: EXACT
+  - type: PHONE
+    value: "555%"
+    match: LIKE
+    reason: "Test numbers"

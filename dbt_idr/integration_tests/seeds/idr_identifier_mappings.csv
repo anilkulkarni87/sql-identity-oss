@@ -1,0 +1,7 @@
+source_id,identifier_type,column_name,is_hashed,description
+crm,EMAIL,email,false,Customer email
+crm,PHONE,phone,false,Customer phone
+orders,EMAIL,customer_email,false,Order email
+orders,PHONE,contact_phone,false,Order phone
+pos,LOYALTY,loyalty_card_id,false,Loyalty card
+pos,PHONE,contact_phone,false,POS phone

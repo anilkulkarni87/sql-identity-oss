@@ -1,0 +1,11 @@
+customer_id,email,phone,first_name,last_name,loyalty_id,updated_at
+1,alice@example.com,5551234567,Alice,Smith,,2024-01-01 10:00:00
+2,bob@example.com,5559876543,Bob,Jones,,2024-01-02 11:00:00
+3,charlie@example.com,,Charlie,Brown,,2024-01-03 12:00:00
+4,alice@example.com,5551111111,Alice,Smith-Johnson,,2024-01-04 13:00:00
+5,david@example.com,5552222222,David,Wilson,,2024-01-05 14:00:00
+6,,5551234567,A,Smith,,2024-01-06 15:00:00
+7,eve@example.com,5553333333,Eve,Davis,,2024-01-07 16:00:00
+8,frank@example.com,,Frank,Miller,,2024-01-08 17:00:00
+9,bob@example.com,,Robert,Jones,,2024-01-09 18:00:00
+10,grace@example.com,5554444444,Grace,Taylor,,2024-01-10 19:00:00

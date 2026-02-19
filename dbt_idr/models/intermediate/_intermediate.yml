@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: int_edges
+    description: |
+      Identity edges connecting entities that share identifier values.
+      Uses anchor-based approach where MIN(entity_key) is the anchor.
+      Groups exceeding max_group_size are filtered out.
+
+    columns:
+      - name: left_entity_key
+        description: "Anchor entity key (MIN in group)"
+        tests:
+          - not_null
+
+      - name: right_entity_key
+        description: "Other entity in the edge"
+        tests:
+          - not_null
+
+      - name: identifier_type
+        description: "Type of identifier creating this edge"
+        tests:
+          - not_null
+
+      - name: identifier_value_norm
+        description: "Normalized identifier value"
+
+      - name: created_at
+        description: "Edge creation timestamp"
+
+  - name: int_labels
+    description: |
+      Label propagation results assigning each entity to a resolved_id (cluster).
+      The resolved_id is the minimum entity_key in the connected component.
+
+    columns:
+      - name: entity_key
+        description: "Entity identifier"
+        tests:
+          - not_null
+          - unique
+
+      - name: resolved_id
+        description: "Cluster identifier (MIN entity_key in component)"
+        tests:
+          - not_null
+
+      - name: updated_at
+        description: "Label assignment timestamp"

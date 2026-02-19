@@ -1,0 +1,58 @@
+services:
+  api:
+    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-resolution}/idr-api:${IDR_IMAGE_TAG:-0.5.1}
+    pull_policy: always
+    container_name: idr-api
+    ports:
+      - "${IDR_API_PORT:-8000}:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - IDR_DATABASE=${IDR_DATABASE:-/data/idr.duckdb}
+      - IDR_CORS_ORIGINS=${IDR_CORS_ORIGINS:-http://localhost:3000}
+      - IDR_AUTH_ISSUER=${IDR_AUTH_ISSUER:-}
+      - IDR_AUTH_AUDIENCE=${IDR_AUTH_AUDIENCE:-account}
+      - IDR_AUTH_JWKS_URL=${IDR_AUTH_JWKS_URL:-}
+      - IDR_AUTH_JWKS_TTL_SECONDS=${IDR_AUTH_JWKS_TTL_SECONDS:-300}
+      - IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS=${IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS:-5}
+      - IDR_ALLOW_INSECURE_DEV_AUTH=${IDR_ALLOW_INSECURE_DEV_AUTH:-false}
+      - IDR_CONNECTION_IDLE_TTL_SECONDS=${IDR_CONNECTION_IDLE_TTL_SECONDS:-3600}
+      - IDR_SESSION_STORE_CLASS=${IDR_SESSION_STORE_CLASS:-}
+    volumes:
+      - idr-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - idr-net
+
+  ui:
+    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-resolution}/idr-ui:${IDR_IMAGE_TAG:-0.5.1}
+    pull_policy: always
+    container_name: idr-ui
+    ports:
+      - "${IDR_UI_PORT:-3000}:80"
+    environment:
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - idr-net
+
+volumes:
+  idr-data:
+    driver: local
+
+networks:
+  idr-net:
+    driver: bridge

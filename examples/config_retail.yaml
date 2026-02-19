@@ -1,0 +1,219 @@
+# ============================================================
+# IDR Metadata Configuration - Retail Template
+# ============================================================
+# This file defines the sources, rules, and mappings for Identity Resolution.
+# Use tools/generate_config.py to convert this to SQL.
+
+# 1. Sources & Mappings
+# ------------------------------------------------------------
+sources:
+  - id: DIGITAL
+    table: idr_input.digital_customer_account
+    entity_type: CUSTOMER
+    entity_key: digital_customer_id
+    watermark: updated_at
+    watermark_lookback: 60
+    identifiers:
+      - type: EMAIL
+        expr: email_norm
+      - type: PHONE
+        expr: phone_norm
+    attributes:
+      - name: first_name
+        expr: first_name
+      - name: last_name
+        expr: last_name
+      - name: email_raw
+        expr: email_norm
+      - name: phone_raw
+        expr: phone_norm
+      - name: record_updated_at
+        expr: updated_at
+
+  - id: POS
+    table: idr_input.pos_customer
+    entity_type: CUSTOMER
+    entity_key: pos_customer_id
+    watermark: updated_at
+    watermark_lookback: 60
+    identifiers:
+      - type: EMAIL
+        expr: email_norm
+      - type: PHONE
+        expr: phone_norm
+    attributes:
+      - name: first_name
+        expr: first_name
+      - name: last_name
+        expr: last_name
+      - name: email_raw
+        expr: email_norm
+      - name: phone_raw
+        expr: phone_norm
+      - name: record_updated_at
+        expr: updated_at
+
+  - id: ECOM
+    table: idr_input.ecom_order
+    entity_type: ORDER
+    entity_key: order_id
+    watermark: updated_at
+    watermark_lookback: 60
+    identifiers:
+      - type: EMAIL
+        expr: email_norm
+      - type: PHONE
+        expr: phone_norm
+      - type: CUSTOMER_ID
+        expr: digital_customer_id
+    attributes:
+      - name: email_raw
+        expr: email_norm
+      - name: phone_raw
+        expr: phone_norm
+      - name: record_updated_at
+        expr: updated_at
+
+  - id: STORE
+    table: idr_input.store_order
+    entity_type: ORDER
+    entity_key: store_order_id
+    watermark: updated_at
+    watermark_lookback: 60
+    identifiers:
+      - type: CUSTOMER_ID
+        expr: pos_customer_id
+    attributes: []
+
+  - id: SDK
+    table: idr_input.sdk_event
+    entity_type: EVENT
+    entity_key: event_id
+    watermark: created_at
+    watermark_lookback: 60
+    identifiers:
+      - type: CUSTOMER_ID
+        expr: digital_customer_id
+    attributes: []
+
+  - id: SURVEY
+    table: idr_input.bazaarvoice_survey
+    entity_type: FEEDBACK
+    entity_key: survey_response_id
+    watermark: updated_at
+    watermark_lookback: 60
+    identifiers:
+      - type: EMAIL
+        expr: email_norm
+      - type: PHONE
+        expr: phone_norm
+    attributes:
+      - name: email_raw
+        expr: email_norm
+      - name: record_updated_at
+        expr: updated_at
+
+  - id: REVIEW
+    table: idr_input.product_review
+    entity_type: FEEDBACK
+    entity_key: review_id
+    watermark: updated_at
+    watermark_lookback: 60
+    identifiers:
+      - type: EMAIL
+        expr: email_norm
+      - type: CUSTOMER_ID
+        expr: digital_customer_id
+    attributes:
+      - name: email_raw
+        expr: email_norm
+      - name: record_updated_at
+        expr: updated_at
+
+# 2. Matching Rules
+# ------------------------------------------------------------
+# Lower priority number = Stronger match (processed first)
+rules:
+  - id: R_EMAIL
+    name: Email exact match
+    type: EMAIL
+    priority: 1
+    canonicalize: LOWERCASE
+    max_group_size: 10000
+
+  - id: R_PHONE
+    name: Phone exact match
+    type: PHONE
+    priority: 2
+    canonicalize: NONE
+    max_group_size: 10000
+
+  - id: R_CUSTOMER_ID
+    name: Customer ID match
+    type: CUSTOMER_ID
+    priority: 3
+    canonicalize: NONE
+    max_group_size: 5000
+
+# 3. Fuzzy Matching Rules (Optional)
+# ------------------------------------------------------------
+fuzzy_rules:
+  - id: FR_NAME
+    name: "Name Fuzzy Match"
+    blocking_key: "CONCAT(SOUNDEX(last_name), '_', LEFT(first_name, 1))"
+    score_expr:
+      default: "idr_meta.jaro_winkler_similarity(<a>, <b>)"
+      bigquery: "1 - SAFE_DIVIDE(CAST(EDIT_DISTANCE(<a>, <b>) AS FLOAT64), CAST(GREATEST(LENGTH(<a>), LENGTH(<b>), 1) AS FLOAT64))"
+    threshold: 0.8  # Using 0.8 as it's safe for both Jaro-Winkler and Levenshtein
+    priority: 100
+
+# 4. Exclusions
+# ------------------------------------------------------------
+exclusions:
+  - type: EMAIL
+    value: "test@test.com"
+    match: EXACT
+    reason: "Test email"
+  - type: EMAIL
+    value: "%@mailinator.%"
+    match: LIKE
+    reason: "Disposable email"
+  - type: EMAIL
+    value: "%@example.com"
+    match: LIKE
+    reason: "Example domain"
+  - type: PHONE
+    value: "0000000000"
+    match: EXACT
+    reason: "Placeholder phone"
+  - type: PHONE
+    value: "1111111111"
+    match: EXACT
+    reason: "Placeholder phone"
+  - type: PHONE
+    value: "1234567890"
+    match: EXACT
+    reason: "Test phone"
+
+# 4. Survivorship Rules (Golden Profile)
+# ------------------------------------------------------------
+survivorship:
+  - attribute: first_name
+    strategy: PRIORITY
+    order: [DIGITAL, POS]
+
+  - attribute: last_name
+    strategy: PRIORITY
+    order: [DIGITAL, POS]
+
+  - attribute: email_raw
+    strategy: PRIORITY
+    order: [DIGITAL, ECOM, SURVEY, REVIEW, POS]
+
+  - attribute: phone_raw
+    strategy: PRIORITY
+    order: [DIGITAL, ECOM, POS]
+
+  - attribute: country_code
+    strategy: PRIORITY
+    order: [DIGITAL]

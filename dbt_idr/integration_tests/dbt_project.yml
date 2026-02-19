@@ -1,0 +1,24 @@
+name: 'dbt_idr_integration_tests'
+version: '1.0.0'
+config-version: 2
+
+profile: 'integration_tests'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Import the parent dbt_idr package
+packages-install-path: "dbt_packages"
+
+vars:
+  # Use test sample data
+  idr_dry_run: false
+  idr_max_lp_iterations: 30
+  idr_large_cluster_threshold: 100
+  idr_default_max_group_size: 1000

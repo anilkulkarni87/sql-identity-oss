@@ -1,0 +1,68 @@
+sources:
+  - id: CRM
+    table: idr_input.crm_customers
+    entity_key: customer_id
+    identifiers:
+      - type: EMAIL
+        expr: email
+    attributes:
+      - name: first_name
+        expr: first_name
+      - name: last_name
+        expr: last_name
+
+rules:
+  - id: R_EMAIL
+    type: EMAIL
+    priority: 1
+
+# ==========================================
+# PLATFORM-SPECIFIC FUZZY RULES
+# Uncomment the section corresponding to your target platform
+# ==========================================
+
+# --- 1. DUCKDB (Native Jaro-Winkler) ---
+fuzzy_rules:
+  - id: FR_NAME_DUCKDB
+    name: "Name Fuzzy Match (DuckDB)"
+    # Blocking: Use First Letter of First Name
+    blocking_key: "CASE WHEN first_name IS NOT NULL THEN SUBSTRING(first_name, 1, 1) ELSE '' END"
+    # Scoring: Native jaro_winkler_similarity
+    score_expr: "jaro_winkler_similarity(first_name)"
+    threshold: 0.85
+    priority: 2
+
+
+# --- 2. SNOWFLAKE (Native, Scale 0-100) ---
+# fuzzy_rules:
+#   - id: FR_NAME_SNOWFLAKE
+#     name: "Name Fuzzy Match (Snowflake)"
+#     # Blocking: Use SOUNDEX to avoid "Eric" vs "Erin" mismatch (E620 vs E650)
+#     blocking_key: "SOUNDEX(first_name)"
+#     # Scoring: Use <a> and <b> placeholders for explicit column reference
+#     score_expr: "JAROWINKLER_SIMILARITY(<a>, <b>) / 100.0"
+#     threshold: 0.85
+#     priority: 2
+
+
+# --- 3. BIGQUERY (Levenshtein/Edit Distance) ---
+# BigQuery has no native Jaro-Winkler. We use Normalized Levenshtein.
+# fuzzy_rules:
+#   - id: FR_NAME_BQ
+#     name: "Name Fuzzy Match (BigQuery)"
+#     blocking_key: "CASE WHEN first_name IS NOT NULL THEN SUBSTR(first_name, 1, 1) ELSE '' END"
+#     # Use <a> and <b> for clear two-argument function calls
+#     score_expr: "1.0 - (SAFE_DIVIDE(EDIT_DISTANCE(<a>, <b>), GREATEST(LENGTH(<a>), LENGTH(<b>))))"
+#     threshold: 0.80  # Levenshtein is stricter
+#     priority: 2
+
+
+# --- 4. DATABRICKS (Levenshtein) ---
+# Native Jaro-Winkler requires installing extra JARs. Levenshtein is built-in.
+# fuzzy_rules:
+#   - id: FR_NAME_DATABRICKS
+#     name: "Name Fuzzy Match (Databricks)"
+#     blocking_key: "CASE WHEN first_name IS NOT NULL THEN SUBSTRING(first_name, 1, 1) ELSE '' END"
+#     score_expr: "1.0 - (levenshtein(first_name, attribute_value) / greatest(length(first_name), length(attribute_value)))"
+#     threshold: 0.80
+#     priority: 2

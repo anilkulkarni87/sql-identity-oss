@@ -1,0 +1,77 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+6 0 obj
+<< /Length 3493 >>
+stream
+BT /F2 18.0 Tf 44.0 748.0 Td (SQL Identity Resolution - One-Page App Summary) Tj ET
+BT /F1 9.5 Tf 44.0 726.0 Td (Repo-based summary only \(no external claims\)) Tj ET
+BT /F2 12.0 Tf 44.0 708.0 Td (What It Is) Tj ET
+BT /F1 10.2 Tf 52.0 694.0 Td (SQL Identity Resolution \(IDR\) is a warehouse-native identity graph engine that links records) Tj ET
+BT /F1 10.2 Tf 52.0 681.8 Td (across sources using deterministic SQL rules.) Tj ET
+BT /F1 10.2 Tf 52.0 669.6 Td (It can apply optional fuzzy matching refinement and produces resolved clusters plus golden) Tj ET
+BT /F1 10.2 Tf 52.0 657.4 Td (profiles.) Tj ET
+BT /F2 12.0 Tf 44.0 640.2 Td (Who It Is For) Tj ET
+BT /F1 10.2 Tf 52.0 626.2 Td (Primary persona \(inferred\): data/analytics engineers and developers running identity) Tj ET
+BT /F1 10.2 Tf 52.0 614.0 Td (resolution in SQL warehouses.) Tj ET
+BT /F1 10.2 Tf 52.0 601.8 Td (Explicit persona statement: Not found in repo.) Tj ET
+BT /F2 12.0 Tf 44.0 584.6 Td (What It Does) Tj ET
+BT /F1 10.2 Tf 52.0 570.6 Td (- Runs a unified pipeline \(FULL/INCR\) via the idr CLI on DuckDB, BigQuery, Snowflake,) Tj ET
+BT /F1 10.2 Tf 52.0 558.4 Td (  and Databricks.) Tj ET
+BT /F1 10.2 Tf 52.0 546.2 Td (- Builds deterministic identity edges from identifiers and resolves clusters with) Tj ET
+BT /F1 10.2 Tf 52.0 534.0 Td (  label propagation.) Tj ET
+BT /F1 10.2 Tf 52.0 521.8 Td (- Optionally applies fuzzy matching; strict mode disables fuzzy matching for) Tj ET
+BT /F1 10.2 Tf 52.0 509.6 Td (  deterministic-only runs.) Tj ET
+BT /F1 10.2 Tf 52.0 497.4 Td (- Supports dry-run previews, metadata init, and YAML config validate/generate/apply) Tj ET
+BT /F1 10.2 Tf 52.0 485.2 Td (  workflows.) Tj ET
+BT /F1 10.2 Tf 52.0 473.0 Td (- Exposes FastAPI endpoints for setup, dashboard metrics, explorer search, runs,) Tj ET
+BT /F1 10.2 Tf 52.0 460.8 Td (  schema, and health.) Tj ET
+BT /F1 10.2 Tf 52.0 448.6 Td (- Provides a React web UI with Setup Wizard, Dashboard, Explorer, Runs, Data Model,) Tj ET
+BT /F1 10.2 Tf 52.0 436.4 Td (  and Settings pages.) Tj ET
+BT /F2 12.0 Tf 44.0 419.2 Td (How It Works \(Repo-Evidence Architecture\)) Tj ET
+BT /F1 10.2 Tf 52.0 405.2 Td (- Metadata/rules live in idr_meta, transient processing in idr_work, and outputs in) Tj ET
+BT /F1 10.2 Tf 52.0 393.0 Td (  idr_out.) Tj ET
+BT /F1 10.2 Tf 52.0 380.8 Td (- IDRRunner orchestrates stages: Preflight -> Extraction -> Graph -> Output.) Tj ET
+BT /F1 10.2 Tf 52.0 368.6 Td (- Graph stage builds edges, runs label propagation, then optional fuzzy matching) Tj ET
+BT /F1 10.2 Tf 52.0 356.4 Td (  refinement.) Tj ET
+BT /F1 10.2 Tf 52.0 344.2 Td (- Output stage materializes current membership/golden profile tables and records run) Tj ET
+BT /F1 10.2 Tf 52.0 332.0 Td (  history.) Tj ET
+BT /F1 10.2 Tf 52.0 319.8 Td (- Interfaces: CLI and MCP use core engine; UI calls FastAPI routers that use platform) Tj ET
+BT /F1 10.2 Tf 52.0 307.6 Td (  adapters.) Tj ET
+BT /F2 12.0 Tf 44.0 290.4 Td (How To Run \(Minimal\)) Tj ET
+BT /F1 10.2 Tf 52.0 276.4 Td (1\) pip install "sql-identity-resolution[duckdb]") Tj ET
+BT /F1 10.2 Tf 52.0 264.2 Td (2\) idr quickstart) Tj ET
+BT /F1 10.2 Tf 52.0 252.0 Td (3\) Optional: idr serve, then open http://localhost:8000) Tj ET
+BT /F2 12.0 Tf 44.0 234.8 Td (Evidence Used) Tj ET
+BT /F1 10.2 Tf 52.0 220.8 Td (Readme.md, docs/01-overview.md, docs/18-architecture.md, docs/03-quickstart.md,) Tj ET
+BT /F1 10.2 Tf 52.0 208.6 Td (idr_core/runner.py, idr_core/cli.py, idr_api/main.py, idr_ui/src/App.tsx) Tj ET
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000257 00000 n 
+0000000327 00000 n 
+0000000402 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+3947
+%%EOF

@@ -1,0 +1,78 @@
+# IDR Configuration - Retail Example
+# This YAML file configures identity resolution for a retail customer dataset.
+
+version: "1.0"
+
+# Source tables to process
+sources:
+  - id: crm
+    table: idr_demo.customers
+    entity_type: PERSON
+    entity_key: customer_id
+    watermark_column: updated_at
+    identifiers:
+      EMAIL: email
+      PHONE: phone
+      LOYALTY_ID: loyalty_card_number
+    attributes:
+      first_name: first_name
+      last_name: last_name
+      email_raw: email
+      phone_raw: phone
+      city: city
+      state: state
+
+  - id: orders
+    table: idr_demo.orders
+    entity_type: PERSON
+    entity_key: order_id
+    watermark_column: order_date
+    identifiers:
+      EMAIL: customer_email
+
+  - id: support
+    table: idr_demo.support_tickets
+    entity_type: PERSON
+    entity_key: ticket_id
+    watermark_column: created_at
+    identifiers:
+      EMAIL: contact_email
+      PHONE: contact_phone
+
+# Matching rules
+rules:
+  - id: email_match
+    identifier_type: EMAIL
+    canonicalize: LOWERCASE
+    max_group_size: 10000
+    priority: 10
+
+  - id: phone_match
+    identifier_type: PHONE
+    canonicalize: NONE
+    max_group_size: 5000
+    priority: 20
+
+  - id: loyalty_match
+    identifier_type: LOYALTY_ID
+    canonicalize: NONE
+    max_group_size: 1
+    priority: 30
+
+# Identifier exclusions (values to skip)
+exclusions:
+  - type: EMAIL
+    pattern: "test@%"
+    match: LIKE
+  - type: EMAIL
+    pattern: "noreply@%"
+    match: LIKE
+  - type: EMAIL
+    pattern: "%@mailinator.%"
+    match: LIKE
+  - type: PHONE
+    pattern: "0000000000"
+    match: EXACT
+  - type: PHONE
+    pattern: "1111111111"
+    match: EXACT

@@ -1,0 +1,24 @@
+{
+  "name": "IDR_Run",
+  "tasks": [
+    {
+      "task_key": "idr_run",
+      "python_wheel_task": {
+        "package_name": "sql-identity-resolution",
+        "entry_point": "idr",
+        "parameters": [
+          "run",
+          "--platform", "databricks",
+          "--mode", "INCR",
+          "--max-iters", "30"
+        ]
+      },
+      "libraries": [
+        {
+          "whl": "dbfs:/FileStore/jars/sql_identity_resolution-0.1.0-py3-none-any.whl"
+        }
+      ],
+      "existing_cluster_id": "<cluster_id>"
+    }
+  ]
+}

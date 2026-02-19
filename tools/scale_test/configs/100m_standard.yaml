@@ -1,0 +1,21 @@
+# Scale Test Configuration
+# 100M row test with retail industry distribution
+
+rows: 100000000
+seed: 42
+
+# Cluster Distribution (matches others for fair comparison)
+distributions:
+  - [1, 1, 0.35]
+  - [2, 2, 0.25]
+  - [3, 5, 0.20]
+  - [6, 15, 0.12]
+  - [16, 50, 0.05]
+  - [51, 200, 0.02]
+  - [201, 1000, 0.01]
+
+email_match_rate: 0.55
+phone_match_rate: 0.25
+loyalty_match_rate: 0.10
+address_match_rate: 0.10
+chain_rate: 0.15

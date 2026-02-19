@@ -1,0 +1,70 @@
+stages:
+  - test
+  - lint
+  - validate
+  - deploy
+
+variables:
+  PYTHON_VERSION: "3.11"
+
+# Test workflow - runs on main and merge requests
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+test:
+  stage: test
+  image: python:3.11
+  script:
+    - pip install ".[duckdb,api,dev]"
+    - python -m pytest tests/ --ignore=tests/legacy -v
+
+lint:
+  stage: lint
+  image: python:3.11
+  script:
+    - pip install ruff
+    - ruff check .
+    - ruff format --check .
+  allow_failure: true
+
+validate-ddl:
+  stage: validate
+  image: python:3.11
+  script:
+    - pip install duckdb
+    - |
+      python -c "
+      import duckdb
+      conn = duckdb.connect(':memory:')
+      with open('sql/ddl/duckdb.sql') as f:
+          ddl = f.read()
+      for stmt in ddl.split(';'):
+          if stmt.strip():
+              try:
+                  conn.execute(stmt)
+              except Exception as e:
+                  print(f'Warning: {e}')
+      print('DuckDB DDL validation complete')
+      "
+
+# Deploy docs - only runs on main when docs files change
+pages:
+  stage: deploy
+  image: python:3.11
+  only:
+    refs:
+      - main
+    changes:
+      - docs/**
+      - mkdocs.yml
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - pip install mkdocs-material mkdocs-mermaid2-plugin pymdown-extensions
+    - mkdocs build
+    - mv site public
+  artifacts:
+    paths:
+      - public

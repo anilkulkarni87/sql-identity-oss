@@ -1,0 +1,131 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sql-identity-resolution"
+version = "0.5.1"
+description = "SQL-native identity resolution for data warehouses"
+readme = "Readme.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Anil Kulkarni", email = "anilkulkarni87@gmail.com"}
+]
+keywords = [
+    "identity-resolution",
+    "customer-360",
+    "data-warehouse",
+    "cdp",
+    "entity-resolution",
+    "record-linkage",
+    "duckdb",
+    "snowflake",
+    "bigquery",
+    "databricks"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+duckdb = ["duckdb>=0.9.0", "pandas>=1.5.0"]
+bigquery = ["google-cloud-bigquery>=3.0.0", "pandas>=1.5.0", "db-dtypes>=1.0.0"]
+snowflake = ["snowflake-snowpark-python>=1.0.0", "snowflake-connector-python>=3.0.0"]
+databricks = ["databricks-sql-connector>=3.0.0"]
+api = ["fastapi>=0.100.0", "uvicorn>=0.20.0", "python-jose[cryptography]>=3.3.0", "httpx>=0.23.0", "prometheus-client>=0.20.0"]
+enterprise = ["redis>=5.0.0"]
+mcp = ["mcp[fastmcp]>=0.1.0"]
+all = [
+    "duckdb>=0.9.0",
+    "google-cloud-bigquery>=3.0.0",
+    "pandas>=1.5.0",
+    "db-dtypes>=1.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "prometheus-client>=0.20.0",
+    "mcp[fastmcp]>=0.1.0",
+    "python-jose[cryptography]>=3.3.0",
+    "httpx>=0.23.0",
+    "redis>=5.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+    "httpx>=0.23.0",
+]
+
+[project.scripts]
+idr = "idr_core.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/anilkulkarni87/sql-identity-resolution"
+Documentation = "https://anilkulkarni87.github.io/sql-identity-resolution/"
+Repository = "https://github.com/anilkulkarni87/sql-identity-resolution"
+Changelog = "https://github.com/anilkulkarni87/sql-identity-resolution/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+include = ["idr_core*", "idr_api*", "idr_mcp*", "idr_enterprise*"]
+
+[tool.setuptools.package-data]
+idr_core = ["sql/*.sql", "sql/*.j2"]
+idr_api = ["static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_ignores = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = [
+    "tests/legacy/",
+    "sql/",
+    "runners/",
+    "examples/",
+    "deployment/",
+    "dbt_idr/",
+    ".git/",
+    "__pycache__/",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501", "W291", "W293"]  # whitespace handled by ruff-format
+
+[tool.ruff.lint.per-file-ignores]
+# Tools are utility scripts — relax unused import/var rules
+"tools/**" = ["F401", "F841", "F403", "F405", "E402", "E722"]
+# Tests can have unused imports for fixtures and star imports
+"tests/**" = ["F401", "F403", "F405", "E402"]
+# API routers may assign intermediate vars for clarity
+"idr_api/**" = ["F841"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["idr_core", "idr_api", "idr_mcp", "idr_enterprise"]

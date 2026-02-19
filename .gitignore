@@ -1,0 +1,70 @@
+.DS_Store
+*.duckdb
+*.duckdb.wal
+*.parquet
+
+# dbt integration tests
+dbt_idr/integration_tests/target/
+dbt_idr/integration_tests/logs/
+dbt_idr/integration_tests/dbt_packages/
+dbt_idr/integration_tests/.user.yml
+dbt_idr/integration_tests/package-lock.yml
+
+# dbt general
+dbt_packages/
+target/
+logs/
+validation_report.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+*.zip
+MANIFEST
+
+# Linting & Testing
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# IDR Specific
+idr_core_extracted/
+metrics.json
+benchmark_results.json
+profile_reports/
+test_data/
+
+# Generated Artifacts
+generated/
+deploy_*.sql
+build.log
+.chat_history/
+site/
+
+# React / Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+idr_ui/dist/
+idr_ui/.env.local
+
+# Benchmarks
+benchmarks/data/

@@ -1,0 +1,11 @@
+source_id,attribute_name,column_expr,description
+crm,email,email,CRM email
+crm,phone,phone,CRM phone
+crm,first_name,first_name,CRM first name
+crm,last_name,last_name,CRM last name
+crm,record_updated_at,updated_at,CRM timestamp
+orders,email,customer_email,Order email
+orders,phone,contact_phone,Order phone
+orders,record_updated_at,order_date,Order timestamp
+pos,phone,contact_phone,POS phone
+pos,record_updated_at,transaction_date,POS timestamp

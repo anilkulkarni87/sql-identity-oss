@@ -1,0 +1,6 @@
+identifier_type,identifier_value_pattern,match_type,reason
+EMAIL,noreply@%,LIKE,Generic no-reply emails
+EMAIL,test@%,LIKE,Test email addresses
+EMAIL,admin@%,LIKE,Admin email addresses
+PHONE,0000000000,EXACT,Invalid placeholder phone
+PHONE,1111111111,EXACT,Invalid placeholder phone

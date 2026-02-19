@@ -1,0 +1,5 @@
+rule_id,identifier_type,priority,is_active,canonicalize,max_group_size,description
+email_exact,EMAIL,1,true,LOWERCASE,10000,Exact email match (case-insensitive)
+phone_exact,PHONE,2,true,NONE,5000,Exact phone match
+loyalty_id,LOYALTY,3,true,NONE,1,Loyalty card ID (should be unique)
+device_id,DEVICE,4,true,NONE,100,Device fingerprint ID

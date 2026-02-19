@@ -1,0 +1,208 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  package-smoke:
+    name: Package Smoke Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/release.lock
+          python -m build
+          twine check dist/*
+
+      - name: Install from built wheel
+        run: |
+          python -m venv .venv-smoke
+          . .venv-smoke/bin/activate
+          python -m pip install dist/*.whl
+          idr version
+          idr quickstart --help
+
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/ci.lock
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ --ignore=tests/legacy -v
+
+  ui-lockfile:
+    name: UI Lockfile Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate package-lock.json
+        run: npm ci --ignore-scripts --no-audit
+        working-directory: idr_ui
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install linters
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/ci.lock
+
+      - name: Lint with flake8
+        run: |
+          flake8 idr_core/ idr_api/ tests/ tools/ \
+            --max-line-length=120 \
+            --exclude='**/legacy/**,**/databricks/**,**/notebooks/**' \
+            --ignore=E501,W503,W291,W293,W504,E302,E305,E402,E722,E124,E128,E126,E131,E226,E261,E301,E701,E704,E111,E117,W391,F541,F401,F405,F403,F841,F811
+        continue-on-error: true
+
+  validate-ddl:
+    name: Validate DDL
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install DuckDB
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/ci.lock
+
+      - name: Validate DuckDB DDL
+        run: |
+          python -c "
+          import duckdb
+          conn = duckdb.connect(':memory:')
+          with open('sql/ddl/duckdb.sql') as f:
+              ddl = f.read()
+          for stmt in ddl.split(';'):
+              if stmt.strip():
+                  try:
+                      conn.execute(stmt)
+                  except Exception as e:
+                      print(f'Warning: {e}')
+          print('DuckDB DDL validation complete')
+          "
+
+  sbom-verify:
+    name: SBOM Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build Python artifacts
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/release.lock
+          python -m build
+
+      - name: Generate Python artifact SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist
+          format: spdx-json
+          output-file: sbom-python.spdx.json
+
+      - name: Build API image
+        run: docker build -t idr-api:ci -f idr_api/Dockerfile .
+
+      - name: Build UI image
+        run: docker build -t idr-ui:ci -f idr_ui/Dockerfile idr_ui
+
+      - name: Generate API image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: idr-api:ci
+          format: spdx-json
+          output-file: sbom-api.spdx.json
+
+      - name: Generate UI image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: idr-ui:ci
+          format: spdx-json
+          output-file: sbom-ui.spdx.json
+
+      - name: Verify SBOM structure
+        run: |
+          for sbom in sbom-python.spdx.json sbom-api.spdx.json sbom-ui.spdx.json; do
+            echo "Verifying $sbom"
+            jq -e '((.SPDXID // "") | length) > 0 and ((.packages // []) | length) > 0' "$sbom" > /dev/null
+          done
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-artifacts
+          path: sbom-*.spdx.json
+
+  enterprise-e2e:
+    name: Enterprise Stack E2E
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Docker Compose availability
+        run: docker compose version
+
+      - name: Run enterprise stack verification
+        run: bash tools/ci/verify_enterprise_stack.sh docker-compose.enterprise.yml

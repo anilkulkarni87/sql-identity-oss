@@ -1,0 +1,71 @@
+project_name: "fuzzy_demo"
+schema_source: "retail"
+schema_meta: "idr_meta"
+schema_out: "idr_out"
+
+sources:
+  - id: digital
+    table: digital_customer_account
+    entity_key: customer_id
+    attributes:
+      - name: email
+        expr: email
+      - name: first_name
+        expr: first_name
+      - name: last_name
+        expr: last_name
+      - name: phone
+        expr: phone
+    watermark_column: created_at
+
+  - id: pos
+    table: pos_customer
+    entity_key: customer_id
+    attributes:
+      - name: email
+        expr: email
+      - name: first_name
+        expr: first_name
+      - name: last_name
+        expr: last_name
+      - name: phone
+        expr: phone
+    watermark_column: created_at
+
+rules:
+  # Exact Match Rules
+  - id: rule_exact_email
+    type: EXACT
+    match_keys: [email]
+    priority: 1
+
+  - id: rule_exact_phone
+    type: EXACT
+    match_keys: [phone]
+    priority: 2
+
+
+# Fuzzy Rules (Optional for this test, but good to have)
+fuzzy_rules:
+  - id: fuzzy_name
+    name: Fuzzy Name Match
+    blocking_key: substring(last_name, 1, 1)
+    score_expr: jaro_winkler_similarity(<a>.first_name, <b>.first_name)
+    threshold: 0.70
+
+# GOLDEN PROFILE RULES (Survivorship)
+survivorship:
+  - attribute: email
+    strategy: PRIORITY
+    source_priority: [digital, pos]
+
+  - attribute: first_name
+    strategy: FREQUENCY # Mode
+
+  - attribute: last_name
+    strategy: RECENCY # Last Seen
+    recency_field: created_at
+
+  - attribute: phone
+    strategy: PRIORITY
+    source_priority: [pos, digital] # POS phone preferred

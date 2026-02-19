@@ -1,0 +1,101 @@
+version: 2
+
+models:
+  - name: identity_membership
+    description: "Entity to cluster membership mapping with parsed source columns for easier downstream joins"
+    columns:
+      - name: entity_key
+        description: "Composite key (source_id:source_key)"
+        tests: [not_null, unique]
+      - name: resolved_id
+        description: "The canonical entity_key representing this cluster"
+        tests: [not_null]
+      - name: source_id
+        description: "Parsed source identifier (e.g., 'orders', 'crm')"
+        tests: [not_null]
+      - name: source_key
+        description: "Original key from source table for joining"
+        tests: [not_null]
+      - name: updated_at
+        description: "When this membership was last updated"
+
+  - name: identity_clusters
+    description: "Cluster metadata with confidence scoring"
+    columns:
+      - name: resolved_id
+        tests: [not_null, unique]
+      - name: cluster_size
+        tests: [not_null]
+      - name: confidence_score
+        tests: [not_null]
+      - name: edge_diversity
+      - name: match_density
+      - name: primary_reason
+
+  - name: golden_profiles
+    description: "Best-record profiles using survivorship rules (dynamic columns)"
+    columns:
+      - name: resolved_id
+        tests: [not_null, unique]
+
+  - name: identity_edges
+    description: "Persistent identity edges"
+    columns:
+      - name: left_entity_key
+        tests: [not_null]
+      - name: right_entity_key
+        tests: [not_null]
+      - name: identifier_type
+        tests: [not_null]
+
+  - name: run_history
+    description: "IDR execution history"
+    columns:
+      - name: run_id
+        tests: [not_null]
+      - name: status
+        tests: [not_null]
+
+  - name: stage_metrics
+    description: "Row counts at each pipeline stage"
+    columns:
+      - name: run_id
+        tests: [not_null]
+      - name: stage_name
+        tests: [not_null]
+
+  - name: rule_match_audit
+    description: "Edges created per identifier type/rule"
+    columns:
+      - name: rule_id
+        tests: [not_null]
+      - name: edges_created
+        tests: [not_null]
+
+  - name: skipped_identifier_groups
+    description: "Groups exceeding max_group_size"
+    columns:
+      - name: identifier_type
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+
+  - name: dry_run_results
+    description: "Per-entity change comparison (dry run only)"
+    config:
+      enabled: "{{ var('idr_dry_run', false) }}"
+    columns:
+      - name: run_id
+        tests: [not_null]
+      - name: entity_key
+        tests: [not_null]
+      - name: change_type
+        tests: [not_null]
+
+  - name: dry_run_summary
+    description: "Aggregate statistics of proposed changes (dry run only)"
+    config:
+      enabled: "{{ var('idr_dry_run', false) }}"
+    columns:
+      - name: run_id
+        tests: [not_null]

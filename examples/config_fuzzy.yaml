@@ -1,0 +1,25 @@
+sources:
+  - id: CRM
+    table: idr_input.crm_customers
+    entity_key: customer_id
+    identifiers:
+      - type: EMAIL
+        expr: email
+    attributes:
+      - name: first_name
+        expr: first_name
+      - name: last_name
+        expr: last_name
+
+rules:
+  - id: R_EMAIL
+    type: EMAIL
+    priority: 1
+
+fuzzy_rules:
+  - id: FR_NAME
+    name: "Name Fuzzy Match"
+    blocking_key: "CASE WHEN first_name IS NOT NULL THEN SUBSTRING(first_name, 1, 1) ELSE '' END"
+    score_expr: "jaro_winkler_similarity(first_name)"
+    threshold: 0.85
+    priority: 2
