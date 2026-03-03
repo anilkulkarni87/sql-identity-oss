@@ -1,0 +1,9 @@
+{{- if .Values.keycloak.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "idr-enterprise.fullname" . }}-keycloak-realm
+data:
+  idr-realm.json: |
+{{ .Files.Get "files/idr-realm.json" | indent 4 }}
+{{- end }}

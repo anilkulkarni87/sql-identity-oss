@@ -8,9 +8,13 @@ import {
 } from 'recharts'
 import { Users, GitBranch, Activity, Clock, AlertTriangle, Play } from 'lucide-react'
 import { api } from '../api/client'
+import { useIDRAuth } from '../auth/IDRAuthProvider'
 
 export default function Dashboard() {
     const navigate = useNavigate();
+    const auth = useIDRAuth()
+    const canViewSetup = auth.hasAllPermissions(['connection.read', 'config.read'])
+    const canRunPipeline = auth.hasPermission('run.execute')
 
     // Check setup status
     const { data: setupStatus } = useQuery({
@@ -19,10 +23,10 @@ export default function Dashboard() {
     });
 
     useEffect(() => {
-        if (setupStatus && !setupStatus.configured) {
+        if (setupStatus && !setupStatus.configured && canViewSetup) {
             navigate('/setup');
         }
-    }, [setupStatus, navigate]);
+    }, [setupStatus, navigate, canViewSetup]);
 
     const { data: metrics, isLoading: metricsLoading } = useQuery({
         queryKey: ['metrics'],
@@ -53,7 +57,9 @@ export default function Dashboard() {
                 <h1 className="text-2xl font-bold">Match Quality Dashboard</h1>
                 <button
                     onClick={() => navigate('/setup')}
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                    disabled={!canRunPipeline || !canViewSetup}
+                    title={!canRunPipeline ? "Run Pipeline requires run.execute permission." : (!canViewSetup ? "Setup access requires connection.read and config.read permissions." : undefined)}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
                 >
                     <Play className="w-4 h-4" />
                     Run Pipeline

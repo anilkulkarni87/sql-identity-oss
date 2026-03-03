@@ -1,0 +1,44 @@
+{
+  "profiles": [
+    {
+      "id": "duckdb_ci_small",
+      "platform": "duckdb",
+      "mode": "pipeline",
+      "rows": 15000,
+      "repetitions": 2,
+      "seed": 42,
+      "strict": false,
+      "max_iters": 30
+    },
+    {
+      "id": "snowflake_ci_compile",
+      "platform": "snowflake",
+      "mode": "sql_compile",
+      "repetitions": 30
+    },
+    {
+      "id": "bigquery_ci_compile",
+      "platform": "bigquery",
+      "mode": "sql_compile",
+      "repetitions": 30
+    },
+    {
+      "id": "databricks_ci_compile",
+      "platform": "databricks",
+      "mode": "sql_compile",
+      "repetitions": 30
+    },
+    {
+      "id": "api_latency_ci",
+      "platform": "api",
+      "mode": "api_latency",
+      "endpoints": [
+        "/api/health",
+        "/api/schema",
+        "/api/auth/whoami"
+      ],
+      "warmup_requests": 2,
+      "requests_per_endpoint": 40
+    }
+  ]
+}

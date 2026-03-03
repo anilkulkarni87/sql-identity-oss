@@ -2,14 +2,32 @@
  * API Client for IDR Backend
  */
 
+import type { IDRConfig, SetupConnectionData, SetupRunResult, TableColumn, WarehousePlatform } from '../types'
+import { redactSensitiveText } from '../security/redaction'
+
 const rawBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
 const BASE_URL = (rawBaseUrl && rawBaseUrl.length > 0 ? rawBaseUrl : '/api').replace(/\/$/, '')
 
 
 let getToken: (() => string | undefined) | null = null;
+type AuthFailureStatus = 401 | 403
+
+export interface APIAuthFailureEvent {
+    status: AuthFailureStatus
+    path: string
+    error: APIError
+}
+
+type APIAuthFailureListener = (event: APIAuthFailureEvent) => void
+const authFailureListeners = new Set<APIAuthFailureListener>()
 
 export const setTokenGetter = (fn: () => string | undefined) => {
     getToken = fn;
+}
+
+export const onAPIAuthFailure = (listener: APIAuthFailureListener): (() => void) => {
+    authFailureListeners.add(listener)
+    return () => authFailureListeners.delete(listener)
 }
 
 export class APIError extends Error {
@@ -22,6 +40,14 @@ export class APIError extends Error {
         this.status = status
         this.detail = detail
     }
+}
+
+export interface WhoAmIResponse {
+    sub?: string | null
+    auth_type?: string
+    roles?: string[]
+    permissions?: string[]
+    scope?: string | null
 }
 
 function buildUrl(path: string): string {
@@ -44,12 +70,55 @@ function buildHeaders(options: RequestInit): Headers {
     return headers
 }
 
+function resolveErrorDetail(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') {
+        return null
+    }
+
+    const data = payload as Record<string, unknown>
+    const candidates = [data.detail, data.message, data.error]
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+            return redactSensitiveText(candidate.trim())
+        }
+        if (Array.isArray(candidate)) {
+            const joined = candidate
+                .filter((item): item is string => typeof item === 'string')
+                .map((item) => item.trim())
+                .filter(Boolean)
+                .join('; ')
+            if (joined) {
+                return redactSensitiveText(joined)
+            }
+        }
+    }
+
+    return null
+}
+
+function emitAuthFailure(status: AuthFailureStatus, path: string, error: APIError): void {
+    authFailureListeners.forEach((listener) => {
+        try {
+            listener({ status, path, error })
+        } catch {
+            // Keep failures isolated to listener code.
+        }
+    })
+}
+
 async function parseError(response: Response): Promise<APIError> {
     let detail = `API error: ${response.status}`
     try {
-        const data = await response.json()
-        if (data && typeof data.detail === 'string') {
-            detail = data.detail
+        const contentType = response.headers.get('content-type') || ''
+        if (contentType.includes('application/json')) {
+            const data = await response.json()
+            detail = resolveErrorDetail(data) || detail
+        } else {
+            const text = await response.text()
+            if (text.trim()) {
+                detail = redactSensitiveText(text.trim())
+            }
         }
     } catch {
         // Keep default detail when response is not JSON.
@@ -67,7 +136,11 @@ export async function apiRequest(path: string, options: RequestInit = {}): Promi
 async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
     const response = await apiRequest(path, options)
     if (!response.ok) {
-        throw await parseError(response)
+        const error = await parseError(response)
+        if (error.status === 401 || error.status === 403) {
+            emitAuthFailure(error.status as AuthFailureStatus, path, error)
+        }
+        throw error
     }
 
     if (response.status === 204) {
@@ -82,6 +155,8 @@ async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T>
 }
 
 export const api = {
+    getWhoAmI: () => fetchJson<WhoAmIResponse>('/auth/whoami'),
+
     connect: (payload: Record<string, string>) => fetchJson<{
         status: string
         platform: string
@@ -171,18 +246,9 @@ export const api = {
         platform: string | null
     }>('/setup/status'),
 
-    getSetupConfig: () => fetchJson<{
-        sources: Array<Record<string, unknown>>
-        rules?: Array<Record<string, unknown>>
-        fuzzy_rules?: Array<Record<string, unknown>>
-        survivorship?: Array<Record<string, unknown>>
-    }>('/setup/config'),
+    getSetupConfig: () => fetchJson<IDRConfig>('/setup/config'),
 
-    setupConnect: (platform: string, params: Record<string, unknown>) => fetchJson<{
-        status: string
-        platform: string
-        warning?: string
-    }>('/setup/connect', {
+    setupConnect: (platform: WarehousePlatform, params: Record<string, string>) => fetchJson<SetupConnectionData>('/setup/connect', {
         method: 'POST',
         body: JSON.stringify({ platform, params }),
     }),
@@ -191,9 +257,7 @@ export const api = {
         tables: string[]
     }>(`/setup/discover/tables${schema ? `?schema=${encodeURIComponent(schema)}` : ''}`),
 
-    discoverColumns: (table: string) => fetchJson<{
-        columns: Array<{ name: string; type: string }>
-    }>(`/setup/discover/columns?table=${encodeURIComponent(table)}`),
+    discoverColumns: (table: string) => fetchJson<{ columns: TableColumn[] }>(`/setup/discover/columns?table=${encodeURIComponent(table)}`),
 
     getFuzzyTemplates: () => fetchJson<{
         templates: Array<{
@@ -205,7 +269,7 @@ export const api = {
         }>
     }>('/setup/fuzzy-templates'),
 
-    saveSetupConfig: (config: unknown) => fetchJson<{
+    saveSetupConfig: (config: IDRConfig) => fetchJson<{
         status: string
         message: string
     }>('/setup/config/save', {
@@ -218,7 +282,7 @@ export const api = {
         strict: boolean
         max_iterations: number
         dry_run: boolean
-    }) => fetchJson<Record<string, unknown>>('/setup/run', {
+    }) => fetchJson<SetupRunResult>('/setup/run', {
         method: 'POST',
         body: JSON.stringify(payload),
     }),

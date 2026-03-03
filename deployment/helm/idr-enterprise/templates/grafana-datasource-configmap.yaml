@@ -1,0 +1,15 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "idr-enterprise.fullname" . }}-grafana-datasource
+data:
+  datasource.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://{{ include "idr-enterprise.fullname" . }}-prometheus:{{ .Values.prometheus.service.port }}
+        isDefault: true
+{{- end }}

@@ -1,0 +1,16 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "idr-enterprise.fullname" . }}-prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: idr-api
+        metrics_path: /metrics
+        static_configs:
+          - targets:
+              - {{ include "idr-enterprise.fullname" . }}-api:{{ .Values.api.service.port }}
+{{- end }}

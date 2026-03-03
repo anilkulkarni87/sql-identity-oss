@@ -92,3 +92,92 @@ def test_cli_run_incr_mode(monkeypatch):
 
     assert rc == 0
     assert FakeRunner.last_config.run_mode == "INCR"
+
+
+def test_cli_doctor_dispatch(monkeypatch):
+    called = {}
+
+    def fake_handle_doctor(args):
+        called["strict"] = args.strict
+        called["json"] = args.json
+        called["target"] = args.target
+        called["api_url"] = args.api_url
+        called["metrics_url"] = args.metrics_url
+        called["whoami_url"] = args.whoami_url
+        called["token_env"] = args.token_env
+        return 0
+
+    monkeypatch.setattr("idr_core.cli.handle_doctor", fake_handle_doctor)
+    rc = main(
+        [
+            "doctor",
+            "--strict",
+            "--json",
+            "--target",
+            "cluster",
+            "--api-url",
+            "https://idr.example.com/api/health",
+            "--metrics-url",
+            "https://idr.example.com/metrics",
+            "--whoami-url",
+            "https://idr.example.com/api/auth/whoami",
+            "--token-env",
+            "IDR_TOKEN",
+        ]
+    )
+    assert rc == 0
+    assert called == {
+        "strict": True,
+        "json": True,
+        "target": "cluster",
+        "api_url": "https://idr.example.com/api/health",
+        "metrics_url": "https://idr.example.com/metrics",
+        "whoami_url": "https://idr.example.com/api/auth/whoami",
+        "token_env": "IDR_TOKEN",
+    }
+
+
+def test_cli_deploy_dispatch(monkeypatch):
+    called = {}
+
+    def fake_exists(path):
+        called["script_path"] = path
+        return True
+
+    class _Completed:
+        returncode = 0
+
+    def fake_run(cmd, check=False):
+        called["cmd"] = cmd
+        called["check"] = check
+        return _Completed()
+
+    monkeypatch.setattr("idr_core.cli.os.path.exists", fake_exists)
+    monkeypatch.setattr("idr_core.cli.subprocess.run", fake_run)
+
+    rc = main(
+        [
+            "deploy",
+            "--provider",
+            "aws",
+            "--mode",
+            "plan",
+            "--namespace",
+            "idr",
+            "--release",
+            "idr-enterprise",
+            "--values",
+            "/tmp/custom.yaml",
+            "--set",
+            "api.replicaCount=2",
+            "--use-existing-secret",
+            "idr-enterprise-secrets",
+            "--no-doctor",
+        ]
+    )
+
+    assert rc == 0
+    assert called["check"] is False
+    assert called["cmd"][0] == "bash"
+    assert "--provider" in called["cmd"]
+    assert "aws" in called["cmd"]

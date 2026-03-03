@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "idr-enterprise.fullname" . }}-api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "idr-enterprise.name" . }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "idr-enterprise.name" . }}
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.api.image.repository }}:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          env:
+            - name: IDR_DATABASE
+              value: {{ .Values.api.env.IDR_DATABASE | quote }}
+            - name: IDR_CORS_ORIGINS
+              value: {{ .Values.api.env.IDR_CORS_ORIGINS | quote }}
+            - name: IDR_AUTH_ISSUER
+              value: {{ .Values.api.oidc.issuer | quote }}
+            - name: IDR_AUTH_AUDIENCE
+              value: {{ .Values.api.env.IDR_AUTH_AUDIENCE | quote }}
+            - name: IDR_AUTH_JWKS_URL
+              value: {{ .Values.api.oidc.jwksUrl | quote }}
+            - name: IDR_AUTH_JWKS_TTL_SECONDS
+              value: {{ .Values.api.env.IDR_AUTH_JWKS_TTL_SECONDS | quote }}
+            - name: IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS
+              value: {{ .Values.api.env.IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS | quote }}
+            - name: IDR_ALLOW_INSECURE_DEV_AUTH
+              value: {{ .Values.api.env.IDR_ALLOW_INSECURE_DEV_AUTH | quote }}
+            - name: IDR_CONNECTION_IDLE_TTL_SECONDS
+              value: {{ .Values.api.env.IDR_CONNECTION_IDLE_TTL_SECONDS | quote }}
+            - name: IDR_RUN_JOB_DB_PATH
+              value: {{ .Values.api.env.IDR_RUN_JOB_DB_PATH | quote }}
+            - name: IDR_RUN_JOB_MAX_ATTEMPTS
+              value: {{ .Values.api.env.IDR_RUN_JOB_MAX_ATTEMPTS | quote }}
+            - name: IDR_RUN_JOB_RETRY_BACKOFF_SECONDS
+              value: {{ .Values.api.env.IDR_RUN_JOB_RETRY_BACKOFF_SECONDS | quote }}
+            - name: IDR_RUN_JOB_WEBHOOK_URL
+              value: {{ .Values.api.env.IDR_RUN_JOB_WEBHOOK_URL | quote }}
+            - name: IDR_RUN_JOB_WEBHOOK_TIMEOUT_SECONDS
+              value: {{ .Values.api.env.IDR_RUN_JOB_WEBHOOK_TIMEOUT_SECONDS | quote }}
+            - name: IDR_RUN_JOB_WEBHOOK_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "idr-enterprise.secretName" . }}
+                  key: IDR_RUN_JOB_WEBHOOK_BEARER_TOKEN
+          volumeMounts:
+            - name: api-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+      volumes:
+        - name: api-data
+{{- if .Values.api.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "idr-enterprise.fullname" . }}-api-data
+{{- else }}
+          emptyDir: {}
+{{- end }}

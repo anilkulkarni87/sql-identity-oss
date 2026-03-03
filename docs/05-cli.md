@@ -88,5 +88,54 @@ Start the API server.
 
 Use `docker compose up` to run the standalone web UI with API.
 
+---
+
+### `idr doctor`
+Run install/runtime diagnostics for supportability.
+
+**Usage:**
+```bash
+idr doctor
+idr doctor --json
+idr doctor --strict
+idr doctor --telemetry-url https://example.internal/idr-doctor
+idr doctor --target cluster \
+  --api-url https://idr.example.com/api/health \
+  --metrics-url https://idr.example.com/metrics \
+  --whoami-url https://idr.example.com/api/auth/whoami
+```
+
+**Behavior:**
+- checks required runtime constraints (for example Python version and writable workspace)
+- checks optional components (DuckDB/API modules, Docker/Compose availability)
+- returns non-zero on required failures
+- with `--strict`, warnings also return non-zero
+- with `--telemetry-url` (or env `IDR_DOCTOR_TELEMETRY_URL`), report is POSTed as JSON for support workflows
+- `--target cluster` enables endpoint probes (`--api-url`, `--metrics-url`, optional `--whoami-url`)
+- `--token-env` controls which env var supplies bearer token for whoami probe (default `IDR_TOKEN`)
+
+---
+
+### `idr deploy`
+Deploy enterprise Helm package using cloud presets.
+
+**Usage:**
+```bash
+idr deploy --provider aws --mode plan
+idr deploy --provider aws --mode apply --use-existing-secret idr-enterprise-secrets
+```
+
+**Options:**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--provider` | Required | Cloud preset (`aws`, `gcp`, `azure`) |
+| `--mode` | `apply` | `plan` (lint/template) or `apply` (helm upgrade/install) |
+| `--namespace` | `idr` | Kubernetes namespace |
+| `--release` | `idr-enterprise` | Helm release name |
+| `--values` | None | Additional values files (repeatable) |
+| `--set` | None | Additional helm set overrides (repeatable) |
+| `--use-existing-secret` | None | Existing Kubernetes secret name for chart secret refs |
+| `--no-doctor` | `False` | Skip post-deploy doctor probe |
+
 ## Deprecated Runners
 > **Warning**: Direct usage of `python sql/*/idr_run.py` scripts is deprecated. Please use the unified `idr` CLI.

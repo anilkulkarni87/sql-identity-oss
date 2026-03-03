@@ -78,10 +78,8 @@ lint:
 
 # Run benchmark
 benchmark:
-	@echo "Running DuckDB benchmark..."
-	python tools/scale_test/benchmark.py \
-		--platform=duckdb \
-		--data=data/customers_all.parquet \
-		--rows=20000000 \
-		--db=benchmark.duckdb \
-		--output=benchmarks/
+	@echo "Running scale benchmark harness..."
+	python tools/ci/run_scale_benchmarks.py \
+		--profiles tools/ci/benchmark_profiles.json \
+		--output-dir benchmark_artifacts \
+		--run-label local

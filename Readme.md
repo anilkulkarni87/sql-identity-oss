@@ -18,6 +18,7 @@
 # Install and run
 pip install "sql-identity-resolution[duckdb,api,mcp]"
 idr quickstart
+idr doctor
 ```
 
 That's it! The engine will:
@@ -129,6 +130,11 @@ For pinned-image deployment:
 ```bash
 cp .env.example .env
 docker compose -f docker-compose.prod.yml --env-file .env up -d
+```
+
+Enterprise one-command self-hosted startup:
+```bash
+bash tools/deploy/enterprise_up.sh
 ```
 
 ## 🏭 Industry Templates

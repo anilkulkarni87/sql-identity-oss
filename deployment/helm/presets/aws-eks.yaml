@@ -1,0 +1,21 @@
+# AWS EKS baseline preset for idr-enterprise chart.
+# Use with: helm upgrade --install ... -f deployment/helm/presets/aws-eks.yaml
+
+api:
+  service:
+    type: ClusterIP
+  env:
+    IDR_CORS_ORIGINS: "https://idr.example.com"
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: gp3
+
+ui:
+  service:
+    type: LoadBalancer
+
+secrets:
+  # Recommended for enterprise: inject from external secret manager.
+  create: false
+  existingSecretName: idr-enterprise-secrets

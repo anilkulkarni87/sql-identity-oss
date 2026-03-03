@@ -1,0 +1,14 @@
+IDR Enterprise chart deployed.
+
+Key services:
+- API:      {{ include "idr-enterprise.fullname" . }}-api:{{ .Values.api.service.port }}
+- UI:       {{ include "idr-enterprise.fullname" . }}-ui:{{ .Values.ui.service.port }}
+{{- if .Values.keycloak.enabled }}
+- Keycloak: {{ include "idr-enterprise.fullname" . }}-keycloak:{{ .Values.keycloak.service.port }}
+{{- end }}
+{{- if .Values.prometheus.enabled }}
+- Prometheus: {{ include "idr-enterprise.fullname" . }}-prometheus:{{ .Values.prometheus.service.port }}
+{{- end }}
+{{- if .Values.grafana.enabled }}
+- Grafana: {{ include "idr-enterprise.fullname" . }}-grafana:{{ .Values.grafana.service.port }}
+{{- end }}

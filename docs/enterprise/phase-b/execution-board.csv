@@ -1,0 +1,20 @@
+ticket_id,epic,title,owner,estimate_days,depends_on,acceptance_test
+E07-T01,EPIC-07,Align MCP golden-profile table contract to idr_out.golden_profile_current,BE,1,None,pytest tests/test_mcp_contract.py::test_get_golden_profile_contract -q passes against DuckDB fixture
+E07-T02,EPIC-07,Integrate idr_core.secrets in MCP env connection path with *_FILE support,SE,1,E07-T01,pytest tests/test_mcp_secrets.py -q verifies Snowflake Databricks secret precedence
+E07-T03,EPIC-07,Standardize MCP error envelopes deterministic and safe,BE,2,E07-T01,Tool failures return expected error envelope without raw stack traces
+E07-T04,EPIC-07,Add MCP contract tests for search_identifier get_cluster run_history config_snapshot,QA,3,E07-T01,pytest tests/test_mcp_contract.py -q covers happy error and masking paths
+E07-T05,EPIC-07,Add MCP CI gate to workflow,PE,1,E07-T04,New mcp-contract workflow job fails on regression and publishes report artifact
+E08-T01,EPIC-08,Add frontend permission model from api auth whoami,UX,2,None,UI auth context exposes resolved permission and role claims
+E08-T02,EPIC-08,Enforce permission-aware nav routes and actions with denied states,UX,3,E08-T01,Unauthorized actions hidden disabled or blocked with clear explanation
+E08-T03,EPIC-08,Add global 401 403 session-expiry handling in UI API client and route layer,UX,2,E08-T01,Expired token path triggers reauth and 403 renders denied state
+E08-T04,EPIC-08,Remove token logging and tighten frontend auth defaults,SE,1,E08-T03,No token values emitted by app console logs
+E08-T05,EPIC-08,Replace any types in setup flow with strict TypeScript interfaces,UX,3,E08-T01,npm run build passes with strict typing and reduced any usage in setup components
+E08-T06,EPIC-08,Add app-level error boundary and recoverability UX,UX,2,E08-T03,Frontend runtime failures show fallback with retry and navigation actions
+E09-T01,EPIC-09,Add Vitest plus React Testing Library harness to UI,QA,2,E08-T01,npm run test executes and emits coverage artifact
+E09-T02,EPIC-09,Add UI unit tests for auth provider protected route permission guards,QA,3,E09-T01|E08-T03,Guard behavior validated for auth success auth error and denied permission states
+E09-T03,EPIC-09,Add API client tests for token header and error handling,QA,2,E09-T01,Client tests assert auth header injection and robust error mapping
+E09-T04,EPIC-09,Add Playwright smoke flow login setup runs shell render,QA,3,E08-T02,Browser smoke suite runs headless in CI on PRs
+E09-T05,EPIC-09,Wire ui-unit ui-e2e and mcp-contract jobs into test workflow,PE,2,E09-T02|E09-T04|E07-T05,PR blocked on failing UI MCP quality gates
+E10-T01,EPIC-10,Update docs with explicit UI MCP golden paths and prerequisites,AK,2,E09-T05,docs include verified commands expected outcomes and troubleshooting links
+E10-T02,EPIC-10,Publish UI auth troubleshooting and MCP operator runbook,AK,2,E08-T03|E07-T04,Support runbook resolves 401 403 and MCP connection failures deterministically
+E10-T03,EPIC-10,Execute clean-host validation and capture launch evidence pack,QA,3,E10-T01|E10-T02,Evidence includes CI links quickstart timing enterprise stack and MCP contract reports

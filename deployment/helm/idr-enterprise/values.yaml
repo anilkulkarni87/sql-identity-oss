@@ -1,0 +1,76 @@
+global:
+  imageRegistry: ghcr.io/anilkulkarni87/sql-identity-resolution
+  imageTag: "0.5.1"
+
+api:
+  replicaCount: 1
+  image:
+    repository: idr-api
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8000
+  env:
+    IDR_DATABASE: /data/idr.duckdb
+    IDR_CORS_ORIGINS: "*"
+    IDR_AUTH_AUDIENCE: account
+    IDR_AUTH_JWKS_TTL_SECONDS: "300"
+    IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS: "5"
+    IDR_ALLOW_INSECURE_DEV_AUTH: "false"
+    IDR_CONNECTION_IDLE_TTL_SECONDS: "3600"
+    IDR_RUN_JOB_DB_PATH: /data/control/idr_run_jobs.sqlite3
+    IDR_RUN_JOB_MAX_ATTEMPTS: "3"
+    IDR_RUN_JOB_RETRY_BACKOFF_SECONDS: "1.0"
+    IDR_RUN_JOB_WEBHOOK_URL: ""
+    IDR_RUN_JOB_WEBHOOK_TIMEOUT_SECONDS: "3.0"
+  oidc:
+    issuer: http://idr-enterprise-keycloak:8080/realms/idr-realm
+    jwksUrl: http://idr-enterprise-keycloak:8080/realms/idr-realm/protocol/openid-connect/certs
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+
+ui:
+  replicaCount: 1
+  image:
+    repository: idr-ui
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+
+keycloak:
+  enabled: true
+  image: quay.io/keycloak/keycloak:23.0.0
+  service:
+    type: ClusterIP
+    port: 8080
+
+redis:
+  enabled: true
+  image: redis:7.4-alpine
+  service:
+    type: ClusterIP
+    port: 6379
+
+prometheus:
+  enabled: true
+  image: prom/prometheus:v2.55.1
+  service:
+    type: ClusterIP
+    port: 9090
+
+grafana:
+  enabled: true
+  image: grafana/grafana:11.3.0
+  service:
+    type: ClusterIP
+    port: 3000
+
+secrets:
+  create: true
+  existingSecretName: ""
+  keycloakAdminPassword: "change-me"
+  grafanaAdminPassword: "change-me"
+  runJobWebhookBearerToken: ""

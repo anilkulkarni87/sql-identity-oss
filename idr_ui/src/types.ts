@@ -17,6 +17,7 @@ export interface SourceConfig {
     table: string; // Table FQN
     entity_key?: string;
     watermark_column?: string;
+    watermark_lookback_minutes?: number;
     identifiers?: Identifier[];
     attributes?: Attribute[];
     // UI specific helpers might be added here if needed, but keeping it clean
@@ -24,7 +25,7 @@ export interface SourceConfig {
 
 export interface MatchingRule {
     id: number;
-    type: string; // 'EXACT' or 'FUZZY'
+    type: 'EXACT' | 'FUZZY';
     match_keys: string[]; // For EXACT: identifiers to match
     priority: number;
     canonicalize?: 'LOWERCASE' | 'UPPERCASE' | 'EXACT';
@@ -51,4 +52,24 @@ export interface IDRConfig {
 export interface TableColumn {
     name: string;
     type: string;
+}
+
+export type WarehousePlatform = 'duckdb' | 'snowflake' | 'bigquery' | 'databricks';
+
+export interface SetupConnectionData {
+    status: string;
+    platform: WarehousePlatform;
+    warning?: string;
+}
+
+export interface SetupDryRunSummary {
+    proposed_changes?: number;
+    error?: string;
+}
+
+export interface SetupRunResult {
+    run_id?: string;
+    status?: string;
+    dry_run_summary?: SetupDryRunSummary;
+    [key: string]: unknown;
 }

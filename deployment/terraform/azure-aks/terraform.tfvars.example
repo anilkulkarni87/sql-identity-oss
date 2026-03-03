@@ -1,0 +1,34 @@
+resource_group_name = "idr-rg"
+location            = "eastus"
+project_name        = "idr"
+environment         = "prod"
+cluster_name        = "idr-aks-prod"
+ingress_hostname    = "idr.example.com"
+
+# Optional: set explicitly when using multiple subscriptions.
+# subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Optional: reuse existing Kubernetes secret instead of creating one.
+# use_existing_secret_name = "idr-enterprise-secrets"
+
+# Optional: disable cloud secret manager provisioning.
+# create_secret_manager = false
+
+# Optional: create Azure DNS A record automatically.
+# create_dns_record = true
+# dns_zone_name = "example.com"
+# dns_zone_resource_group = "shared-dns-rg"
+# dns_record_name = "idr.example.com"
+# dns_ttl = 300
+
+# Optional attach mode (existing network + AKS):
+# create_resource_group = false
+# create_network = false
+# existing_subnet_id = "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<subnet>"
+# create_cluster = false
+# existing_cluster_name = "my-existing-aks"
+
+# Optional external OIDC
+# external_oidc_enabled  = true
+# external_oidc_issuer   = "https://idp.example.com/realms/idr"
+# external_oidc_jwks_url = "https://idp.example.com/realms/idr/protocol/openid-connect/certs"

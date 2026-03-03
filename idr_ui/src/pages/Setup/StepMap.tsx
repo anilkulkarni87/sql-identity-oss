@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Loader2, Key, Tag, ChevronDown, ChevronRight, Fingerprint, Clock, Info, CheckSquare, Square } from "lucide-react";
-import { IDRConfig, SourceConfig, TableColumn, Identifier, Attribute } from '../../types';
+import { IDRConfig, SourceConfig, TableColumn, Identifier, Attribute, MatchingRule } from '../../types';
 import { api } from '../../api/client';
 
 function HelpCard({ title, children }: { title: string, children: React.ReactNode }) {
@@ -36,7 +36,7 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
     const loadColumns = async () => {
         setLoading(true);
         const newCols: Record<string, TableColumn[]> = {};
-        const newConfig = { ...config };
+        const newConfig: Record<string, SourceConfig> = { ...config };
 
         try {
             for (const table of tables) {
@@ -57,15 +57,13 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
 
                     newConfig[table] = {
                         id: table.replace(/\./g, '_'),
-                        table: table,
+                        table,
                         entity_key: likelyKey,
                         watermark_column: likelyWatermark || '',
-                        // Initialize new fields
+                        watermark_lookback_minutes: 0,
                         identifiers: [],
                         attributes: []
                     };
-                    // Add lookback if it exists in SourceConfig type (we need to cast or add to type)
-                    (newConfig[table] as any).watermark_lookback_minutes = 0;
                 }
             }
             setColumns(newCols);
@@ -75,7 +73,7 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
         }
     };
 
-    const updateConfig = (table: string, field: keyof SourceConfig, value: any) => {
+    const updateConfig = <K extends keyof SourceConfig>(table: string, field: K, value: SourceConfig[K]) => {
         setConfig(prev => ({
             ...prev,
             [table]: {
@@ -95,16 +93,16 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
                 newAttrs = currentAttrs.filter(a => a.name !== colName);
             } else {
                 newAttrs = [...currentAttrs, { name: colName, column: colName, expr: colName }];
-                // Remove from identifiers if it was there
-                prev[table].identifiers = (prev[table].identifiers || []).filter(i => i.column !== colName);
             }
+
+            const nextIdentifiers = (prev[table].identifiers || []).filter(i => i.column !== colName);
 
             return {
                 ...prev,
                 [table]: {
                     ...prev[table],
                     attributes: newAttrs,
-                    identifiers: prev[table].identifiers
+                    identifiers: nextIdentifiers
                 }
             };
         });
@@ -127,29 +125,23 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
                 else if (defaultType.includes('device')) defaultType = 'device_id';
 
                 newIds = [...currentIds, { column: colName, type: defaultType, expr: colName, is_match_key: true }];
-                // Remove from attributes if it was there
-                prev[table].attributes = (prev[table].attributes || []).filter(a => a.name !== colName);
             }
+
+            const nextAttributes = (prev[table].attributes || []).filter(a => a.name !== colName);
 
             return {
                 ...prev,
                 [table]: {
                     ...prev[table],
                     identifiers: newIds,
-                    attributes: prev[table].attributes
+                    attributes: nextAttributes
                 }
             };
         });
     };
 
     const updateIdentifierType = (table: string, colName: string, newType: string) => {
-        // Validation: Only allow alphanumeric and underscores
-        let safeType = newType.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
-
-        // Prevent empty string - if usage clears it, maybe don't update? Or defaults?
-        // Better: allow typing but validate on blur/save?
-        // For now, let's just not allow empty rules generation if type is empty.
-        // But here we just update state.
+        const safeType = newType.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
 
         setConfig(prev => {
             const currentIds = prev[table].identifiers || [];
@@ -176,7 +168,12 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
         });
     };
 
-    const getColumnState = (table: string, colName: string) => {
+    const getColumnState = (table: string, colName: string): {
+        isAttr?: boolean;
+        isId?: boolean;
+        type?: string;
+        isMatch?: boolean;
+    } => {
         const attrs = config[table]?.attributes || [];
         if (attrs.find(a => a.name === colName)) return { isAttr: true };
 
@@ -201,7 +198,7 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
         const enabledIdentifiers = allIdentifiers.filter(i => i.is_match_key !== false && i.type && i.type.trim() !== '');
 
         const usedTypes = new Set(enabledIdentifiers.map(i => i.type));
-        const dynamicRules = Array.from(usedTypes).map((type, idx) => ({
+        const dynamicRules: MatchingRule[] = Array.from(usedTypes).map((type, idx) => ({
             id: 100 + idx,
             type: 'EXACT',
             match_keys: [type],
@@ -258,7 +255,15 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
 
             <div className="flex-1 overflow-y-auto pr-2 space-y-2">
                 {tables.map(table => {
-                    const tableConfig = config[table] || {};
+                    const tableConfig: SourceConfig = config[table] || {
+                        id: table.replace(/\./g, '_'),
+                        table,
+                        entity_key: '',
+                        watermark_column: '',
+                        watermark_lookback_minutes: 0,
+                        identifiers: [],
+                        attributes: [],
+                    };
                     const tableCols = columns[table] || [];
                     const attrCount = (tableConfig.attributes || []).length;
                     const idCount = (tableConfig.identifiers || []).length;
@@ -338,8 +343,8 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
                                                 </label>
                                                 <input
                                                     type="number"
-                                                    value={(tableConfig as any).watermark_lookback_minutes || 0}
-                                                    onChange={e => updateConfig(table, 'watermark_lookback_minutes' as any, parseInt(e.target.value) || 0)}
+                                                    value={tableConfig.watermark_lookback_minutes || 0}
+                                                    onChange={e => updateConfig(table, 'watermark_lookback_minutes', parseInt(e.target.value, 10) || 0)}
                                                     className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                                 />
                                                 <p className="text-xs text-gray-500">Buffer to handle late-arriving data (0 = strict).</p>

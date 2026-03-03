@@ -70,10 +70,23 @@ nav:
     - Platforms: 06-platforms.md
     - Pipeline Details: 07-pipeline.md
     - Scaling & Sizing: 25-scaling.md
+    - Scale Benchmark Harness: 29-scale-benchmark-harness.md
     - Security: 16-security.md
     - CI/CD: 15-ci-cd.md
     - Troubleshooting: 14-troubleshooting.md
+    - UI Auth and MCP Operator Runbook: 38-ui-auth-mcp-operator-runbook.md
+    - Launch Evidence Pack: 39-launch-evidence-pack.md
+    - Cloud Deployment Quickstart: 40-cloud-deployment-quickstart.md
+    - Cross-Device Verification Runbook: 41-cross-device-verification-runbook.md
     - Production Hardening: 26-production-hardening.md
+    - HA Deployment Baseline: 30-ha-deployment.md
+    - Backup Restore Rollback: 31-backup-restore-rollback.md
+    - Secrets Management and Rotation: 32-secrets-management-rotation.md
+    - Golden Paths: 33-golden-paths.md
+    - Versioning and Upgrades: 34-versioning-and-upgrades.md
+    - Helm Enterprise Package: 35-helm-enterprise-package.md
+    - Launch Success Criteria: 36-launch-success-criteria.md
+    - UI MCP Hardening Board: 37-ui-mcp-hardening-board.md
   - 'Act V: Advanced':
     - API: 10-api.md
     - MCP Server: 11-mcp.md
@@ -81,3 +94,9 @@ nav:
     - Web UI: 09-ui.md
     - Metrics: 22-metrics.md
     - Benchmarks: 23-benchmarks.md
+  - 'Act VI: Enterprise Program':
+    - Enterprise Launch Board: 28-enterprise-launch-board.md
+    - UI MCP Hardening Board: 37-ui-mcp-hardening-board.md
+    - Phase A Scope and PRD: enterprise/phase-a/01-scope-and-prd.md
+    - Phase A Launch Checklist: enterprise/phase-a/02-launch-checklist.md
+    - Phase A RAID Log: enterprise/phase-a/03-raid-log.md

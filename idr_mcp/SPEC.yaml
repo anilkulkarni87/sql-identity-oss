@@ -1,6 +1,20 @@
 name: idr-mcp
 version: 0.1
 purpose: Read-only access to IDR outputs (deterministic + fuzzy) for agents.
+error_envelope:
+  schema: mcp_error_v1
+  shape:
+    error:
+      schema: mcp_error_v1
+      code: string
+      message: string
+      retryable: boolean
+      context: object
+  codes:
+    - MCP_NOT_CONNECTED
+    - MCP_NOT_FOUND
+    - MCP_INVALID_ARGUMENT
+    - MCP_QUERY_FAILED
 security:
   pii_access: masked_by_default
   require_roles_for_full_pii: true
@@ -17,7 +31,7 @@ resources:
   - idr_out.run_history
   - idr_out.config_snapshot
   - idr_out.skipped_identifier_groups
-  - idr_out.golden_profiles
+  - idr_out.golden_profile_current
   - idr_meta.rule
   - idr_meta.source_table
 

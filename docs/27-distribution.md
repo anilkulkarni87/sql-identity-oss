@@ -12,6 +12,12 @@ Use this guide to choose a reproducible install path for your environment.
    - Use `docker compose -f docker-compose.prod.yml --env-file .env up -d`.
 4. Need SSO + observability stack for enterprise evaluation?
    - Use `docker compose -f docker-compose.enterprise.yml up -d --build`.
+5. Need enterprise HA baseline (active-active API + LB)?
+   - Use `docker compose -f docker-compose.enterprise.ha.yml up -d --build`.
+6. Need Kubernetes package for enterprise self-hosting?
+   - Use Helm chart at `deployment/helm/idr-enterprise`.
+7. Need cloud infra + cluster + ingress + secrets provisioned end-to-end?
+   - Use Terraform full modules under `deployment/terraform/`.
 
 ## Compatibility Matrix
 
@@ -21,6 +27,9 @@ Use this guide to choose a reproducible install path for your environment.
 | Dev Compose | Source build (`idr_api/Dockerfile`, `idr_ui/Dockerfile`) | Docker Engine + Compose | Local development |
 | Prod Compose | Pinned GHCR images (`idr-api`, `idr-ui`) | Docker Engine + Compose | Reproducible app deployment |
 | Enterprise Compose | Source build + Keycloak + Grafana + Prometheus | Docker Engine + Compose | Security/ops validation |
+| Enterprise HA Compose | Active-active API nodes + API load balancer + enterprise stack | Docker Engine + Compose | HA deployment baseline |
+| Enterprise Helm | Chart package (`deployment/helm/idr-enterprise`) | Kubernetes + Helm | Enterprise self-hosted Kubernetes |
+| Enterprise Terraform | IaC modules (`deployment/terraform/*`) | Terraform + cloud provider + Kubernetes | Full cloud provisioning |
 
 ## Runtime Compatibility
 
@@ -54,6 +63,25 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d
 ### Local Dev Compose (Build From Source)
 ```bash
 docker compose up --build
+```
+
+### Enterprise Single-Command Bring-Up
+```bash
+bash tools/deploy/enterprise_up.sh
+```
+
+### Enterprise Helm Package
+```bash
+helm upgrade --install idr-enterprise deployment/helm/idr-enterprise \
+  --namespace idr --create-namespace \
+  -f deployment/helm/idr-enterprise/values.example.yaml
+```
+
+### Enterprise Terraform (Full Cloud Provisioning)
+```bash
+cd deployment/terraform/aws-eks
+terraform init
+terraform apply -var region=us-east-1 -var ingress_hostname=idr.example.com
 ```
 
 ## CI Lockfiles

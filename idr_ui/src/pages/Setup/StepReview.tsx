@@ -1,10 +1,29 @@
 import { useState } from 'react';
 import { Loader2, CheckCircle2, Settings, Play, Save, ClipboardList } from "lucide-react";
-import { IDRConfig } from '../../types';
+import { IDRConfig, SetupRunResult } from '../../types';
 import { api } from '../../api/client';
+import { safeErrorMessage } from '../../security/redaction';
 
 
-export default function StepReview({ config, onBack, onComplete, initialSaved = false, readOnly = false, warningMessage = null }: { config: IDRConfig, onBack: () => void, onComplete: () => void, initialSaved?: boolean, readOnly?: boolean, warningMessage?: string | null }) {
+export default function StepReview({
+    config,
+    onBack,
+    onComplete,
+    initialSaved = false,
+    readOnly = false,
+    canSaveConfig = true,
+    canRunPipeline = true,
+    warningMessage = null,
+}: {
+    config: IDRConfig,
+    onBack: () => void,
+    onComplete: () => void,
+    initialSaved?: boolean,
+    readOnly?: boolean,
+    canSaveConfig?: boolean,
+    canRunPipeline?: boolean,
+    warningMessage?: string | null,
+}) {
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -16,23 +35,27 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
     const [strictMode, setStrictMode] = useState(false);
     const [maxIterations, setMaxIterations] = useState(10);
     const [dryRun, setDryRun] = useState(false);
-    const [runResult, setRunResult] = useState<any>(null);
+    const [runResult, setRunResult] = useState<SetupRunResult | null>(null);
 
     const handleSave = async () => {
-        if (readOnly) return;
+        if (readOnly || !canSaveConfig) return;
         setSaving(true);
         setError(null);
         try {
             await api.saveSetupConfig(config);
             setConfigSaved(true);
-        } catch (err: any) {
-            setError(err.message || String(err));
+        } catch (err: unknown) {
+            setError(safeErrorMessage(err, "Failed to save configuration."));
         } finally {
             setSaving(false);
         }
     };
 
     const handleRun = async () => {
+        if (!canRunPipeline) {
+            setError("Run blocked: missing run.execute permission.");
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
@@ -44,8 +67,8 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
             });
             setRunResult(result);
             setSuccess(true);
-        } catch (err: any) {
-            setError(err.message || String(err));
+        } catch (err: unknown) {
+            setError(safeErrorMessage(err, "Pipeline run failed."));
         } finally {
             setLoading(false);
         }
@@ -115,7 +138,7 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
             <div className="flex-1 overflow-y-auto space-y-6">
 
                 {/* Read Only / Warning Alert */}
-                {readOnly && (
+                {(readOnly || !canSaveConfig) && (
                     <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 flex gap-3">
                         <div className="text-yellow-400">
                             <Settings className="w-5 h-5" />
@@ -124,6 +147,20 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
                             <h4 className="text-sm font-semibold text-yellow-400">Limited Permissions Mode</h4>
                             <p className="text-xs text-yellow-200/80">
                                 {warningMessage || "Unable to save configuration due to missing write permissions. You can review the config but cannot save changes."}
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {!canRunPipeline && (
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 flex gap-3">
+                        <div className="text-yellow-400">
+                            <Play className="w-5 h-5" />
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-sm font-semibold text-yellow-400">Run Disabled</h4>
+                            <p className="text-xs text-yellow-200/80">
+                                Missing <span className="font-mono">run.execute</span> permission. You can review configuration but cannot execute runs.
                             </p>
                         </div>
                     </div>
@@ -206,7 +243,7 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
                             <label className="text-sm font-medium text-gray-300">Run Mode</label>
                             <select
                                 value={runMode}
-                                onChange={(e) => setRunMode(e.target.value as any)}
+                                onChange={(e) => setRunMode(e.target.value === 'FULL' ? 'FULL' : 'INCREMENTAL')}
                                 className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
                                 <option value="INCREMENTAL">Incremental (Faster)</option>
@@ -266,10 +303,10 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
                 <button className={btnOutlineClass} onClick={onBack} disabled={loading || saving}>Back</button>
                 <div className="flex gap-3">
                     <button
-                        className={`${btnOutlineClass} ${configSaved ? 'border-green-500 text-green-400' : ''} ${readOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`${btnOutlineClass} ${configSaved ? 'border-green-500 text-green-400' : ''} ${(readOnly || !canSaveConfig) ? 'opacity-50 cursor-not-allowed' : ''}`}
                         onClick={handleSave}
-                        disabled={loading || saving || readOnly}
-                        title={readOnly ? "Read-only mode" : "Save configuration"}
+                        disabled={loading || saving || readOnly || !canSaveConfig}
+                        title={(readOnly || !canSaveConfig) ? "Save requires config.manage permission." : "Save configuration"}
                     >
                         {saving ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : <Save className="mr-2 w-4 h-4" />}
                         {configSaved ? 'Config Saved' : 'Save Config'}
@@ -278,8 +315,8 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
                     <button
                         className={`${btnClass} ${dryRun ? 'bg-purple-600 hover:bg-purple-700' : ''}`}
                         onClick={handleRun}
-                        disabled={loading || saving || !configSaved}
-                        title={!configSaved ? "Save configuration first" : ""}
+                        disabled={loading || saving || !configSaved || !canRunPipeline}
+                        title={!configSaved ? "Save configuration first" : (!canRunPipeline ? "Run requires run.execute permission." : "")}
                     >
                         {loading ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : <Play className="mr-2 w-4 h-4" />}
                         {dryRun ? 'Start Dry Run' : 'Run Pipeline'}

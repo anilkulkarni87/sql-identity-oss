@@ -36,7 +36,11 @@ export default function StepSurvivorship({ config, onNext, onBack }: StepSurvivo
         setRules(initialRules);
     }, [config]);
 
-    const updateRule = (attr: string, field: keyof SurvivorshipRule, value: any) => {
+    const updateRule = <K extends keyof SurvivorshipRule>(
+        attr: string,
+        field: K,
+        value: SurvivorshipRule[K]
+    ) => {
         setRules(prev => ({
             ...prev,
             [attr]: {
@@ -95,7 +99,7 @@ export default function StepSurvivorship({ config, onNext, onBack }: StepSurvivo
                                 </div>
                                 <select
                                     value={currentStrategy}
-                                    onChange={(e) => updateRule(attr, 'strategy', e.target.value)}
+                                    onChange={(e) => updateRule(attr, 'strategy', e.target.value as SurvivorshipRule['strategy'])}
                                     className="bg-gray-900 border border-gray-600 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
                                 >
                                     {strategies.map(s => (

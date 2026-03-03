@@ -105,3 +105,21 @@ def test_get_current_user_dev_mode_fails_closed_without_override(monkeypatch):
 
     assert exc.value.status_code == 503
     assert "Authentication is not configured" in exc.value.detail
+
+
+def test_extract_user_roles_supports_realm_and_resource_access():
+    user = {
+        "roles": ["viewer"],
+        "realm_access": {"roles": ["admin"]},
+        "resource_access": {"idr-web": {"roles": ["operator"]}},
+    }
+    roles = deps.extract_user_roles(user)
+    assert {"viewer", "admin", "operator"}.issubset(roles)
+
+
+def test_get_effective_permissions_includes_role_and_scope_permissions():
+    user = {"roles": ["viewer"], "scope": "run.submit custom.permission"}
+    perms = deps.get_effective_permissions(user)
+    assert "schema.read" in perms
+    assert "run.submit" in perms
+    assert "custom.permission" in perms

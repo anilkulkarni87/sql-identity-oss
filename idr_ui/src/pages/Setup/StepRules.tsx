@@ -21,6 +21,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     const [rules, setRules] = useState<MatchingRule[]>([]);
     const [availableTypes, setAvailableTypes] = useState<string[]>([]);
     const [fuzzyTemplates, setFuzzyTemplates] = useState<FuzzyTemplate[]>([]);
+    const [templateWarning, setTemplateWarning] = useState<string | null>(null);
 
     useEffect(() => {
         // Initialize rules (combine exact and fuzzy)
@@ -44,8 +45,14 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
 
         // Fetch fuzzy templates
         api.getFuzzyTemplates()
-            .then(data => setFuzzyTemplates(data.templates || []))
-            .catch(err => console.error("Failed to fetch templates", err));
+            .then(data => {
+                setFuzzyTemplates(data.templates || []);
+                setTemplateWarning(null);
+            })
+            .catch(() => {
+                setFuzzyTemplates([]);
+                setTemplateWarning("Template catalog unavailable. You can still add fuzzy rules with manual settings.");
+            });
 
     }, [config]);
 
@@ -81,10 +88,6 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     };
 
     const addFuzzyRule = () => {
-        if (fuzzyTemplates.length === 0 && availableTypes.length > 0) {
-            console.warn("No templates available but adding fallback fuzzy rule");
-        }
-
         const tmpl = fuzzyTemplates[0] || { sql_template: '', default_threshold: 0.85 };
         const newRule: MatchingRule = {
             id: generateId(),
@@ -98,7 +101,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
         updatePriorities([...rules, newRule]);
     };
 
-    const updateRuleField = (idx: number, field: keyof MatchingRule, value: any) => {
+    const updateRuleField = <K extends keyof MatchingRule>(idx: number, field: K, value: MatchingRule[K]) => {
         const newRules = [...rules];
         newRules[idx] = { ...newRules[idx], [field]: value };
         setRules(newRules);
@@ -173,7 +176,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                         <label className="text-xs text-gray-500">Normalization:</label>
                                         <select
                                             value={rule.canonicalize || 'LOWERCASE'}
-                                            onChange={(e) => updateRuleField(idx, 'canonicalize', e.target.value)}
+                                            onChange={(e) => updateRuleField(idx, 'canonicalize', e.target.value as MatchingRule['canonicalize'])}
                                             className="bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500"
                                             onClick={(e) => e.stopPropagation()}
                                         >
@@ -259,6 +262,12 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                         </div>
                     </div>
                 </div>
+
+                {templateWarning && (
+                    <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-3 mt-2 text-sm text-yellow-200">
+                        {templateWarning}
+                    </div>
+                )}
             </div>
 
             <div className="flex justify-between pt-4">

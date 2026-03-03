@@ -9,6 +9,18 @@ Base URL: http://localhost:8000
 
 ## Connection
 - `POST /api/connect` (connect for dashboard/explorer)
+- `POST /api/disconnect`
+
+## Auth
+- `GET /api/auth/whoami`
+- `GET /api/auth/service-accounts`
+- `POST /api/auth/service-accounts`
+- `GET /api/auth/service-accounts/{service_account_id}/tokens`
+- `POST /api/auth/service-accounts/{service_account_id}/tokens`
+- `POST /api/auth/tokens/{token_id}/revoke`
+
+## Audit
+- `GET /api/audit/events?limit=100&action=...&actor_sub=...`
 
 ## Setup Wizard
 - `POST /api/setup/connect`
@@ -18,6 +30,11 @@ Base URL: http://localhost:8000
 - `GET /api/setup/discover/columns?table=...`
 - `POST /api/setup/config/save`
 - `POST /api/setup/run`
+- `POST /api/setup/run/submit` (non-blocking; returns `job_id`)
+- `GET /api/setup/run/jobs/{job_id}`
+- `GET /api/setup/run/jobs?limit=20`
+- `GET /api/setup/run/jobs/{job_id}/events?after_event_id=...` (polling event stream)
+- `POST /api/setup/run/jobs/{job_id}/cancel`
 - `GET /api/setup/fuzzy-templates`
 
 ## Metrics
@@ -39,3 +56,4 @@ Base URL: http://localhost:8000
 Notes:
 - The API uses the current adapter from the ConnectionManager.
 - Setup endpoints are intended for the wizard and can initialize metadata tables.
+- Audit events are append-only and include actor, action, resource, outcome, and details.

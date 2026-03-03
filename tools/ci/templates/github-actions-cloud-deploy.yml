@@ -1,0 +1,71 @@
+name: Cloud Deploy Template
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Cloud provider preset (aws|gcp|azure)"
+        required: true
+        default: "aws"
+      apply:
+        description: "Apply deployment (false = plan only)"
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure kube context
+        run: |
+          # Replace with your cluster auth step.
+          # Example: aws eks update-kubeconfig ...
+          echo "Configure kube context before deployment."
+          kubectl version --client
+
+      - name: Bootstrap k8s secrets
+        env:
+          IDR_KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.IDR_KEYCLOAK_ADMIN_PASSWORD }}
+          IDR_GRAFANA_ADMIN_PASSWORD: ${{ secrets.IDR_GRAFANA_ADMIN_PASSWORD }}
+          IDR_RUN_JOB_WEBHOOK_BEARER_TOKEN: ${{ secrets.IDR_RUN_JOB_WEBHOOK_BEARER_TOKEN }}
+        run: |
+          bash tools/deploy/bootstrap_k8s_secrets.sh \
+            --namespace idr \
+            --secret-name idr-enterprise-secrets
+
+      - name: Plan deployment
+        run: |
+          bash tools/deploy/idr_deploy.sh \
+            --provider "${{ inputs.provider }}" \
+            --mode plan \
+            --use-existing-secret idr-enterprise-secrets
+
+      - name: Apply deployment
+        if: ${{ inputs.apply }}
+        run: |
+          bash tools/deploy/idr_deploy.sh \
+            --provider "${{ inputs.provider }}" \
+            --mode apply \
+            --use-existing-secret idr-enterprise-secrets
+
+      - name: Post-deploy doctor gate
+        if: ${{ inputs.apply }}
+        env:
+          IDR_TOKEN: ${{ secrets.IDR_DOCTOR_BEARER_TOKEN }}
+        run: |
+          idr doctor --target cluster \
+            --api-url "${{ vars.IDR_API_HEALTH_URL }}" \
+            --metrics-url "${{ vars.IDR_METRICS_URL }}" \
+            --whoami-url "${{ vars.IDR_WHOAMI_URL }}" \
+            --token-env IDR_TOKEN \
+            --json

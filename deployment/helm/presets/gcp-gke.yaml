@@ -1,0 +1,21 @@
+# GCP GKE baseline preset for idr-enterprise chart.
+# Use with: helm upgrade --install ... -f deployment/helm/presets/gcp-gke.yaml
+
+api:
+  service:
+    type: ClusterIP
+  env:
+    IDR_CORS_ORIGINS: "https://idr.example.com"
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: standard-rwo
+
+ui:
+  service:
+    type: LoadBalancer
+
+secrets:
+  # Recommended for enterprise: inject from external secret manager.
+  create: false
+  existingSecretName: idr-enterprise-secrets

@@ -7,6 +7,9 @@ Quick path selection:
 - `docker compose up --build`: best for local UI + API development.
 - `docker compose -f docker-compose.prod.yml --env-file .env up -d`: best for reproducible deployments from pinned images.
 - `docker compose -f docker-compose.enterprise.yml up -d --build`: best for SSO/observability validation.
+- `docker compose -f docker-compose.enterprise.ha.yml up -d --build`: best for enterprise HA baseline validation.
+- `bash tools/deploy/enterprise_up.sh`: best for single-command enterprise bring-up.
+- `helm upgrade --install ... deployment/helm/idr-enterprise`: best for Kubernetes self-hosted enterprise deployments.
 
 Base + DuckDB (local/dev):
 ```bash
@@ -42,6 +45,7 @@ pip install "sql-identity-resolution[all]"
 Verify:
 ```bash
 idr version
+idr doctor
 ```
 
 See `27-distribution.md` for compatibility matrix and deployment decision tree.

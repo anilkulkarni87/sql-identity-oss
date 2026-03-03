@@ -9,17 +9,20 @@ const queryClient = new QueryClient()
 
 import { IDRAuthProvider } from './auth/IDRAuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
         <QueryClientProvider client={queryClient}>
             <IDRAuthProvider>
                 <BrowserRouter>
-                    <ProtectedRoute>
-                        <Routes>
-                            <Route path="/*" element={<App />} />
-                        </Routes>
-                    </ProtectedRoute>
+                    <AppErrorBoundary>
+                        <ProtectedRoute>
+                            <Routes>
+                                <Route path="/*" element={<App />} />
+                            </Routes>
+                        </ProtectedRoute>
+                    </AppErrorBoundary>
                 </BrowserRouter>
             </IDRAuthProvider>
         </QueryClientProvider>

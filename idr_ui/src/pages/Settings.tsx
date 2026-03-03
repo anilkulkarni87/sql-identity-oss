@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Database, Cloud, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import { api } from '../api/client'
+import { useIDRAuth } from '../auth/IDRAuthProvider'
 
 interface HealthStatus {
     connected: boolean
@@ -11,6 +12,8 @@ interface HealthStatus {
 
 export default function Settings() {
     const queryClient = useQueryClient()
+    const auth = useIDRAuth()
+    const canManageConnection = auth.hasPermission('connection.manage')
     const [platform, setPlatform] = useState('duckdb')
 
     // DuckDB
@@ -123,10 +126,11 @@ export default function Settings() {
                             <button
                                 key={p.id}
                                 onClick={() => setPlatform(p.id)}
+                                disabled={!canManageConnection}
                                 className={`p-3 rounded-lg border transition-colors ${platform === p.id
                                     ? 'border-blue-500 bg-blue-600/20'
                                     : 'border-gray-600 hover:border-gray-500'
-                                    }`}
+                                    } ${!canManageConnection ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 <span className="text-2xl">{p.icon}</span>
                                 <p className="text-sm mt-1">{p.label}</p>
@@ -236,7 +240,8 @@ export default function Settings() {
                 {/* Connect Button */}
                 <button
                     onClick={() => connectMutation.mutate()}
-                    disabled={connectMutation.isPending}
+                    disabled={connectMutation.isPending || !canManageConnection}
+                    title={!canManageConnection ? "Connecting requires connection.manage permission." : undefined}
                     className="w-full mt-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                 >
                     {connectMutation.isPending ? (
@@ -248,6 +253,12 @@ export default function Settings() {
                         'Connect'
                     )}
                 </button>
+
+                {!canManageConnection && (
+                    <p className="mt-3 text-sm text-yellow-300">
+                        Read-only mode: connection.manage permission is required to change connection settings.
+                    </p>
+                )}
 
                 {/* Error/Success Messages */}
                 {connectMutation.isError && (

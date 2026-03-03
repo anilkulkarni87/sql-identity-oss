@@ -3,6 +3,8 @@ set -euo pipefail
 
 COMPOSE_FILE="${1:-docker-compose.enterprise.yml}"
 MAX_RETRIES="${MAX_RETRIES:-90}"
+# Keycloak realm bootstrap/import can take significantly longer than other checks.
+KEYCLOAK_MAX_RETRIES="${KEYCLOAK_MAX_RETRIES:-600}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-2}"
 DESKTOP_COMPOSE_BIN="/Applications/Docker.app/Contents/Resources/cli-plugins/docker-compose"
 
@@ -32,13 +34,31 @@ compose() {
   "${COMPOSE_BIN[@]}" "$@"
 }
 
+generate_secret() {
+  python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+}
+
+ensure_runtime_secret_env() {
+  local var_name="$1"
+  if [ -z "${!var_name:-}" ]; then
+    local generated
+    generated="$(generate_secret)"
+    export "${var_name}=${generated}"
+    echo "Set ${var_name} from generated runtime secret."
+  fi
+}
+
 wait_for_status_200() {
   local url="$1"
   local label="$2"
+  local max_retries="${3:-$MAX_RETRIES}"
   local attempt=1
 
-  echo "Waiting for ${label}: ${url}"
-  while [ "$attempt" -le "$MAX_RETRIES" ]; do
+  echo "Waiting for ${label}: ${url} (max retries: ${max_retries})"
+  while [ "$attempt" -le "$max_retries" ]; do
     status="$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)"
     if [ "$status" = "200" ]; then
       echo "✓ ${label} is ready"
@@ -52,17 +72,58 @@ wait_for_status_200() {
   return 1
 }
 
+wait_for_compose_service_healthy() {
+  local service="$1"
+  local attempt=1
+
+  echo "Waiting for service health: ${service}"
+  while [ "$attempt" -le "$MAX_RETRIES" ]; do
+    state=""
+    container_id="$(compose -f "$COMPOSE_FILE" ps -q "$service" 2>/dev/null | head -n 1)"
+    if [ -n "${container_id}" ] && command -v docker >/dev/null 2>&1; then
+      state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
+    else
+      if compose -f "$COMPOSE_FILE" ps --services --status running 2>/dev/null | grep -qx "$service"; then
+        state="running"
+      fi
+    fi
+
+    if [ "$state" = "healthy" ] || [ "$state" = "running" ]; then
+      echo "✓ Service ${service} state is ${state}"
+      return 0
+    fi
+
+    sleep "$SLEEP_SECONDS"
+    attempt=$((attempt + 1))
+  done
+
+  echo "✗ Timed out waiting for service ${service} to become healthy/running"
+  return 1
+}
+
 on_exit() {
   local exit_code="$1"
-  if [ "$exit_code" -ne 0 ]; then
-    echo ""
-    echo "Enterprise stack verification failed. Dumping logs..."
-    compose -f "$COMPOSE_FILE" logs --no-color || true
+  local has_compose=0
+  if [ "${#COMPOSE_BIN[@]}" -gt 0 ]; then
+    has_compose=1
   fi
 
-  echo ""
-  echo "Tearing down enterprise stack..."
-  compose -f "$COMPOSE_FILE" down -v || true
+  if [ "$exit_code" -ne 0 ]; then
+    echo ""
+    echo "Enterprise stack verification failed."
+    if [ "$has_compose" -eq 1 ]; then
+      echo "Dumping compose logs..."
+      compose -f "$COMPOSE_FILE" logs --no-color || true
+    else
+      echo "Compose command unavailable; skipping compose log dump."
+    fi
+  fi
+
+  if [ "$has_compose" -eq 1 ]; then
+    echo ""
+    echo "Tearing down enterprise stack..."
+    compose -f "$COMPOSE_FILE" down -v || true
+  fi
 }
 
 trap 'on_exit $?' EXIT
@@ -70,10 +131,23 @@ trap 'on_exit $?' EXIT
 detect_compose_bin
 echo "Using compose command: ${COMPOSE_BIN[*]}"
 
+ensure_runtime_secret_env "IDR_KEYCLOAK_ADMIN_PASSWORD"
+ensure_runtime_secret_env "IDR_GRAFANA_ADMIN_PASSWORD"
+
 echo "Starting enterprise stack from ${COMPOSE_FILE}..."
 compose -f "$COMPOSE_FILE" up -d --build
 
-wait_for_status_200 "http://localhost:8080/realms/idr-realm/.well-known/openid-configuration" "Keycloak realm"
+if [ -n "${EXPECT_HEALTHY_SERVICES:-}" ]; then
+  IFS=',' read -r -a expected_services <<<"$EXPECT_HEALTHY_SERVICES"
+  for service in "${expected_services[@]}"; do
+    service="$(echo "$service" | xargs)"
+    if [ -n "$service" ]; then
+      wait_for_compose_service_healthy "$service"
+    fi
+  done
+fi
+
+wait_for_status_200 "http://localhost:8080/realms/idr-realm/.well-known/openid-configuration" "Keycloak realm" "$KEYCLOAK_MAX_RETRIES"
 wait_for_status_200 "http://localhost:8000/api/health" "IDR API health"
 wait_for_status_200 "http://localhost:9090/-/healthy" "Prometheus health"
 

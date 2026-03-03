@@ -1,0 +1,30 @@
+region           = "us-east-1"
+project_name     = "idr"
+environment      = "prod"
+cluster_name     = "idr-eks-prod"
+ingress_hostname = "idr.example.com"
+
+# Optional: reuse existing Kubernetes secret instead of creating one.
+# use_existing_secret_name = "idr-enterprise-secrets"
+
+# Optional: disable cloud secret manager provisioning.
+# create_secret_manager = false
+
+# Optional: create Route53 CNAME automatically.
+# create_dns_record = true
+# route53_zone_id = "Z1234567890ABC"
+# dns_record_name = "idr.example.com"
+# dns_ttl = 300
+
+# Optional attach mode (existing VPC + EKS):
+# create_network = false
+# existing_vpc_id = "vpc-1234567890"
+# existing_private_subnet_ids = ["subnet-private-a", "subnet-private-b", "subnet-private-c"]
+# existing_public_subnet_ids = ["subnet-public-a", "subnet-public-b", "subnet-public-c"]
+# create_cluster = false
+# existing_cluster_name = "my-existing-eks"
+
+# Optional external OIDC
+# external_oidc_enabled  = true
+# external_oidc_issuer   = "https://idp.example.com/realms/idr"
+# external_oidc_jwks_url = "https://idp.example.com/realms/idr/protocol/openid-connect/certs"

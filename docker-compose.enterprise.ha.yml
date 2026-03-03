@@ -1,0 +1,167 @@
+services:
+  # --- IDR API backends (active-active) ---
+  api-a:
+    build:
+      context: .
+      dockerfile: idr_api/Dockerfile
+      args:
+        - IDR_PIP_EXTRAS=${IDR_PIP_EXTRAS:-api,duckdb,enterprise}
+    environment: &api_env
+      - PYTHONUNBUFFERED=1
+      - IDR_DATABASE=/data/idr.duckdb
+      - IDR_DB_PATH=/data/idr.duckdb
+      - IDR_CORS_ORIGINS=http://localhost:3000
+      - IDR_AUTH_ISSUER=http://localhost:8080/realms/idr-realm
+      - IDR_AUTH_AUDIENCE=account
+      - IDR_AUTH_JWKS_URL=http://keycloak:8080/realms/idr-realm/protocol/openid-connect/certs
+      - IDR_AUTH_JWKS_TTL_SECONDS=300
+      - IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS=5
+      - IDR_SERVICE_AUTH_DB_PATH=/data/idr_service_auth.sqlite3
+      - IDR_AUDIT_DB_PATH=/data/idr_audit.sqlite3
+      - IDR_ALLOW_INSECURE_DEV_AUTH=false
+      - IDR_CONNECTION_IDLE_TTL_SECONDS=3600
+      - IDR_SESSION_STORE_CLASS=${IDR_SESSION_STORE_CLASS:-idr_enterprise.session_store.RedisConnectionSessionStore}
+      - IDR_REDIS_URL=${IDR_REDIS_URL:-redis://redis:6379/0}
+      - IDR_REDIS_NAMESPACE=${IDR_REDIS_NAMESPACE:-idr:session_store}
+      - IDR_RUN_JOB_DB_PATH=/data/idr_run_jobs.sqlite3
+      - IDR_RUN_JOB_MAX_ATTEMPTS=${IDR_RUN_JOB_MAX_ATTEMPTS:-3}
+      - IDR_RUN_JOB_RETRY_BACKOFF_SECONDS=${IDR_RUN_JOB_RETRY_BACKOFF_SECONDS:-1.0}
+      - IDR_RUN_JOB_WEBHOOK_URL=${IDR_RUN_JOB_WEBHOOK_URL:-}
+      - IDR_RUN_JOB_WEBHOOK_BEARER_TOKEN_FILE=${IDR_RUN_JOB_WEBHOOK_BEARER_TOKEN_FILE:-}
+      - IDR_RUN_JOB_WEBHOOK_BEARER_TOKEN=${IDR_RUN_JOB_WEBHOOK_BEARER_TOKEN:-}
+      - IDR_RUN_JOB_WEBHOOK_TIMEOUT_SECONDS=${IDR_RUN_JOB_WEBHOOK_TIMEOUT_SECONDS:-3.0}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://prometheus:9090
+    volumes:
+      - idr-data:/data
+    networks:
+      - idr-ent-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  api-b:
+    build:
+      context: .
+      dockerfile: idr_api/Dockerfile
+      args:
+        - IDR_PIP_EXTRAS=${IDR_PIP_EXTRAS:-api,duckdb,enterprise}
+    environment: *api_env
+    volumes:
+      - idr-data:/data
+    networks:
+      - idr-ent-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # --- Internal API load balancer ---
+  api:
+    image: nginx:1.27.3-alpine
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./deployment/nginx/api-lb.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - idr-ent-net
+    depends_on:
+      api-a:
+        condition: service_healthy
+      api-b:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # --- UI ---
+  ui:
+    build:
+      context: ./idr_ui
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=/api
+        - VITE_AUTH_AUTHORITY=http://localhost:8080/realms/idr-realm
+        - VITE_AUTH_CLIENT_ID=idr-web
+        - VITE_ALLOW_INSECURE_DEV_AUTH=false
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - idr-ent-net
+
+  # --- Identity Provider ---
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${IDR_KEYCLOAK_ADMIN_PASSWORD:?Set IDR_KEYCLOAK_ADMIN_PASSWORD}
+    volumes:
+      - ./deployment/keycloak/idr-realm.json:/opt/keycloak/data/import/idr-realm.json:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - idr-ent-net
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - idr-ent-net
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # --- Observability ---
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - idr-ent-net
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards
+      - grafana-storage:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${IDR_GRAFANA_ADMIN_PASSWORD:?Set IDR_GRAFANA_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - idr-ent-net
+    depends_on:
+      - prometheus
+
+volumes:
+  idr-data:
+  redis-data:
+  grafana-storage:
+
+networks:
+  idr-ent-net:
+    driver: bridge

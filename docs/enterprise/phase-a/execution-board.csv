@@ -1,0 +1,19 @@
+ticket_id,epic,title,owner,estimate_days,depends_on,acceptance_test
+E01-T01,EPIC-01,Finalize enterprise GA scope and non-goals,AK,2,None,PRD approved with explicit in-scope and out-of-scope list
+E01-T02,EPIC-01,Publish owner-by-owner RACI and staffing plan,AK,1,E01-T01,Every epic has DRI backup owner and escalation path
+E01-T03,EPIC-01,Baseline launch checklist and quality gates,QA,2,E01-T01,Checklist merged with CI and manual release gates
+E02-T01,EPIC-02,Add async run submission endpoint and job ID,BE,3,E01-T01,POST run returns job id and is non-blocking
+E02-T02,EPIC-02,Implement worker queue with retry cancel semantics,PE,5,E02-T01,Retry and cancel transitions validated in tests
+E02-T03,EPIC-02,Add run event stream webhook callback support,BE,4,E02-T02,Exactly one lifecycle event per state transition
+E03-T01,EPIC-03,Enforce route-level RBAC ABAC middleware,SE,4,E01-T01,Protected route matrix has deny-by-default coverage
+E03-T02,EPIC-03,Add service accounts and scoped API tokens,SE,3,E03-T01,Token scope allow deny matrix passes
+E03-T03,EPIC-03,Implement immutable audit log for admin run config actions,SE,4,E03-T01,Append-only audit entries include actor action resource result
+E04-T01,EPIC-04,Build repeatable scale benchmark harness in CI profile,PE,4,E02-T02,Benchmark job emits versioned metrics artifact
+E04-T02,EPIC-04,Define and enforce SLOs API run success latency,PE,3,E04-T01,SLO thresholds are codified and gate releases
+E04-T03,EPIC-04,Add resilience tests worker kill DB transient timeout,QA,4,E02-T02,Recovery and no-corruption checks pass
+E05-T01,EPIC-05,Deliver HA deployment profile enterprise compose helm baseline,PE,4,E04-T02,Deployment guide reproduces healthy stack from clean host
+E05-T02,EPIC-05,Write backup restore and rollback runbooks and test,PE,3,E05-T01,Restore drill meets documented RTO RPO targets
+E05-T03,EPIC-05,Integrate secrets management pattern KMS Vault ready,SE,3,E05-T01,No plaintext runtime secrets and rotation procedure validated
+E06-T01,EPIC-06,Design-partner onboarding playbook and migration checklist,CE,3,E05-T01,Playbook executed by two pilots without blocker defects
+E06-T02,EPIC-06,UAT execution with two enterprise design partners,CE,8,E06-T01,Both partners sign acceptance script and defect closure
+E06-T03,EPIC-06,GA package release notes support SLA pricing guardrails,AK,3,E06-T02,GA bundle approved by product engineering support

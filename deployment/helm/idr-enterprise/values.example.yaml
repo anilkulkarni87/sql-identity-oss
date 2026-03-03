@@ -1,0 +1,20 @@
+# Copy and customize before deploy
+
+global:
+  imageRegistry: ghcr.io/anilkulkarni87/sql-identity-resolution
+  imageTag: "0.5.1"
+
+api:
+  oidc:
+    issuer: http://idr-enterprise-keycloak:8080/realms/idr-realm
+    jwksUrl: http://idr-enterprise-keycloak:8080/realms/idr-realm/protocol/openid-connect/certs
+
+secrets:
+  create: true
+  # Set to an existing Kubernetes secret name to reuse externally managed secrets.
+  # existingSecretName: "idr-enterprise-secrets"
+  existingSecretName: ""
+  # Set via --set or secret manager integration; avoid committing real values.
+  keycloakAdminPassword: "replace-me"
+  grafanaAdminPassword: "replace-me"
+  runJobWebhookBearerToken: ""

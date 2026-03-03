@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Search, GitGraph, Play, Layers, Shield } from "lucide-react";
-import { IDRConfig } from '../../types';
+import { IDRConfig, SetupConnectionData } from '../../types';
 import { api } from '../../api/client';
+import { useIDRAuth } from '../../auth/IDRAuthProvider';
 
 import StepConnect from './StepConnect';
 import StepDiscover from './StepDiscover';
@@ -11,8 +12,13 @@ import StepSurvivorship from './StepSurvivorship';
 import StepReview from './StepReview';
 
 export default function SetupWizard() {
+    const auth = useIDRAuth()
+    const canManageConnection = auth.hasPermission('connection.manage')
+    const canManageConfig = auth.hasPermission('config.manage')
+    const canExecuteRun = auth.hasPermission('run.execute')
+
     const [step, setStep] = useState(1);
-    const [connectionData, setConnectionData] = useState<any>(null);
+    const [connectionData, setConnectionData] = useState<SetupConnectionData | null>(null);
     const [initWarning, setInitWarning] = useState<string | null>(null);
     const [selectedTables, setSelectedTables] = useState<string[]>([]);
     const [mappingConfig, setMappingConfig] = useState<IDRConfig>({ sources: [] }); // Initialize with empty sources
@@ -35,13 +41,13 @@ export default function SetupWizard() {
                 // Fetch existing config
                 const config = await api.getSetupConfig();
                 if (config && config.sources && config.sources.length > 0) {
-                    setMappingConfig(config as unknown as IDRConfig);
+                    setMappingConfig(config);
                     setStep(6); // Jump to Run
                     return true;
                 }
             }
-        } catch (error) {
-            console.error("Failed to load setup config:", error);
+        } catch {
+            // Non-fatal: setup can continue without loading existing config snapshot.
         }
         return false;
     };
@@ -98,7 +104,8 @@ export default function SetupWizard() {
                     {step === 1 && (
                         <StepConnect
                             isConnected={isConnected}
-                            onNext={async (data: any) => {
+                            canManageConnection={canManageConnection}
+                            onNext={async (data: SetupConnectionData) => {
                                 setConnectionData(data);
                                 if (data.warning) {
                                     setInitWarning(data.warning);
@@ -161,8 +168,15 @@ export default function SetupWizard() {
                                 window.location.href = "/"; // Navigate to dashboard
                             }}
                             initialSaved={isConfigured}
-                            readOnly={!!initWarning}
-                            warningMessage={initWarning}
+                            readOnly={!!initWarning || !canManageConfig}
+                            canSaveConfig={canManageConfig}
+                            canRunPipeline={canExecuteRun}
+                            warningMessage={
+                                initWarning ||
+                                (!canManageConfig
+                                    ? "You can review the setup but cannot save configuration (config.manage required)."
+                                    : null)
+                            }
                         />
                     )}
                 </div>

@@ -1,33 +1,47 @@
 import { useState } from 'react';
 import { Loader2, RefreshCw } from "lucide-react";
 import { api } from '../../api/client';
+import { safeErrorMessage } from '../../security/redaction';
+import { SetupConnectionData, WarehousePlatform } from '../../types';
 
 const PLATFORMS = [
     { id: 'duckdb', name: 'DuckDB (Local)', description: 'Fast local embedded database.' },
     { id: 'snowflake', name: 'Snowflake', description: 'Cloud data warehouse.' },
     { id: 'bigquery', name: 'Google BigQuery', description: 'Serverless data warehouse.' },
     { id: 'databricks', name: 'Databricks', description: 'Unified data platform.' },
-];
+] as const satisfies ReadonlyArray<{ id: WarehousePlatform; name: string; description: string }>;
 
 interface StepConnectProps {
-    onNext: (data: any) => void;
+    onNext: (data: SetupConnectionData) => void;
     isConnected?: boolean;
+    canManageConnection?: boolean;
 }
 
-export default function StepConnect({ onNext, isConnected = false }: StepConnectProps) {
-    const [platform, setPlatform] = useState('duckdb');
-    const [params, setParams] = useState<any>({});
+export default function StepConnect({
+    onNext,
+    isConnected = false,
+    canManageConnection = true,
+}: StepConnectProps) {
+    const [platform, setPlatform] = useState<WarehousePlatform>('duckdb');
+    const [params, setParams] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [warning, setWarning] = useState<string | null>(null);
-    const [pendingData, setPendingData] = useState<any>(null);
+    const [pendingData, setPendingData] = useState<SetupConnectionData | null>(null);
 
-    const onSubmit = async (e: React.FormEvent) => {
+    const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         submitConnection(platform, params);
     };
 
-    const submitConnection = async (selectedPlatform: string, selectedParams: any) => {
+    const submitConnection = async (
+        selectedPlatform: WarehousePlatform,
+        selectedParams: Record<string, string>
+    ) => {
+        if (!canManageConnection) {
+            setError("Connection update is disabled: missing connection.manage permission.");
+            return;
+        }
         // If user acknowledges warning
         if (warning && pendingData) {
             onNext(pendingData);
@@ -50,15 +64,15 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
             }
 
             onNext(data);
-        } catch (err: any) {
-            setError(err.message || String(err));
+        } catch (err: unknown) {
+            setError(safeErrorMessage(err, "Connection failed."));
         } finally {
             setLoading(false);
         }
     };
 
-    const updateParam = (key: string, value: any) => {
-        setParams((prev: any) => ({ ...prev, [key]: value }));
+    const updateParam = (key: string, value: string) => {
+        setParams((prev) => ({ ...prev, [key]: value }));
     };
 
     const inputClass = "w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500";
@@ -84,10 +98,11 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                             key={p.id}
                             type="button"
                             onClick={() => { setPlatform(p.id); setParams({}); setError(null); }}
+                            disabled={!canManageConnection}
                             className={`p-3 rounded-lg border text-left transition-all ${platform === p.id
                                 ? 'bg-blue-600/10 border-blue-500 ring-1 ring-blue-500'
                                 : 'bg-gray-800 border-gray-700 hover:border-gray-600'
-                                }`}
+                                } ${!canManageConnection ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                             <div className={`font-semibold text-sm ${platform === p.id ? 'text-blue-400' : 'text-gray-200'}`}>
                                 {p.name}
@@ -105,6 +120,7 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                                 type="text"
                                 placeholder="data/identity_graph.db"
                                 className={inputClass}
+                                disabled={!canManageConnection}
                                 onChange={e => updateParam('path', e.target.value)}
                             />
                             <p className="text-xs text-gray-600 mt-1">Leave empty for in-memory (data lost on restart).</p>
@@ -115,31 +131,31 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                         <>
                             <div>
                                 <label className={labelClass}>Account</label>
-                                <input type="text" required className={inputClass} onChange={e => updateParam('account', e.target.value)} />
+                                <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('account', e.target.value)} />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className={labelClass}>User</label>
-                                    <input type="text" required className={inputClass} onChange={e => updateParam('user', e.target.value)} />
+                                    <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('user', e.target.value)} />
                                 </div>
                                 <div>
                                     <label className={labelClass}>Password</label>
-                                    <input type="password" required className={inputClass} onChange={e => updateParam('password', e.target.value)} />
+                                    <input type="password" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('password', e.target.value)} />
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className={labelClass}>Database</label>
-                                    <input type="text" required className={inputClass} onChange={e => updateParam('database', e.target.value)} />
+                                    <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('database', e.target.value)} />
                                 </div>
                                 <div>
                                     <label className={labelClass}>Schema</label>
-                                    <input type="text" required className={inputClass} onChange={e => updateParam('schema', e.target.value)} />
+                                    <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('schema', e.target.value)} />
                                 </div>
                             </div>
                             <div>
                                 <label className={labelClass}>Warehouse</label>
-                                <input type="text" required className={inputClass} onChange={e => updateParam('warehouse', e.target.value)} />
+                                <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('warehouse', e.target.value)} />
                             </div>
                         </>
                     )}
@@ -148,11 +164,11 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                         <>
                             <div>
                                 <label className={labelClass}>Project ID</label>
-                                <input type="text" required className={inputClass} onChange={e => updateParam('project', e.target.value)} />
+                                <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('project', e.target.value)} />
                             </div>
                             <div>
                                 <label className={labelClass}>Dataset</label>
-                                <input type="text" required className={inputClass} onChange={e => updateParam('dataset', e.target.value)} />
+                                <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('dataset', e.target.value)} />
                             </div>
                             <div>
                                 <label className={labelClass}>Credentials JSON (Path or Content)</label>
@@ -160,6 +176,7 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                                     className={`${inputClass} font-mono text-xs`}
                                     rows={3}
                                     placeholder="{ ... }"
+                                    disabled={!canManageConnection}
                                     onChange={e => updateParam('credentials_json', e.target.value)}
                                 />
                             </div>
@@ -170,24 +187,24 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                         <>
                             <div>
                                 <label className={labelClass}>Server Hostname</label>
-                                <input type="text" required className={inputClass} onChange={e => updateParam('server_hostname', e.target.value)} />
+                                <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('server_hostname', e.target.value)} />
                             </div>
                             <div>
                                 <label className={labelClass}>HTTP Path</label>
-                                <input type="text" required className={inputClass} onChange={e => updateParam('http_path', e.target.value)} />
+                                <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('http_path', e.target.value)} />
                             </div>
                             <div>
                                 <label className={labelClass}>Access Token</label>
-                                <input type="password" required className={inputClass} onChange={e => updateParam('access_token', e.target.value)} />
+                                <input type="password" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('access_token', e.target.value)} />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className={labelClass}>Catalog</label>
-                                    <input type="text" required className={inputClass} onChange={e => updateParam('catalog', e.target.value)} />
+                                    <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('catalog', e.target.value)} />
                                 </div>
                                 <div>
                                     <label className={labelClass}>Schema</label>
-                                    <input type="text" required className={inputClass} onChange={e => updateParam('schema', e.target.value)} />
+                                    <input type="text" required className={inputClass} disabled={!canManageConnection} onChange={e => updateParam('schema', e.target.value)} />
                                 </div>
                             </div>
                         </>
@@ -208,9 +225,16 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                     </div>
                 )}
 
+                {!canManageConnection && (
+                    <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-md p-3 text-sm text-yellow-300">
+                        Read-only mode: missing <span className="font-mono">connection.manage</span> permission.
+                    </div>
+                )}
+
                 <button
                     type="submit"
-                    disabled={loading}
+                    disabled={loading || !canManageConnection}
+                    title={!canManageConnection ? "Connection requires connection.manage permission." : undefined}
                     className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (warning ? 'Confirm & Proceed' : 'Connect')}

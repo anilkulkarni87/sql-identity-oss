@@ -1,0 +1,76 @@
+{
+  "artifact_version": "1.0",
+  "rules": [
+    {
+      "id": "all_profiles_report_success",
+      "type": "summary_max",
+      "path": "failed",
+      "op": "<=",
+      "value": 0
+    },
+    {
+      "id": "duckdb_run_success_rate",
+      "type": "profile_metric",
+      "profile_id": "duckdb_ci_small",
+      "path": "metrics.run_success_rate",
+      "op": ">=",
+      "value": 1.0
+    },
+    {
+      "id": "duckdb_run_p95_seconds",
+      "type": "profile_metric",
+      "profile_id": "duckdb_ci_small",
+      "path": "metrics.run_duration_seconds.p95",
+      "op": "<=",
+      "value": 10.0
+    },
+    {
+      "id": "duckdb_total_p95_seconds",
+      "type": "profile_metric",
+      "profile_id": "duckdb_ci_small",
+      "path": "metrics.total_duration_seconds.p95",
+      "op": "<=",
+      "value": 20.0
+    },
+    {
+      "id": "snowflake_compile_p95_seconds",
+      "type": "profile_metric",
+      "profile_id": "snowflake_ci_compile",
+      "path": "metrics.compile_duration_seconds.p95",
+      "op": "<=",
+      "value": 0.01
+    },
+    {
+      "id": "bigquery_compile_p95_seconds",
+      "type": "profile_metric",
+      "profile_id": "bigquery_ci_compile",
+      "path": "metrics.compile_duration_seconds.p95",
+      "op": "<=",
+      "value": 0.01
+    },
+    {
+      "id": "databricks_compile_p95_seconds",
+      "type": "profile_metric",
+      "profile_id": "databricks_ci_compile",
+      "path": "metrics.compile_duration_seconds.p95",
+      "op": "<=",
+      "value": 0.01
+    },
+    {
+      "id": "api_latency_success_rate",
+      "type": "profile_metric",
+      "profile_id": "api_latency_ci",
+      "path": "metrics.success_rate",
+      "op": ">=",
+      "value": 1.0
+    },
+    {
+      "id": "api_latency_p95_seconds",
+      "type": "profile_metric",
+      "profile_id": "api_latency_ci",
+      "path": "metrics.request_latency_seconds.p95",
+      "op": "<=",
+      "value": 0.20
+    }
+  ]
+}

@@ -9,7 +9,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that p
 - **Tools Included**:
   - `search_identifier` — Find clusters by name, email, phone, etc.
   - `get_cluster` — Retrieve full cluster details (entities + edges).
-  - `get_golden_profile` — Get the best/surviving attributes for an identity.
+  - `get_golden_profile` — Get the best/surviving attributes for an identity (`idr_out.golden_profile_current`).
   - `explain_edge` — View evidence for why two records matched.
   - `config_snapshot` — Retrieve saved configuration snapshots.
   - `run_history` / `latest_run` — Check recent job status.
@@ -52,6 +52,8 @@ export IDR_PLATFORM=snowflake
 export SNOWFLAKE_ACCOUNT=your-account
 export SNOWFLAKE_USER=username
 export SNOWFLAKE_PASSWORD=password
+# Optional preferred secret-file pattern:
+# export SNOWFLAKE_PASSWORD_FILE=/run/secrets/snowflake_password
 export SNOWFLAKE_WAREHOUSE=compute_wh
 export SNOWFLAKE_DATABASE=idr_db
 export SNOWFLAKE_SCHEMA=public
@@ -63,6 +65,8 @@ export IDR_PLATFORM=databricks
 export DATABRICKS_HOST=hostname
 export DATABRICKS_HTTP_PATH=path
 export DATABRICKS_TOKEN=token
+# Optional preferred secret-file pattern:
+# export DATABRICKS_TOKEN_FILE=/run/secrets/databricks_token
 export DATABRICKS_CATALOG=hive_metastore
 ```
 
@@ -76,6 +80,30 @@ By default, all PII (emails, phone numbers, exact match values) is **masked** in
 ```bash
 export IDR_PII_ACCESS=full
 ```
+
+## Error Contract
+
+All tool failures return a deterministic envelope:
+
+```json
+{
+  "error": {
+    "schema": "mcp_error_v1",
+    "code": "MCP_QUERY_FAILED",
+    "message": "Unable to read run history.",
+    "retryable": true,
+    "context": {
+      "tool": "run_history"
+    }
+  }
+}
+```
+
+Error codes:
+- `MCP_NOT_CONNECTED`
+- `MCP_NOT_FOUND`
+- `MCP_INVALID_ARGUMENT`
+- `MCP_QUERY_FAILED`
 
 ## Agent Configuration
 

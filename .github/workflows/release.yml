@@ -59,7 +59,8 @@ jobs:
           . .venv-release/bin/activate
           python -m pip install dist/*.whl
           idr version
-          idr quickstart --help
+          idr quickstart --rows 1000 --output release_smoke.duckdb --seed 7
+          idr doctor --json
 
       - name: Attest Python artifacts
         uses: actions/attest-build-provenance@v2
@@ -202,6 +203,29 @@ jobs:
           subject-digest: ${{ steps.build_ui.outputs.digest }}
           push-to-registry: true
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.7.0
+
+      - name: Sign API image (keyless)
+        run: cosign sign --yes ghcr.io/${{ github.repository }}/idr-api@${{ steps.build_api.outputs.digest }}
+
+      - name: Verify API image signature
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            ghcr.io/${{ github.repository }}/idr-api@${{ steps.build_api.outputs.digest }}
+
+      - name: Sign UI image (keyless)
+        run: cosign sign --yes ghcr.io/${{ github.repository }}/idr-ui@${{ steps.build_ui.outputs.digest }}
+
+      - name: Verify UI image signature
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            ghcr.io/${{ github.repository }}/idr-ui@${{ steps.build_ui.outputs.digest }}
+
       - name: Print image digests
         run: |
           echo "API digest: ${{ steps.build_api.outputs.digest }}"
@@ -214,4 +238,5 @@ jobs:
             echo "- API image digest: \`${{ steps.build_api.outputs.digest }}\`"
             echo "- UI image digest: \`${{ steps.build_ui.outputs.digest }}\`"
             echo "- Signed attestations: https://github.com/${{ github.repository }}/attestations"
+            echo "- Cosign keyless signatures generated and verified for API/UI images"
           } >> "$GITHUB_STEP_SUMMARY"

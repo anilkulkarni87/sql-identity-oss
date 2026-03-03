@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, Search, Table as TableIcon } from "lucide-react";
 import { api } from '../../api/client';
+import { safeErrorMessage } from '../../security/redaction';
+import { SetupConnectionData } from '../../types';
 
 interface StepDiscoverProps {
     onNext: (tables: string[]) => void;
     onBack: () => void;
-    connectionData: any;
+    connectionData: SetupConnectionData | null;
 }
 
 export default function StepDiscover({ onNext, onBack, connectionData }: StepDiscoverProps) {
@@ -15,7 +17,7 @@ export default function StepDiscover({ onNext, onBack, connectionData }: StepDis
     const [selectedTables, setSelectedTables] = useState<string[]>([]);
     const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         // Optional: Auto-load if platform provides a default schema context
@@ -23,7 +25,7 @@ export default function StepDiscover({ onNext, onBack, connectionData }: StepDis
 
     const handleScan = async (e?: React.FormEvent) => {
         e?.preventDefault();
-        if (!schema && connectionData.platform !== 'duckdb') return;
+        if (!schema && connectionData?.platform !== 'duckdb') return;
 
         setLoading(true);
         setError(null);
@@ -31,8 +33,8 @@ export default function StepDiscover({ onNext, onBack, connectionData }: StepDis
             const data = await api.discoverTables(schema || undefined);
             setTables(data.tables || []);
             setFilteredTables(data.tables || []);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(safeErrorMessage(err, "Table discovery failed."));
             setTables([]);
         } finally {
             setLoading(false);
