@@ -145,16 +145,17 @@ Pre-built configurations for common use cases:
 ## 🧪 Testing (Local & Cloud)
 
 ```bash
-# 1. Run the full local & multi-dialect test suite (260+ tests)
+# 1. Run the full unit & multi-dialect test suite (265+ tests)
 pytest
 
-# 2. Run opt-in live cloud smoke tests (when cloud credentials are set)
-IDR_LIVE_SNOWFLAKE=1 SNOWFLAKE_ACCOUNT=... SNOWFLAKE_USER=... SNOWFLAKE_PASSWORD=... SNOWFLAKE_WAREHOUSE=... SNOWFLAKE_DATABASE=... pytest tests/test_cloud_dialects_live.py
-IDR_LIVE_BIGQUERY=1 IDR_BQ_PROJECT=my-gcp-project pytest tests/test_cloud_dialects_live.py
-IDR_LIVE_DATABRICKS=1 DATABRICKS_HOST=... DATABRICKS_HTTP_PATH=... DATABRICKS_TOKEN=... pytest tests/test_cloud_dialects_live.py
+# 2. Run opt-in live cloud integration tests (when cloud credentials are set)
+pytest tests/test_cloud_dialects_live.py -v
+
+# 3. Run the 260,000-entity scale & MCP benchmark
+python tools/scale_test/run_scale_and_mcp_benchmark.py --rows 250000 --incr-rows 10000
 ```
 
-See [`CONTEXT_GRAPH.md`](CONTEXT_GRAPH.md) for the complete architecture and cross-database context graph.
+See [Architecture Documentation](docs/18-architecture.md) for detailed pipeline stage and schema design.
 
 ## 🤝 Contributing
 

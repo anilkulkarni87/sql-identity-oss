@@ -44,7 +44,7 @@ demo: install
 test:
 	@echo "Running tests..."
 	pip install pytest --quiet
-	python -m pytest tests/ --ignore=tests/legacy -v
+	python -m pytest tests/ -v
 
 # Serve documentation locally
 docs:
@@ -58,9 +58,8 @@ docs-build:
 
 # Generate scale test data
 generate:
-	@echo "Generating 20M row test dataset..."
-	pip install pyarrow
-	python tools/scale_test/data_generator.py --rows=20000000 --seed=42 --output=data/
+	@echo "Generating scale test dataset..."
+	python tools/scale_test/generate_global_retail_idr.py --rows=1000000 --output=data/
 
 # Clean generated files
 clean:
@@ -78,10 +77,5 @@ lint:
 
 # Run benchmark
 benchmark:
-	@echo "Running DuckDB benchmark..."
-	python tools/scale_test/benchmark.py \
-		--platform=duckdb \
-		--data=data/customers_all.parquet \
-		--rows=20000000 \
-		--db=benchmark.duckdb \
-		--output=benchmarks/
+	@echo "Running scale & MCP benchmark..."
+	python tools/scale_test/run_scale_and_mcp_benchmark.py --rows=250000 --incr-rows=10000

@@ -55,7 +55,7 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest tests/ --ignore=tests/legacy -v
+          python -m pytest tests/ -v
 
   ui-lockfile:
     name: UI Lockfile Validation

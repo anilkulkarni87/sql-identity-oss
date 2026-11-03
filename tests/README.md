@@ -6,10 +6,10 @@ Unit and integration tests for sql-identity-resolution using **pytest**.
 
 ```bash
 # Run all tests
-python -m pytest tests/ --ignore=tests/legacy -v
+pytest tests/ -v
 
 # Run a specific test file
-python -m pytest tests/test_config.py -v
+pytest tests/test_config.py -v
 
 # Via Makefile
 make test
@@ -49,9 +49,4 @@ make test
 1. Create a test file matching `tests/test_*.py`
 2. Use pytest conventions (`TestClassName`, `test_method_name`)
 3. Use `conftest.py` fixtures for shared setup
-4. Run `python -m pytest tests/ --ignore=tests/legacy -v` to verify
-
-## Legacy Tests
-
-Archived tests from the pre-`idr_core` era are in `tests/legacy/`.
-See [legacy/README.md](legacy/README.md) for details.
+4. Run `pytest tests/ -v` to verify
