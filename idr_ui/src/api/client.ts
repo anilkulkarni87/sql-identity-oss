@@ -129,6 +129,7 @@ export const api = {
 
     getCluster: (clusterId: string) => fetchJson<{
         resolved_id: string
+        super_cluster_id?: string | null
         cluster_size: number
         confidence_score: number | null
         entities: Array<{
@@ -143,6 +144,7 @@ export const api = {
             identifier_value: string
             rule_id: string
         }>
+        golden_profile?: Record<string, unknown> | null
     }>(`/clusters/${encodeURIComponent(clusterId)}`),
 
     // Run History
@@ -156,6 +158,29 @@ export const api = {
         edges_created: number
         clusters_impacted: number
     }>>(`/runs?limit=${limit}`),
+
+    getRunDetail: (runId: string) => fetchJson<{
+        run_id: string
+        run_mode: string
+        status: string
+        started_at: string
+        ended_at?: string | null
+        duration_seconds: number | null
+        entities_processed: number
+        edges_created: number
+        clusters_impacted: number
+        lp_iterations?: number | null
+        error_message?: string | null
+        warnings: string[]
+        stages: Array<{
+            stage_name: string
+            stage_order: number
+            rows_in?: number | null
+            rows_out?: number | null
+            duration_seconds?: number | null
+            notes?: string | null
+        }>
+    }>(`/runs/${encodeURIComponent(runId)}`),
 
     // System Health
     getHealth: () => fetchJson<{

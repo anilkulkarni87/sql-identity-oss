@@ -128,6 +128,7 @@ DIALECT_CONFIG = {
         "string_type": "VARCHAR",
         "timestamp_type": "TIMESTAMP",
         "int_type": "INTEGER",
+        "float_type": "DOUBLE",
         "bool_true": "TRUE",
         "bool_false": "FALSE",
         "transient_table": "",  # DuckDB doesn't have transient
@@ -135,12 +136,15 @@ DIALECT_CONFIG = {
         "coalesce": "COALESCE",
         "ilike": "ILIKE",
         "md5": lambda x: f"MD5({x})",
+        "sha256": lambda x: f"SHA256(CAST({x} AS VARCHAR))",
+        "split_part": lambda col, delim, idx: f"SPLIT_PART({col}, '{delim}', {idx})",
     },
     "snowflake": {
         "current_timestamp": "CURRENT_TIMESTAMP()",
         "string_type": "VARCHAR",
         "timestamp_type": "TIMESTAMP_NTZ",  # Explicitly use NTZ for Snowflake compatibility
         "int_type": "INTEGER",
+        "float_type": "DOUBLE",
         "bool_true": "TRUE",
         "bool_false": "FALSE",
         "transient_table": "TRANSIENT",
@@ -148,12 +152,15 @@ DIALECT_CONFIG = {
         "coalesce": "COALESCE",
         "ilike": "ILIKE",
         "md5": lambda x: f"MD5({x})",
+        "sha256": lambda x: f"SHA2(CAST({x} AS VARCHAR), 256)",
+        "split_part": lambda col, delim, idx: f"SPLIT_PART({col}, '{delim}', {idx})",
     },
     "bigquery": {
         "current_timestamp": "CURRENT_TIMESTAMP()",
         "string_type": "STRING",
         "timestamp_type": "TIMESTAMP",
         "int_type": "INT64",
+        "float_type": "FLOAT64",
         "bool_true": "TRUE",
         "bool_false": "FALSE",
         "transient_table": "",  # BigQuery uses temp tables differently
@@ -161,12 +168,15 @@ DIALECT_CONFIG = {
         "coalesce": "COALESCE",
         "ilike": "LOWER({}) LIKE LOWER({})",  # No native ILIKE
         "md5": lambda x: f"TO_HEX(MD5(CAST({x} AS STRING)))",
+        "sha256": lambda x: f"TO_HEX(SHA256(CAST({x} AS STRING)))",
+        "split_part": lambda col, delim, idx: f"SPLIT({col}, '{delim}')[SAFE_OFFSET({idx - 1})]",
     },
     "databricks": {
         "current_timestamp": "CURRENT_TIMESTAMP()",
         "string_type": "STRING",
         "timestamp_type": "TIMESTAMP",  # Explicitly use TIMESTAMP (LTZ) to avoid NTZ feature error
         "int_type": "INT",
+        "float_type": "DOUBLE",
         "bool_true": "TRUE",
         "bool_false": "FALSE",
         "transient_table": "",  # Databricks uses TEMPORARY
@@ -174,6 +184,8 @@ DIALECT_CONFIG = {
         "coalesce": "COALESCE",
         "ilike": "ILIKE",
         "md5": lambda x: f"MD5({x})",
+        "sha256": lambda x: f"SHA2(CAST({x} AS STRING), 256)",
+        "split_part": lambda col, delim, idx: f"SPLIT_PART({col}, '{delim}', {idx})",
     },
 }
 

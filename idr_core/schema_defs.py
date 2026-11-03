@@ -223,6 +223,7 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("clusters_impacted", ColumnType.INT),
             ColumnDef("lp_iterations", ColumnType.INT),
             ColumnDef("source_tables_processed", ColumnType.INT),
+            ColumnDef("warnings", ColumnType.STRING),
             ColumnDef("error_message", ColumnType.STRING),
             ColumnDef(
                 "config_hash", ColumnType.STRING
@@ -319,6 +320,19 @@ SYSTEM_TABLES: List[TableDef] = [
     ),
     TableDef(
         schema="idr_out",
+        name="identity_identifiers_current",
+        description="Current registry of all entity identifiers for fast incremental candidate expansion.",
+        columns=[
+            ColumnDef("entity_key", ColumnType.STRING, is_pk=True),
+            ColumnDef("identifier_type", ColumnType.STRING, is_pk=True),
+            ColumnDef("identifier_value_norm", ColumnType.STRING),
+            ColumnDef("is_hashed", ColumnType.BOOL, default="FALSE"),
+            ColumnDef("updated_at", ColumnType.TIMESTAMP),
+            ColumnDef("run_id", ColumnType.STRING),
+        ],
+    ),
+    TableDef(
+        schema="idr_out",
         name="identity_edges_current",
         description="Graph edges representing links between entities.",
         columns=[
@@ -342,6 +356,9 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("identifier_type", ColumnType.STRING),
             ColumnDef("identifier_value_norm", ColumnType.STRING),
             ColumnDef("group_size", ColumnType.INT),
+            ColumnDef("max_allowed", ColumnType.INT),
+            ColumnDef("sample_entity_keys", ColumnType.STRING),
+            ColumnDef("reason", ColumnType.STRING),
             ColumnDef("skipped_at", ColumnType.TIMESTAMP),
         ],
     ),
@@ -359,6 +376,17 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("match_value", ColumnType.STRING),
             ColumnDef("score", ColumnType.DOUBLE),
             ColumnDef("created_at", ColumnType.TIMESTAMP),
+        ],
+    ),
+    # --- Golden Profiles (Unified Customer 360 Record) ---
+    TableDef(
+        schema="idr_out",
+        name="golden_profiles",
+        description="Unified golden customer profiles resolved by survivorship rules.",
+        columns=[
+            ColumnDef("resolved_id", ColumnType.STRING, is_pk=True),
+            ColumnDef("run_id", ColumnType.STRING),
+            ColumnDef("updated_at", ColumnType.TIMESTAMP),
         ],
     ),
 ]

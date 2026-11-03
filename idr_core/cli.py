@@ -311,7 +311,7 @@ def handle_config(args) -> int:
     if args.config_cmd == "generate":
         try:
             config = load_config(args.file)
-            statements = config_to_sql(config)
+            statements = config_to_sql(config, dialect=getattr(args, "dialect", "duckdb"))
             print("-- Generated SQL from YAML configuration")
             print("-- " + "=" * 58)
             for stmt in statements:
@@ -393,7 +393,7 @@ def handle_run(args) -> int:
             print(f"  Error:           {result.error}")
         print(f"{'=' * 60}\n")
 
-        return 0 if "SUCCESS" in result.status else 1
+        return 0 if ("SUCCESS" in result.status or result.status == "DRY_RUN_COMPLETE") else 1
 
     finally:
         adapter.close()

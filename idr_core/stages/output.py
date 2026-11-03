@@ -53,63 +53,57 @@ class OutputStage(BaseStage):
 
     def compute_confidence_scores(self) -> None:
         """Compute confidence metrics for updated clusters."""
+        float_type = self._dialect.get("float_type", "DOUBLE")
+        str_type = self._dialect["string_type"]
 
         # 0. Calculate cluster sizes for impacted clusters
         self.adapter.execute("""
-            DROP TABLE IF EXISTS idr_work.cluster_sizes_updates;
-            CREATE TABLE idr_work.cluster_sizes_updates AS
+            CREATE OR REPLACE TABLE idr_work.cluster_sizes_updates AS
             SELECT
                 resolved_id,
                 COUNT(*) as cluster_size
             FROM idr_out.identity_resolved_membership_current
             WHERE resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
-            GROUP BY resolved_id;
+            GROUP BY resolved_id
         """)
 
-        # 1. Edge stats per cluster
+        # 1. Edge stats per cluster (count each undirected edge once per cluster)
         self.adapter.execute("""
-            DROP TABLE IF EXISTS idr_work.cluster_edge_stats;
-            CREATE TABLE idr_work.cluster_edge_stats AS
+            CREATE OR REPLACE TABLE idr_work.cluster_edge_stats AS
             SELECT
                 m.resolved_id,
                 COUNT(DISTINCT e.identifier_type) AS edge_diversity,
                 COUNT(*) AS edge_count
-            FROM idr_out.identity_resolved_membership_current m
-            JOIN idr_out.identity_edges_current e
-              ON e.left_entity_key = m.entity_key OR e.right_entity_key = m.entity_key
+            FROM idr_out.identity_edges_current e
+            JOIN idr_out.identity_resolved_membership_current m
+              ON e.left_entity_key = m.entity_key
+            JOIN idr_out.identity_resolved_membership_current m2
+              ON e.right_entity_key = m2.entity_key
+             AND m.resolved_id = m2.resolved_id
             WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
-            GROUP BY m.resolved_id;
+            GROUP BY m.resolved_id
         """)
 
-        # 2. Cluster density
-        self.adapter.execute("""
-            DROP TABLE IF EXISTS idr_work.cluster_density;
-            CREATE TABLE idr_work.cluster_density AS
+        # 2. Cluster density (actual edges / max possible edges for N nodes)
+        self.adapter.execute(f"""
+            CREATE OR REPLACE TABLE idr_work.cluster_density AS
             SELECT
                 c.resolved_id,
                 c.cluster_size,
                 COALESCE(es.edge_diversity, 0) AS edge_diversity,
                 COALESCE(es.edge_count, 0) AS edge_count,
                 CASE
-                    WHEN c.cluster_size <= 1 THEN 1.0
-                    ELSE LEAST(1.0, CAST(COALESCE(es.edge_count, 0) AS FLOAT) /
-                         (CAST(c.cluster_size AS FLOAT) - 1))
+                    WHEN c.cluster_size <= 2 THEN 1.0
+                    ELSE LEAST(1.0, (2.0 * CAST(COALESCE(es.edge_count, 0) AS {float_type})) /
+                         (CAST(c.cluster_size AS {float_type}) * (CAST(c.cluster_size AS {float_type}) - 1.0)))
                 END AS match_density
             FROM idr_work.cluster_sizes_updates c
-            LEFT JOIN idr_work.cluster_edge_stats es ON es.resolved_id = c.resolved_id;
+            LEFT JOIN idr_work.cluster_edge_stats es ON es.resolved_id = c.resolved_id
         """)
 
-        # 3. Max diversity (for normalization)
-        self.adapter.execute("""
-            DROP TABLE IF EXISTS idr_work.max_diversity;
-            CREATE TABLE idr_work.max_diversity AS
-            SELECT GREATEST(1, MAX(edge_diversity)) AS max_div FROM idr_work.cluster_density;
-        """)
-
-        # 4. Final Confidence Score & Reason
-        self.adapter.execute("""
-            DROP TABLE IF EXISTS idr_work.cluster_confidence;
-            CREATE TABLE idr_work.cluster_confidence AS
+        # 3. Final Confidence Score & Reason (dialect-safe string and float types)
+        self.adapter.execute(f"""
+            CREATE OR REPLACE TABLE idr_work.cluster_confidence AS
             SELECT
                 cd.resolved_id,
                 cd.cluster_size,
@@ -118,7 +112,7 @@ class OutputStage(BaseStage):
                 CASE
                     WHEN cd.cluster_size = 1 THEN 1.0
                     ELSE ROUND(
-                        0.50 * (CAST(cd.edge_diversity AS FLOAT) / md.max_div) +
+                        0.50 * LEAST(1.0, CAST(cd.edge_diversity AS {float_type}) / 3.0) +
                         0.35 * cd.match_density +
                         0.15 * 1.0,
                         3
@@ -127,19 +121,22 @@ class OutputStage(BaseStage):
                 CASE
                     WHEN cd.cluster_size = 1 THEN 'SINGLETON_NO_MATCH_REQUIRED'
                     WHEN cd.edge_diversity >= 3 AND cd.match_density >= 0.8 THEN
-                        CAST(cd.edge_diversity AS VARCHAR) || ' identifier types, high density'
+                        CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types, high density')
                     WHEN cd.edge_diversity >= 2 AND cd.match_density >= 0.5 THEN
-                        CAST(cd.edge_diversity AS VARCHAR) || ' identifier types, moderate density'
+                        CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types, moderate density')
                     WHEN cd.edge_diversity = 1 AND cd.match_density >= 0.8 THEN
                         'Single identifier type, high density'
                     WHEN cd.edge_diversity = 1 AND cd.match_density < 0.5 THEN
                         'Single identifier type, chain pattern'
                     ELSE
-                        CAST(cd.edge_diversity AS VARCHAR) || ' identifier type(s), ' ||
-                        CASE WHEN cd.match_density >= 0.5 THEN 'moderate' ELSE 'low' END || ' density'
+                        CONCAT(
+                            CAST(cd.edge_diversity AS {str_type}),
+                            ' identifier type(s), ',
+                            CASE WHEN cd.match_density >= 0.5 THEN 'moderate' ELSE 'low' END,
+                            ' density'
+                        )
                 END AS primary_reason
             FROM idr_work.cluster_density cd
-            CROSS JOIN idr_work.max_diversity md;
         """)
 
     def generate_output(self) -> None:
@@ -148,10 +145,9 @@ class OutputStage(BaseStage):
 
         # 1. Identify impacted clusters for confidence scoring
         self.adapter.execute("""
-            DROP TABLE IF EXISTS idr_work.impacted_resolved_ids;
-            CREATE TABLE idr_work.impacted_resolved_ids AS
+            CREATE OR REPLACE TABLE idr_work.impacted_resolved_ids AS
             SELECT DISTINCT label AS resolved_id
-            FROM idr_work.lp_labels;
+            FROM idr_work.lp_labels
         """)
 
         # 2. Update membership table
@@ -163,7 +159,7 @@ class OutputStage(BaseStage):
                     l.label AS resolved_id,
                     {current_ts} AS updated_at,
                     '{self.run_id}' AS run_id,
-                    fr.super_cluster_id
+                    COALESCE(fr.super_cluster_id, l.label) AS super_cluster_id
                 FROM idr_work.lp_labels l
                 LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
             """,
@@ -219,6 +215,30 @@ class OutputStage(BaseStage):
                 WHERE run_id != '{self.run_id}'
             """)
 
+        # 3c. Update persistent identifiers store (if table exists)
+        if self.adapter.table_exists("idr_out.identity_identifiers_current"):
+            self.upsert(
+                target_table="idr_out.identity_identifiers_current",
+                source_query=f"""
+                    SELECT DISTINCT
+                        entity_key,
+                        identifier_type,
+                        identifier_value_norm,
+                        is_hashed,
+                        {current_ts} AS updated_at,
+                        '{self.run_id}' AS run_id
+                    FROM idr_work.identifiers_all
+                """,
+                key_cols=["entity_key", "identifier_type"],
+                update_cols=["identifier_value_norm", "is_hashed", "updated_at", "run_id"],
+                insert_cols=["entity_key", "identifier_type", "identifier_value_norm", "is_hashed", "updated_at", "run_id"],
+            )
+            if self.config and self.config.run_mode == "FULL":
+                self.adapter.execute(f"""
+                    DELETE FROM idr_out.identity_identifiers_current
+                    WHERE run_id != '{self.run_id}'
+                """)
+
         # 4. Compute Confidence Scores
         self.compute_confidence_scores()
 
@@ -231,13 +251,13 @@ class OutputStage(BaseStage):
                     COUNT(*) AS cluster_size,
                     {current_ts} AS updated_at,
                     '{self.run_id}' AS run_id,
-                    fr.super_cluster_id,
+                    COALESCE(fr.super_cluster_id, l.label) AS super_cluster_id,
                     COALESCE(cc.confidence_score, 1.0) as confidence_score,
                     COALESCE(cc.primary_reason, 'Single-node cluster') as primary_reason
                 FROM idr_work.lp_labels l
                 LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
                 LEFT JOIN idr_work.cluster_confidence cc ON l.label = cc.resolved_id
-                GROUP BY label, fr.super_cluster_id, cc.confidence_score, cc.primary_reason
+                GROUP BY label, COALESCE(fr.super_cluster_id, l.label), cc.confidence_score, cc.primary_reason
             """,
             key_cols=["resolved_id"],
             update_cols=[
@@ -259,11 +279,19 @@ class OutputStage(BaseStage):
             ],
         )
 
-        # 5b. Cleanup stale clusters (FULL run only)
+        # 5b. Cleanup stale clusters (FULL run or merged phantom clusters in INCR run)
         if self.config and self.config.run_mode == "FULL":
             self.adapter.execute(f"""
                 DELETE FROM idr_out.identity_clusters_current
                 WHERE run_id != '{self.run_id}'
+            """)
+        else:
+            self.adapter.execute("""
+                DELETE FROM idr_out.identity_clusters_current
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM idr_out.identity_resolved_membership_current m
+                    WHERE m.resolved_id = idr_out.identity_clusters_current.resolved_id
+                )
             """)
 
         # 4. Update watermarks

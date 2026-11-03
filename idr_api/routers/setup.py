@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from idr_core.schema_manager import SchemaManager
 
-from ..dependencies import get_current_user, get_manager, get_user_key
+from ..dependencies import get_current_user, get_manager, get_user_key, require_write_access
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 manager = get_manager()
@@ -145,14 +145,16 @@ async def get_status(current_user: Dict[str, Any] = Depends(get_current_user)):
 class IDRConfig(BaseModel):
     sources: List[Dict[str, Any]] = []
     rules: Optional[List[Dict[str, Any]]] = None
+    fuzzy_rules: Optional[List[Dict[str, Any]]] = None
     survivorship: Optional[List[Dict[str, Any]]] = None
+    exclusions: Optional[List[Dict[str, Any]]] = None
     # Add other fields as loose dicts to avoid strict validation errors
     # if the stored JSON varies slightly
 
 
 @router.get("/config", response_model=IDRConfig)
 def get_current_config(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """Get the currently active configuration from the latest snapshot."""
+    """Get the currently active configuration from metadata tables or latest snapshot."""
     adapter, _ = _require_user_adapter(current_user)
 
     try:
@@ -163,7 +165,6 @@ def get_current_config(current_user: Dict[str, Any] = Depends(get_current_user))
         if adapter.table_exists("idr_meta.source_table"):
             active_config = sql_to_config(adapter)
             if active_config and len(active_config.get("sources", [])) > 0:
-                print("Loaded config from SQL Metadata tables.")
                 return IDRConfig(**active_config)
 
         # 2. Fallback: Fetch latest config snapshot
@@ -195,19 +196,27 @@ def get_current_config(current_user: Dict[str, Any] = Depends(get_current_user))
                     src["entity_key"] = src["entity_key_expr"]
                 if "attributes" not in src:
                     src["attributes"] = []
+                for ident in src.get("identifiers", []):
+                    if "expr" in ident and "column" not in ident:
+                        ident["column"] = ident["expr"]
+                for attr in src.get("attributes", []):
+                    if "expr" in attr and "column" not in attr:
+                        attr["column"] = attr["expr"]
 
-            config_dict = {"sources": sources_list}
+            config_dict: Dict[str, Any] = {"sources": sources_list}
 
             if row.get("rules_json"):
-                config_dict["rules"] = json.loads(row["rules_json"])
+                parsed_rules = json.loads(row["rules_json"])
+                if isinstance(parsed_rules, dict):
+                    config_dict["rules"] = parsed_rules.get("rules", [])
+                    config_dict["fuzzy_rules"] = parsed_rules.get("fuzzy_rules", [])
+                    config_dict["exclusions"] = parsed_rules.get("exclusions", [])
+                else:
+                    config_dict["rules"] = parsed_rules
 
             if row.get("mappings_json"):
-                # mappings might be survivorship or similar?
-                # Adjust based on how config_to_sql saves it.
-                pass
+                config_dict["survivorship"] = json.loads(row["mappings_json"])
 
-            # Actually, simply returning IDRConfig(sources=...) is often enough for the wizard to start
-            # But for full restoration, we want rules too.
             return IDRConfig(**config_dict)
 
         return IDRConfig(sources=[])
@@ -250,7 +259,7 @@ class ConfigSaveRequest(BaseModel):
 
 @router.post("/config/save")
 async def save_config(
-    request: ConfigSaveRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: ConfigSaveRequest, current_user: Dict[str, Any] = Depends(require_write_access)
 ):
     """Save configuration to idr_meta tables."""
     adapter, _ = _require_user_adapter(current_user)
@@ -265,16 +274,38 @@ async def save_config(
         schema_manager = SchemaManager(adapter)
         schema_manager.initialize(reset=False)
 
-        # 2. Generate SQL from config
+        # 2. Clear existing active metadata rows so deleted rules/sources don't linger
+        for meta_table in (
+            "idr_meta.identifier_mapping",
+            "idr_meta.entity_attribute_mapping",
+            "idr_meta.source_table",
+            "idr_meta.rule",
+            "idr_meta.fuzzy_rule",
+            "idr_meta.survivorship_rule",
+            "idr_meta.identifier_exclusion",
+        ):
+            try:
+                if adapter.table_exists(meta_table):
+                    adapter.execute(f"DELETE FROM {meta_table} WHERE 1=1")
+            except Exception:
+                pass
+
+        # 3. Generate SQL from config
         statements = config_to_sql(request.config, dialect=adapter.dialect)
 
-        # 3. Snapshot the config JSON so we can reload it later
+        # 4. Snapshot the config JSON so we can reload it later
         import hashlib
         import json
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         sources_json = json.dumps(request.config.get("sources", []))
-        rules_json = json.dumps(request.config.get("rules", []))
+        rules_json = json.dumps(
+            {
+                "rules": request.config.get("rules", []),
+                "fuzzy_rules": request.config.get("fuzzy_rules", []),
+                "exclusions": request.config.get("exclusions", []),
+            }
+        )
         mappings_json = json.dumps(
             request.config.get("survivorship", [])
         )  # Storing survivorship in mappings_json for now
@@ -287,7 +318,7 @@ async def save_config(
         # DuckDB handles INSERT OR IGNORE, others MERGE.
         # idr_out.config_snapshot has columns: config_hash, sources_json, rules_json, mappings_json, created_at
 
-        current_ts = datetime.utcnow().isoformat()
+        current_ts = datetime.now(timezone.utc).isoformat()
 
         # Simple INSERT, duplicates on hash don't strictly matter as we order by created_at DESC LIMIT 1
         # But let's try to be clean.
@@ -334,7 +365,9 @@ class RunRequest(BaseModel):
 
 
 @router.post("/run")
-async def run_pipeline(request: RunRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
+async def run_pipeline(
+    request: RunRequest, current_user: Dict[str, Any] = Depends(require_write_access)
+):
     """Trigger the IDR pipeline."""
     adapter, _ = _require_user_adapter(current_user)
 
@@ -354,20 +387,49 @@ async def run_pipeline(request: RunRequest, current_user: Dict[str, Any] = Depen
         result = runner.run(config)
         res_dict = asdict(result)
 
+        # Record Prometheus pipeline metrics
+        try:
+            from idr_api.main import (
+                CLUSTERS_IMPACTED_TOTAL,
+                EDGES_CREATED_TOTAL,
+                ENTITIES_PROCESSED_TOTAL,
+                LAST_RUN_DURATION_GAUGE,
+            )
+
+            if getattr(result, "entities_processed", 0):
+                ENTITIES_PROCESSED_TOTAL.inc(max(0, int(result.entities_processed)))
+            if getattr(result, "edges_created", 0):
+                EDGES_CREATED_TOTAL.inc(max(0, int(result.edges_created)))
+            if getattr(result, "clusters_impacted", 0):
+                CLUSTERS_IMPACTED_TOTAL.inc(max(0, int(result.clusters_impacted)))
+            if getattr(result, "duration_seconds", None) is not None:
+                LAST_RUN_DURATION_GAUGE.set(float(result.duration_seconds))
+        except Exception:
+            pass
+
         # If dry run, fetch summary metrics to return to UI
         if request.dry_run and result.status == "DRY_RUN_COMPLETE":
             try:
-                # Assuming idr_out.dry_run_summary table exists and has specific columns
-                # We can fetch a simple summary count for now
                 if adapter.table_exists("idr_out.dry_run_summary"):
                     summary_rows = adapter.query(
-                        f"SELECT COUNT(*) as proposed_changes FROM idr_out.dry_run_summary WHERE run_id = '{result.run_id}'"
+                        "SELECT new_entities, moved_entities, unchanged_entities, total_entities "
+                        f"FROM idr_out.dry_run_summary WHERE run_id = '{result.run_id}'"
                     )
-                    res_dict["dry_run_summary"] = {
-                        "proposed_changes": summary_rows[0]["proposed_changes"]
-                        if summary_rows
-                        else 0
-                    }
+                    if summary_rows:
+                        srow = summary_rows[0]
+                        new_cnt = int(srow.get("new_entities") or 0)
+                        moved_cnt = int(srow.get("moved_entities") or 0)
+                        unchanged_cnt = int(srow.get("unchanged_entities") or 0)
+                        total_cnt = int(srow.get("total_entities") or 0)
+                        res_dict["dry_run_summary"] = {
+                            "proposed_changes": new_cnt + moved_cnt,
+                            "new_entities": new_cnt,
+                            "moved_entities": moved_cnt,
+                            "unchanged_entities": unchanged_cnt,
+                            "total_entities": total_cnt,
+                        }
+                    else:
+                        res_dict["dry_run_summary"] = {"proposed_changes": 0}
             except Exception as e:
                 print(f"Failed to fetch dry run summary: {e}")
                 res_dict["dry_run_summary"] = {"error": str(e)}
@@ -415,9 +477,9 @@ async def get_fuzzy_templates(current_user: Dict[str, Any] = Depends(get_current
             {
                 "id": "jaro_winkler",
                 "label": "Jaro-Winkler Similarity",
-                "sql_template": "JAROWINKLER_SIMILARITY(<a>.{col}, <b>.{col})",
-                "default_threshold": 85,
-                "description": "Native Snowflake function (0-100 scale). UI normalizes to 0-1.",
+                "sql_template": "(JAROWINKLER_SIMILARITY(<a>.{col}, <b>.{col}) / 100.0)",
+                "default_threshold": 0.85,
+                "description": "Normalized Snowflake Jaro-Winkler (0.0-1.0 scale).",
             },
             {
                 "id": "edit_distance",
@@ -429,14 +491,20 @@ async def get_fuzzy_templates(current_user: Dict[str, Any] = Depends(get_current
         ]
     elif dialect == "bigquery":
         templates = [
-            # BigQuery needs JS UDFs usually, but we can use generic edit distance logic
             {
                 "id": "levenshtein_ratio",
                 "label": "Levenshtein Ratio (Native)",
                 "sql_template": "(1.0 - SAFE_DIVIDE(LEVENSHTEIN(<a>.{col}, <b>.{col}), GREATEST(LENGTH(<a>.{col}), LENGTH(<b>.{col}))))",
                 "default_threshold": 0.8,
                 "description": "Native BigQuery edit distance normalized.",
-            }
+            },
+            {
+                "id": "soundex",
+                "label": "Soundex Phonetic Match",
+                "sql_template": "CASE WHEN SOUNDEX(<a>.{col}) = SOUNDEX(<b>.{col}) THEN 1.0 ELSE 0.0 END",
+                "default_threshold": 1.0,
+                "description": "Phonetic similarity using BigQuery SOUNDEX.",
+            },
         ]
     elif dialect == "databricks":
         templates = [

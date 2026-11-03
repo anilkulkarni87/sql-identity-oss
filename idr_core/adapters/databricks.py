@@ -68,16 +68,37 @@ class DatabricksAdapter(IDRAdapter):
                     with self.conn_obj.cursor() as cur:
                         cur.execute(stmt)
 
+    @staticmethod
+    def _bind_spark_params(sql: str, params: Optional[List[Any]]) -> str:
+        """Bind positional '?' parameters safely for Spark SQL execution."""
+        if not params or "?" not in sql:
+            return sql
+        bound = sql
+        for p in params:
+            if p is None:
+                lit = "NULL"
+            elif isinstance(p, bool):
+                lit = "TRUE" if p else "FALSE"
+            elif isinstance(p, (int, float)):
+                lit = str(p)
+            else:
+                escaped = str(p).replace("'", "''")
+                lit = f"'{escaped}'"
+            bound = bound.replace("?", lit, 1)
+        return bound
+
     def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
         """Execute SQL and return results as list of dicts."""
         if self.is_spark:
-            # Spark SQL parameterization is tricky, usually relies on templates/binding
-            # We'll assume no params for Spark mode for now (common pattern)
-            df = self.conn_obj.sql(sql).toPandas()
+            bound_sql = self._bind_spark_params(sql, params)
+            df = self.conn_obj.sql(bound_sql).toPandas()
+            df.columns = [str(c).lower() for c in df.columns]
             return df.to_dict("records")
         else:
             with self.conn_obj.cursor() as cur:
-                if params:
+                if params and "?" in sql:
+                    cur.execute(self._bind_spark_params(sql, params))
+                elif params:
                     cur.execute(sql, params)
                 else:
                     cur.execute(sql)
@@ -91,13 +112,16 @@ class DatabricksAdapter(IDRAdapter):
     def query_one(self, sql: str, params: Optional[List[Any]] = None) -> Any:
         """Execute SQL and return first value of first row."""
         if self.is_spark:
-            result = self.conn_obj.sql(sql).collect()
+            bound_sql = self._bind_spark_params(sql, params)
+            result = self.conn_obj.sql(bound_sql).collect()
             if result and len(result) > 0:
                 return result[0][0]
             return None
         else:
             with self.conn_obj.cursor() as cur:
-                if params:
+                if params and "?" in sql:
+                    cur.execute(self._bind_spark_params(sql, params))
+                elif params:
                     cur.execute(sql, params)
                 else:
                     cur.execute(sql)

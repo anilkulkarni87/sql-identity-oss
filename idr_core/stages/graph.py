@@ -8,11 +8,30 @@ and fuzzy matching (probabilistic post-processing).
 import re
 from typing import Dict
 
-from .base import BaseStage
+from .base import BaseStage, StageContext
 
 
 class GraphStage(BaseStage):
     """Builds edges and resolves connected components via label propagation."""
+
+    def __init__(self, ctx: StageContext, config=None):
+        super().__init__(ctx)
+        self.config = config
+        self.run_mode = config.run_mode if config else "FULL"
+
+    def _swap_tables(self, base_table: str, new_table: str) -> None:
+        """Safely swap new_table into base_table across dialects (BigQuery lacks ALTER TABLE RENAME)."""
+        if self.adapter.dialect == "bigquery":
+            self.adapter.execute(f"CREATE OR REPLACE TABLE {base_table} AS SELECT * FROM {new_table}")
+            self.adapter.execute(f"DROP TABLE IF EXISTS {new_table}")
+        else:
+            self.adapter.execute(f"DROP TABLE IF EXISTS {base_table}")
+            rename_target = (
+                base_table
+                if self.adapter.dialect in ("snowflake", "databricks")
+                else base_table.split(".")[-1]
+            )
+            self.adapter.execute(f"ALTER TABLE {new_table} RENAME TO {rename_target}")
 
     def build_edges(self) -> int:
         """Build identity edges using anchor-based approach."""
@@ -111,25 +130,61 @@ class GraphStage(BaseStage):
 
     def label_propagation(self, max_iters: int) -> tuple:
         """Run label propagation to find connected components."""
-        # Initialize labels (each entity starts with itself as label)
-        # MUST include all entities from the current run, including singletons.
-        self.adapter.execute(f"""
-            CREATE OR REPLACE TABLE idr_work.lp_labels AS
-            SELECT DISTINCT entity_key, entity_key AS label
-            FROM idr_work.entities_delta
-            WHERE run_id = '{self.run_id}'
-        """)
-
         # Build undirected edge list
-        self.adapter.execute("""
+        # If running in incremental mode and historical edges exist,
+        # preserve existing edges between candidate entities in delta batch.
+        existing_edges_sql = ""
+        if self.run_mode == "INCR":
+            try:
+                edge_count = self.adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_edges_current")
+                if edge_count and edge_count > 0:
+                    existing_edges_sql = """
+                        UNION ALL
+                        SELECT e.left_entity_key AS src, e.right_entity_key AS dst
+                        FROM idr_out.identity_edges_current e
+                        JOIN idr_work.entities_delta ed1 ON e.left_entity_key = ed1.entity_key
+                        JOIN idr_work.entities_delta ed2 ON e.right_entity_key = ed2.entity_key
+                        UNION ALL
+                        SELECT e.right_entity_key AS src, e.left_entity_key AS dst
+                        FROM idr_out.identity_edges_current e
+                        JOIN idr_work.entities_delta ed1 ON e.left_entity_key = ed1.entity_key
+                        JOIN idr_work.entities_delta ed2 ON e.right_entity_key = ed2.entity_key
+                    """
+            except Exception:
+                pass
+
+        self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.lp_edges AS
             SELECT left_entity_key AS src, right_entity_key AS dst FROM idr_work.edges_new
             UNION ALL
             SELECT right_entity_key AS src, left_entity_key AS dst FROM idr_work.edges_new
+            {existing_edges_sql}
         """)
 
-        # Iterative label propagation
+        # Check if there are any edges to propagate
+        edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.lp_edges") or 0
+
+        if edge_cnt == 0:
+            # All entities are singletons; no edge propagation needed
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.lp_labels AS
+                SELECT DISTINCT entity_key, entity_key AS label
+                FROM idr_work.entities_delta
+                WHERE run_id = '{self.run_id}'
+            """)
+            clusters = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
+            return 0, clusters or 0
+
+        # Initialize labels for connected nodes only (skipping singletons during iterations)
+        self.adapter.execute("""
+            CREATE OR REPLACE TABLE idr_work.lp_labels AS
+            SELECT DISTINCT src AS entity_key, src AS label
+            FROM idr_work.lp_edges
+        """)
+
+        # Iterative label propagation on connected subgraph
         iterations = 0
+        changes = 0
         for i in range(max_iters):
             iterations = i + 1
 
@@ -154,20 +209,35 @@ class GraphStage(BaseStage):
                 SELECT COUNT(*) FROM idr_work.lp_labels prev
                 JOIN idr_work.lp_labels_new curr ON prev.entity_key = curr.entity_key
                 WHERE prev.label != curr.label
-            """)
+            """) or 0
 
-            # Swap tables
-            self.adapter.execute("DROP TABLE IF EXISTS idr_work.lp_labels")
-
-            # Snowflake requires fully qualified name to keep table in same schema (if not current),
-            # while DuckDB/Postgres require unqualified name for rename.
-            rename_target = (
-                "idr_work.lp_labels" if self.adapter.dialect == "snowflake" else "lp_labels"
-            )
-            self.adapter.execute(f"ALTER TABLE idr_work.lp_labels_new RENAME TO {rename_target}")
+            # Dialect-safe table swap (supports BigQuery CTAS & Drop and Snowflake/DuckDB rename)
+            self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_new")
 
             if changes == 0:
                 break
+
+        if changes > 0:
+            msg = (
+                f"Label propagation did not fully converge after {max_iters} iterations "
+                f"({changes} labels still changing). Consider increasing max_iters."
+            )
+            self._warnings.append(msg)
+            self.logger.warning(msg, extra={"run_id": self.run_id, "stage": "label_propagation"})
+
+        # Re-attach singletons (entities in current run with no incident edges)
+        self.adapter.execute(f"""
+            INSERT INTO idr_work.lp_labels (entity_key, label)
+            SELECT ed.entity_key, ed.entity_key AS label
+            FROM (
+                SELECT DISTINCT entity_key
+                FROM idr_work.entities_delta
+                WHERE run_id = '{self.run_id}'
+            ) ed
+            WHERE NOT EXISTS (
+                SELECT 1 FROM idr_work.lp_labels l WHERE l.entity_key = ed.entity_key
+            )
+        """)
 
         # Count unique clusters
         clusters = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
@@ -216,28 +286,70 @@ class GraphStage(BaseStage):
                 rule["threshold"], "float", f"fuzzy_rule[{rule_id}].threshold"
             )
 
-        # 0. Get known attributes
+        # 0. Get known attributes (include both mapped attributes and mapped identifier types)
         known_attrs = set(
             row["attribute_name"].lower()
             for row in self.adapter.query(
                 "SELECT DISTINCT attribute_name FROM idr_meta.entity_attribute_mapping"
             )
         )
+        try:
+            known_ids = set(
+                row["identifier_type"].lower()
+                for row in self.adapter.query(
+                    "SELECT DISTINCT identifier_type FROM idr_meta.identifier_mapping"
+                )
+            )
+            known_attrs |= known_ids
+        except Exception:
+            pass
 
-        # 1. Prepare Cluster Attributes (All distinct values per cluster)
-        self.adapter.execute("""
-            CREATE OR REPLACE TABLE idr_work.cluster_attributes AS
-            SELECT DISTINCT
-                l.label AS resolved_id,
-                LOWER(a.attribute_name) as attribute_name,
-                a.attribute_value
-            FROM idr_work.lp_labels l
-            JOIN idr_work.entity_attributes a ON l.entity_key = a.entity_key
-        """)
+        # 1. Prepare Cluster Attributes (All distinct values per cluster from attributes + identifiers)
+        has_attrs = True
+        has_ids = False
+        try:
+            has_attrs = bool(self.adapter.table_exists("idr_work.entity_attributes"))
+            has_ids = bool(self.adapter.table_exists("idr_work.identifiers_all"))
+        except Exception:
+            pass
+
+        attr_parts = []
+        if has_attrs:
+            attr_parts.append("""
+                SELECT DISTINCT
+                    l.label AS resolved_id,
+                    LOWER(a.attribute_name) as attribute_name,
+                    a.attribute_value
+                FROM idr_work.lp_labels l
+                JOIN idr_work.entity_attributes a ON l.entity_key = a.entity_key
+            """)
+        if has_ids:
+            attr_parts.append("""
+                SELECT DISTINCT
+                    l.label AS resolved_id,
+                    LOWER(i.identifier_type) as attribute_name,
+                    i.identifier_value_norm as attribute_value
+                FROM idr_work.lp_labels l
+                JOIN idr_work.identifiers_all i ON l.entity_key = i.entity_key
+            """)
+
+        if attr_parts:
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.cluster_attributes AS
+                {" UNION ".join(attr_parts)}
+            """)
+        else:
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.cluster_attributes (
+                    resolved_id {string_type},
+                    attribute_name {string_type},
+                    attribute_value {string_type}
+                )
+            """)
 
         # Initialize edges table
         self.adapter.execute(
-            f"CREATE OR REPLACE TABLE idr_work.fuzzy_edges (left_create_id {string_type}, right_create_id {string_type}, score {float_type})"
+            f"CREATE OR REPLACE TABLE idr_work.fuzzy_edges (left_id {string_type}, right_id {string_type}, score {float_type})"
         )
 
         for rule in rules:
@@ -367,10 +479,24 @@ class GraphStage(BaseStage):
             self.adapter.execute(f"DROP TABLE {profile_table}")
 
         # 3. Label Propagation for Super Clusters
+        fuzzy_edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.fuzzy_edges") or 0
+        if fuzzy_edge_cnt == 0:
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.fuzzy_results AS
+                SELECT DISTINCT resolved_id, resolved_id AS super_cluster_id
+                FROM idr_work.cluster_attributes
+            """)
+            count = self.adapter.query_one(
+                "SELECT COUNT(DISTINCT super_cluster_id) FROM idr_work.fuzzy_results"
+            )
+            return count or 0
+
+        # Initialize labels only for connected clusters in fuzzy_edges
         self.adapter.execute("""
             CREATE OR REPLACE TABLE idr_work.lp_fuzzy_labels AS
-            SELECT DISTINCT resolved_id AS entity_key, resolved_id AS label
-            FROM idr_work.cluster_attributes
+            SELECT DISTINCT left_id AS entity_key, left_id AS label FROM idr_work.fuzzy_edges
+            UNION
+            SELECT DISTINCT right_id AS entity_key, right_id AS label FROM idr_work.fuzzy_edges
         """)
 
         for i in range(max_iters):
@@ -380,13 +506,13 @@ class GraphStage(BaseStage):
                     SELECT l.entity_key, l.label AS candidate_label
                     FROM idr_work.lp_fuzzy_labels l
                     UNION ALL
-                    SELECT e.left_create_id AS entity_key, l2.label AS candidate_label
+                    SELECT e.left_id AS entity_key, l2.label AS candidate_label
                     FROM idr_work.fuzzy_edges e
-                    JOIN idr_work.lp_fuzzy_labels l2 ON e.right_create_id = l2.entity_key
+                    JOIN idr_work.lp_fuzzy_labels l2 ON e.right_id = l2.entity_key
                     UNION ALL
-                    SELECT e.right_create_id AS entity_key, l2.label AS candidate_label
+                    SELECT e.right_id AS entity_key, l2.label AS candidate_label
                     FROM idr_work.fuzzy_edges e
-                    JOIN idr_work.lp_fuzzy_labels l2 ON e.left_create_id = l2.entity_key
+                    JOIN idr_work.lp_fuzzy_labels l2 ON e.left_id = l2.entity_key
                 )
                 SELECT entity_key, MIN(candidate_label) AS label
                 FROM candidate_labels
@@ -397,19 +523,22 @@ class GraphStage(BaseStage):
                 SELECT COUNT(*) FROM idr_work.lp_fuzzy_labels prev
                 JOIN idr_work.lp_fuzzy_labels_new curr ON prev.entity_key = curr.entity_key
                 WHERE prev.label != curr.label
-             """)
+            """) or 0
 
-            self.adapter.execute("DROP TABLE idr_work.lp_fuzzy_labels")
-
-            rename_target = (
-                "idr_work.lp_fuzzy_labels" if dialect == "snowflake" else "lp_fuzzy_labels"
-            )
-            self.adapter.execute(
-                f"ALTER TABLE idr_work.lp_fuzzy_labels_new RENAME TO {rename_target}"
-            )
+            self._swap_tables("idr_work.lp_fuzzy_labels", "idr_work.lp_fuzzy_labels_new")
 
             if changes == 0:
                 break
+
+        # Re-attach clusters with no fuzzy links
+        self.adapter.execute("""
+            INSERT INTO idr_work.lp_fuzzy_labels (entity_key, label)
+            SELECT DISTINCT ca.resolved_id AS entity_key, ca.resolved_id AS label
+            FROM idr_work.cluster_attributes ca
+            WHERE NOT EXISTS (
+                SELECT 1 FROM idr_work.lp_fuzzy_labels l WHERE l.entity_key = ca.resolved_id
+            )
+        """)
 
         # 4. Finalize
         self.adapter.execute("""
@@ -418,5 +547,7 @@ class GraphStage(BaseStage):
             FROM idr_work.lp_fuzzy_labels
         """)
 
-        count = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_fuzzy_labels")
+        count = self.adapter.query_one(
+            "SELECT COUNT(DISTINCT super_cluster_id) FROM idr_work.fuzzy_results"
+        )
         return count or 0

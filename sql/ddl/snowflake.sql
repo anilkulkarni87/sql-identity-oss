@@ -268,3 +268,20 @@ CREATE TABLE IF NOT EXISTS idr_out.metrics_export (
   exported_at TIMESTAMP_NTZ,
   PRIMARY KEY (metric_id)
 );
+
+CREATE TABLE IF NOT EXISTS idr_out.identity_identifiers_current (
+  entity_key VARCHAR,
+  identifier_type VARCHAR,
+  identifier_value_norm VARCHAR,
+  is_hashed BOOLEAN,
+  updated_at TIMESTAMP_NTZ,
+  PRIMARY KEY (entity_key, identifier_type, identifier_value_norm)
+);
+
+CREATE TABLE IF NOT EXISTS idr_out.config_snapshot (
+  config_hash VARCHAR PRIMARY KEY,
+  sources_json VARCHAR,
+  rules_json VARCHAR,
+  mappings_json VARCHAR,
+  created_at TIMESTAMP_NTZ
+);

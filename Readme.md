@@ -142,6 +142,20 @@ Pre-built configurations for common use cases:
 | [Financial](examples/templates/financial/) | Account linking | account_id, email, SSN |
 | [B2B SaaS](examples/templates/b2b_saas/) | Lead deduplication | email, domain, company_name |
 
+## 🧪 Testing (Local & Cloud)
+
+```bash
+# 1. Run the full local & multi-dialect test suite (260+ tests)
+pytest
+
+# 2. Run opt-in live cloud smoke tests (when cloud credentials are set)
+IDR_LIVE_SNOWFLAKE=1 SNOWFLAKE_ACCOUNT=... SNOWFLAKE_USER=... SNOWFLAKE_PASSWORD=... SNOWFLAKE_WAREHOUSE=... SNOWFLAKE_DATABASE=... pytest tests/test_cloud_dialects_live.py
+IDR_LIVE_BIGQUERY=1 IDR_BQ_PROJECT=my-gcp-project pytest tests/test_cloud_dialects_live.py
+IDR_LIVE_DATABRICKS=1 DATABRICKS_HOST=... DATABRICKS_HTTP_PATH=... DATABRICKS_TOKEN=... pytest tests/test_cloud_dialects_live.py
+```
+
+See [`CONTEXT_GRAPH.md`](CONTEXT_GRAPH.md) for the complete architecture and cross-database context graph.
+
 ## 🤝 Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

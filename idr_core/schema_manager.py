@@ -60,6 +60,62 @@ class SchemaManager:
         for schema in schemas:
             self.adapter.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
+    def _get_sql_type(self, col_type: ColumnType) -> str:
+        """Resolve database-specific SQL type for a ColumnType."""
+        return self.resolve_sql_type(self.dialect_name, self.dialect_config, col_type)
+
+    @staticmethod
+    def resolve_sql_type(dialect_name: str, dialect_config: dict, col_type: ColumnType) -> str:
+        """Resolve database-specific SQL type for a ColumnType without requiring an adapter."""
+        if col_type == ColumnType.DOUBLE:
+            return "FLOAT64" if dialect_name == "bigquery" else "DOUBLE"
+        elif col_type == ColumnType.BOOL:
+            return "BOOL" if dialect_name == "bigquery" else "BOOLEAN"
+        elif col_type == ColumnType.INT:
+            return dialect_config.get("int_type", "INTEGER")
+        elif col_type == ColumnType.TIMESTAMP:
+            return dialect_config.get("timestamp_type", "TIMESTAMP")
+        elif col_type == ColumnType.STRING:
+            return dialect_config.get("string_type", "VARCHAR")
+        return dialect_config.get(col_type.value, "VARCHAR")
+
+    @classmethod
+    def generate_ddl(cls, dialect_name: str) -> str:
+        """Generate canonical multi-statement DDL script for a target dialect from SYSTEM_TABLES."""
+        dialect_config = get_dialect_config(dialect_name)
+        lines = [
+            f"-- Canonical {dialect_name.upper()} DDL generated from idr_core.schema_defs.SYSTEM_TABLES",
+            "CREATE SCHEMA IF NOT EXISTS idr_meta;",
+            "CREATE SCHEMA IF NOT EXISTS idr_work;",
+            "CREATE SCHEMA IF NOT EXISTS idr_out;",
+            "",
+        ]
+        for table_def in SYSTEM_TABLES:
+            col_defs = []
+            pks = []
+            for col in table_def.columns:
+                sql_type = cls.resolve_sql_type(dialect_name, dialect_config, col.type)
+                col_def = f"    {col.name} {sql_type}"
+                # Databricks Delta Lake requires the table feature 'allowColumnDefaults' to be enabled
+                # for column DEFAULT clauses. Omitting DEFAULT on Databricks ensures universal compatibility.
+                if col.default in ("TRUE", "FALSE") and dialect_name != "databricks":
+                    key = "bool_true" if col.default == "TRUE" else "bool_false"
+                    col_def += f" DEFAULT {dialect_config.get(key, col.default)}"
+                col_defs.append(col_def)
+                if col.is_pk:
+                    pks.append(col.name)
+
+            if pks:
+                if dialect_name in ("bigquery", "databricks"):
+                    col_defs.append(f"    PRIMARY KEY ({', '.join(pks)}) NOT ENFORCED")
+                else:
+                    col_defs.append(f"    PRIMARY KEY ({', '.join(pks)})")
+
+            lines.append(f"CREATE TABLE IF NOT EXISTS {table_def.fqn} (")
+            lines.append(",\n".join(col_defs))
+            lines.append(");\n")
+        return "\n".join(lines)
+
     def _create_table(self, table_def: TableDef) -> None:
         """Generate and execute CREATE TABLE DDL, or ALTER TABLE if columns missing."""
 
@@ -72,13 +128,12 @@ class SchemaManager:
             pks = []
 
             for col in table_def.columns:
-                if col.type == ColumnType.DOUBLE:
-                    sql_type = "DOUBLE"
-                else:
-                    sql_type = self.dialect_config.get(col.type.value, "VARCHAR")
+                sql_type = self._get_sql_type(col.type)
 
                 col_def = f"{col.name} {sql_type}"
-                if col.default:
+                # Databricks Delta Lake requires the table feature 'allowColumnDefaults' to be enabled
+                # for column DEFAULT clauses. Omitting DEFAULT on Databricks ensures universal compatibility.
+                if col.default and self.dialect_name != "databricks":
                     if col.default == "TRUE":
                         val = self.dialect_config.get("bool_true", "TRUE")
                         col_def += f" DEFAULT {val}"
@@ -92,7 +147,10 @@ class SchemaManager:
 
             pk_clause = ""
             if pks:
-                pk_clause = f", PRIMARY KEY ({', '.join(pks)})"
+                if self.dialect_name in ("bigquery", "databricks"):
+                    pk_clause = f", PRIMARY KEY ({', '.join(pks)}) NOT ENFORCED"
+                else:
+                    pk_clause = f", PRIMARY KEY ({', '.join(pks)})"
 
             full_ddl = f"""
                 CREATE TABLE IF NOT EXISTS {table_def.fqn} (
@@ -116,11 +174,7 @@ class SchemaManager:
             for col in table_def.columns:
                 if col.name.lower() not in existing_cols:
                     print(f"Schema Evolution: Adding column {col.name} to {table_def.fqn}")
-
-                    if col.type == ColumnType.DOUBLE:
-                        sql_type = "DOUBLE"
-                    else:
-                        sql_type = self.dialect_config.get(col.type.value, "VARCHAR")
+                    sql_type = self._get_sql_type(col.type)
 
                     # ALTER TABLE ADD COLUMN
                     try:

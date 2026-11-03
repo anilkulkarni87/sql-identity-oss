@@ -16,7 +16,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from .adapters.base import IDRAdapter, get_dialect_config
@@ -126,7 +126,7 @@ class IDRRunner:
         self.config = config
         prefix = "dry_" if config.dry_run else ""
         self.run_id = f"{prefix}run_{uuid.uuid4().hex[:12]}"
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc).replace(tzinfo=None)
         self._warnings = []
         self._stage_metrics = []
 
@@ -153,7 +153,7 @@ class IDRRunner:
         # Initialize stages
         preflight = PreflightStage(ctx)
         extraction = ExtractionStage(ctx)
-        graph = GraphStage(ctx)
+        graph = GraphStage(ctx, config=config)
         output = OutputStage(ctx, config=config)
 
         # Check for optional evidence generation
@@ -189,7 +189,7 @@ class IDRRunner:
                 "Extracting identifiers...",
                 extra={"run_id": self.run_id, "stage": "identifier_extraction"},
             )
-            identifiers = extraction.extract_identifiers()
+            identifiers = extraction.extract_identifiers(config.run_mode)
             self._end_stage("identifier_extraction", identifiers)
 
             # 3b. Attribute extraction
@@ -290,13 +290,13 @@ class IDRRunner:
             f"Starting stage: {stage_name}",
             extra={"run_id": self.run_id, "stage": stage_name, "event": "stage_start"},
         )
-        self._stage_metrics.append(StageMetric(stage_name=stage_name, started_at=datetime.utcnow()))
+        self._stage_metrics.append(StageMetric(stage_name=stage_name, started_at=datetime.now(timezone.utc).replace(tzinfo=None)))
 
     def _end_stage(self, stage_name: str, rows_affected: int = 0) -> None:
         """Record end of a processing stage."""
         for metric in reversed(self._stage_metrics):
             if metric.stage_name == stage_name and metric.ended_at is None:
-                metric.ended_at = datetime.utcnow()
+                metric.ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 metric.rows_affected = rows_affected
 
                 self.logger.info(
@@ -358,26 +358,16 @@ class IDRRunner:
             mappings_json = json.dumps(mappings or [], default=str).replace("'", "''")
 
             try:
-                # Use INSERT OR IGNORE for DuckDB, INSERT IGNORE for others
-                if self.adapter.dialect == "duckdb":
+                exists = self.adapter.query_one(
+                    f"SELECT 1 FROM idr_out.config_snapshot WHERE config_hash = '{config_hash}'"
+                )
+                if not exists:
                     self.adapter.execute(f"""
-                        INSERT OR IGNORE INTO idr_out.config_snapshot
+                        INSERT INTO idr_out.config_snapshot
                         (config_hash, sources_json, rules_json, mappings_json, created_at)
                         VALUES ('{config_hash}', '{sources_json}', '{rules_json}', '{mappings_json}',
                                 {self._dialect["current_timestamp"]})
                     """)
-                else:
-                    # For BigQuery/Snowflake, check if exists first
-                    exists = self.adapter.query_one(
-                        f"SELECT 1 FROM idr_out.config_snapshot WHERE config_hash = '{config_hash}'"
-                    )
-                    if not exists:
-                        self.adapter.execute(f"""
-                            INSERT INTO idr_out.config_snapshot
-                            (config_hash, sources_json, rules_json, mappings_json, created_at)
-                            VALUES ('{config_hash}', '{sources_json}', '{rules_json}', '{mappings_json}',
-                                    {self._dialect["current_timestamp"]})
-                        """)
             except Exception:
                 pass  # Snapshot storage is best-effort
 
@@ -398,7 +388,7 @@ class IDRRunner:
         error: Optional[str] = None,
     ) -> RunResult:
         """Record run completion and return result."""
-        duration = (datetime.utcnow() - start_time).total_seconds()
+        duration = (datetime.now(timezone.utc).replace(tzinfo=None) - start_time).total_seconds()
 
         # Escape strings for SQL
         status_safe = status.replace("'", "''")
@@ -420,18 +410,34 @@ class IDRRunner:
 
         # Update run history
         error_clause = f", error_message = '{error_safe}'" if error else ""
+        warnings_json = json.dumps(self._warnings or []).replace("'", "''")
 
-        self.adapter.execute(f"""
-            UPDATE idr_out.run_history SET
-                status = '{status_safe}',
-                duration_seconds = {int(duration)},
-                entities_processed = {entities},
-                edges_created = {edges},
-                clusters_impacted = {clusters},
-                lp_iterations = {iterations}
-                {error_clause}
-            WHERE run_id = '{self.run_id}'
-        """)
+        try:
+            self.adapter.execute(f"""
+                UPDATE idr_out.run_history SET
+                    status = '{status_safe}',
+                    duration_seconds = {int(duration)},
+                    entities_processed = {entities},
+                    edges_created = {edges},
+                    clusters_impacted = {clusters},
+                    lp_iterations = {iterations},
+                    warnings = '{warnings_json}'
+                    {error_clause}
+                WHERE run_id = '{self.run_id}'
+            """)
+        except Exception:
+            # Fallback if 'warnings' column does not exist on older schema
+            self.adapter.execute(f"""
+                UPDATE idr_out.run_history SET
+                    status = '{status_safe}',
+                    duration_seconds = {int(duration)},
+                    entities_processed = {entities},
+                    edges_created = {edges},
+                    clusters_impacted = {clusters},
+                    lp_iterations = {iterations}
+                    {error_clause}
+                WHERE run_id = '{self.run_id}'
+            """)
 
         # Record stage metrics
         for idx, metric in enumerate(self._stage_metrics):

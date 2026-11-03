@@ -4,7 +4,7 @@ Pydantic models for the IDR API.
 Shared across all router modules.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -48,9 +48,9 @@ class MetricsSummary(BaseModel):
     total_entities: int
     total_edges: int
     avg_confidence: float
-    last_run_id: Optional[str]
-    last_run_duration: Optional[int]
-    last_run_started_at: Optional[str]
+    last_run_id: Optional[str] = None
+    last_run_duration: Optional[int] = None
+    last_run_started_at: Optional[str] = None
 
 
 class ClusterDistribution(BaseModel):
@@ -60,7 +60,7 @@ class ClusterDistribution(BaseModel):
 
 class RuleStats(BaseModel):
     rule_id: str
-    identifier_type: Optional[str]
+    identifier_type: Optional[str] = None
     edges_created: int
     percentage: float
 
@@ -68,8 +68,8 @@ class RuleStats(BaseModel):
 class Alert(BaseModel):
     severity: str
     message: str
-    count: Optional[int]
-    timestamp: Optional[str]
+    count: Optional[int] = None
+    timestamp: Optional[str] = None
 
 
 # ============================================================
@@ -80,7 +80,7 @@ class Alert(BaseModel):
 class ClusterSummary(BaseModel):
     resolved_id: str
     cluster_size: int
-    confidence_score: Optional[float]
+    confidence_score: Optional[float] = None
 
 
 class EntityInfo(BaseModel):
@@ -100,9 +100,11 @@ class EdgeInfo(BaseModel):
 class ClusterDetail(BaseModel):
     resolved_id: str
     cluster_size: int
-    confidence_score: Optional[float]
+    confidence_score: Optional[float] = None
+    super_cluster_id: Optional[str] = None
     entities: List[EntityInfo]
     edges: List[EdgeInfo]
+    golden_profile: Optional[Dict[str, Any]] = None
 
 
 # ============================================================
@@ -119,6 +121,22 @@ class RunSummary(BaseModel):
     entities_processed: Optional[int] = 0
     edges_created: Optional[int] = 0
     clusters_impacted: Optional[int] = 0
+
+
+class StageMetricInfo(BaseModel):
+    stage_name: str
+    stage_order: int
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    duration_seconds: Optional[int] = 0
+    rows_out: Optional[int] = 0
+
+
+class RunDetail(RunSummary):
+    lp_iterations: Optional[int] = 0
+    error_message: Optional[str] = None
+    warnings: List[str] = []
+    stages: List[StageMetricInfo] = []
 
 
 # ============================================================

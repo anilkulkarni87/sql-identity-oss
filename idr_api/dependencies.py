@@ -6,11 +6,28 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
 
+try:
+    from jose import JWTError, jwt
+except ImportError:
+
+    class JWTError(Exception):  # type: ignore[no-redef]
+        """Fallback JWTError when python-jose is not installed."""
+
+    class _JwtFallback:
+        @staticmethod
+        def get_unverified_header(_token: str) -> Dict[str, Any]:
+            raise RuntimeError("python-jose is required for OIDC JWT verification")
+
+        @staticmethod
+        def decode(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+            raise RuntimeError("python-jose is required for OIDC JWT verification")
+
+    jwt = _JwtFallback()  # type: ignore[assignment]
+
+from idr_api.session_store import ConnectionSessionStore, load_connection_session_store
 from idr_core.adapters.base import IDRAdapter
 from idr_core.runner import IDRRunner
-from idr_api.session_store import ConnectionSessionStore, load_connection_session_store
 
 # --- Configuration ---
 # Allow overriding these via env vars
@@ -22,6 +39,11 @@ OIDC_JWKS_HTTP_TIMEOUT_SECONDS = float(os.getenv("IDR_AUTH_JWKS_HTTP_TIMEOUT_SEC
 ALLOW_INSECURE_DEV_AUTH = (
     os.getenv("IDR_ALLOW_INSECURE_DEV_AUTH", "false").strip().lower() in {"1", "true", "yes", "on"}
 )
+ENFORCE_RBAC = (
+    os.getenv("IDR_ENFORCE_RBAC", "false").strip().lower() in {"1", "true", "yes", "on"}
+)
+WRITE_ROLES = {"admin", "operator", "idr-admin", "idr-operator", "write"}
+READ_ONLY_ROLES = {"viewer", "read_only", "readonly", "idr-viewer"}
 CONNECTION_IDLE_TTL_SECONDS = int(os.getenv("IDR_CONNECTION_IDLE_TTL_SECONDS", "3600"))
 DEFAULT_SCOPE = "__default__"
 
@@ -240,6 +262,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         if not payload.get("sub"):
             raise JWTError("Missing subject claim")
 
+        # Normalize roles from top-level 'roles' or Keycloak 'realm_access.roles'
+        if "roles" not in payload:
+            realm_roles = (payload.get("realm_access") or {}).get("roles")
+            if isinstance(realm_roles, list):
+                payload["roles"] = realm_roles
+
         return payload
 
     except HTTPException:
@@ -255,6 +283,34 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             detail=f"Could not validate credentials: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def extract_user_roles(user: Dict[str, Any]) -> set[str]:
+    """Extract normalized lowercase role names from user claims."""
+    roles = user.get("roles")
+    if not isinstance(roles, list):
+        roles = (user.get("realm_access") or {}).get("roles") or []
+    return {str(r).strip().lower() for r in roles if r}
+
+
+def require_write_access(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Verify the authenticated user has write/operator privileges.
+    Enforced when IDR_ENFORCE_RBAC=true or when the user's roles explicitly
+    indicate read-only/viewer access without any write role.
+    """
+    roles = extract_user_roles(current_user)
+    has_write = bool(roles & WRITE_ROLES)
+    is_explicit_viewer = bool(roles & READ_ONLY_ROLES) and not has_write
+
+    if is_explicit_viewer or (ENFORCE_RBAC and not has_write):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions: admin or operator role required",
+        )
+    return current_user
 
 
 def get_adapter(current_user: Dict[str, Any] = Depends(get_current_user)) -> IDRAdapter:

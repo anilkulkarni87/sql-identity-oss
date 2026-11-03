@@ -5,6 +5,8 @@ Handles entity extraction from source tables, identifier extraction
 and canonicalization, and attribute extraction for fuzzy matching.
 """
 
+import os
+
 from ..config import build_where_clause
 from .base import BaseStage
 
@@ -97,7 +99,7 @@ class ExtractionStage(BaseStage):
         count = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.entities_delta")
         return count or 0
 
-    def extract_identifiers(self) -> int:
+    def extract_identifiers(self, run_mode: str = "FULL") -> int:
         """Extract and canonicalize identifiers from entities."""
         # Get identifier mappings
         mappings = self.adapter.query("""
@@ -109,14 +111,16 @@ class ExtractionStage(BaseStage):
             WHERE r.is_active = TRUE
         """)
 
+        str_type = self._dialect["string_type"]
+
         if not mappings:
             self._warnings.append("No identifier mappings found")
             # Create empty table to ensure downstream steps don't fail
             self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.identifiers_all (
-                    entity_key {self._dialect["string_type"]},
-                    identifier_type {self._dialect["string_type"]},
-                    identifier_value_norm {self._dialect["string_type"]},
+                    entity_key {str_type},
+                    identifier_type {str_type},
+                    identifier_value_norm {str_type},
                     max_group_size {self._dialect["int_type"]}
                 )
             """)
@@ -142,28 +146,57 @@ class ExtractionStage(BaseStage):
                 m["canonicalize"], "enum", "rule.canonicalize"
             )
 
+            # Raw trimmed expression
+            raw_expr = f"TRIM(CAST(({value_expr}) AS {str_type}))"
+
             # Apply canonicalization
             if canonicalize == "LOWERCASE":
-                value_expr = f"LOWER({value_expr})"
+                norm_expr = f"LOWER({raw_expr})"
             elif canonicalize == "UPPERCASE":
-                value_expr = f"UPPER({value_expr})"
+                norm_expr = f"UPPER({raw_expr})"
+            else:
+                norm_expr = raw_expr
+
+            # Apply PII hashing if enabled
+            is_hashed = bool(m.get("is_hashed", False))
+            hash_pii = is_hashed or os.environ.get("IDR_HASH_PII", "").lower() in ("1", "true", "yes")
+            if hash_pii:
+                if "sha256" in self._dialect:
+                    norm_expr = self._dialect["sha256"](norm_expr)
+                elif "md5" in self._dialect:
+                    norm_expr = self._dialect["md5"](norm_expr)
+
+            is_hashed_literal = (
+                self._dialect.get("bool_true", "TRUE")
+                if hash_pii
+                else self._dialect.get("bool_false", "FALSE")
+            )
+
+            # Robust null, empty string, and sentinel check
+            where_condition = f"""
+                ({value_expr}) IS NOT NULL
+                AND LENGTH({raw_expr}) > 0
+                AND LOWER({raw_expr}) NOT IN ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', '0', 'default', '')
+            """
 
             union_parts.append(f"""
                 SELECT
                     e.entity_key,
                     '{identifier_type}' AS identifier_type,
-                    {value_expr} AS identifier_value_norm,
+                    {norm_expr} AS identifier_value_norm,
+                    {is_hashed_literal} AS is_hashed,
                     {max_group_size} AS max_group_size
                 FROM idr_work.entities_delta e
                 JOIN {self.get_source_fqn(table_id)} src
-                    ON e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {self._dialect["string_type"]}))
-                WHERE {value_expr} IS NOT NULL
+                    ON e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {str_type}))
+                WHERE {where_condition}
             """)
 
         union_sql = " UNION ALL ".join(union_parts)
 
+        # Stage 1: Store extracted delta identifiers
         self.adapter.execute(f"""
-            CREATE OR REPLACE TABLE idr_work.identifiers_all AS
+            CREATE OR REPLACE TABLE idr_work.identifiers_delta AS
             {union_sql}
         """)
 
@@ -171,18 +204,89 @@ class ExtractionStage(BaseStage):
         try:
             if self.adapter.table_exists("idr_meta.identifier_exclusion"):
                 self.adapter.execute("""
-                    DELETE FROM idr_work.identifiers_all
+                    DELETE FROM idr_work.identifiers_delta
                     WHERE EXISTS (
                         SELECT 1 FROM idr_meta.identifier_exclusion ex
-                        WHERE idr_work.identifiers_all.identifier_type = ex.identifier_type
+                        WHERE idr_work.identifiers_delta.identifier_type = ex.identifier_type
                         AND (
-                            (ex.match_type = 'EXACT' AND idr_work.identifiers_all.identifier_value_norm = ex.identifier_value_pattern)
-                            OR (ex.match_type = 'LIKE' AND idr_work.identifiers_all.identifier_value_norm LIKE ex.identifier_value_pattern)
+                            (ex.match_type = 'EXACT' AND idr_work.identifiers_delta.identifier_value_norm = ex.identifier_value_pattern)
+                            OR (ex.match_type = 'LIKE' AND idr_work.identifiers_delta.identifier_value_norm LIKE ex.identifier_value_pattern)
                         )
                     )
                 """)
         except Exception:
             pass  # Exclusion table may not exist - skip silently
+
+        # Stage 2: Candidate expansion for incremental processing
+        # In INCR mode, find existing entities in idr_out sharing any delta identifiers,
+        # pull in their cluster co-members, and union them into identifiers_all.
+        if run_mode == "INCR" and self.adapter.table_exists("idr_out.identity_identifiers_current"):
+            try:
+                # Step 2a: Find matching historical entities sharing any delta identifier
+                self.adapter.execute("""
+                    CREATE OR REPLACE TABLE idr_work.matched_hist_entities AS
+                    SELECT DISTINCT h.entity_key
+                    FROM idr_work.identifiers_delta d
+                    JOIN idr_out.identity_identifiers_current h
+                      ON d.identifier_type = h.identifier_type
+                     AND d.identifier_value_norm = h.identifier_value_norm
+                """)
+
+                # Step 2b: Expand to all cluster co-members of the matched entities
+                if self.adapter.table_exists("idr_out.identity_resolved_membership_current"):
+                    self.adapter.execute("""
+                        CREATE OR REPLACE TABLE idr_work.expanded_cluster_entities AS
+                        SELECT DISTINCT m2.entity_key
+                        FROM idr_work.matched_hist_entities e
+                        JOIN idr_out.identity_resolved_membership_current m
+                          ON e.entity_key = m.entity_key
+                        JOIN idr_out.identity_resolved_membership_current m2
+                          ON m.resolved_id = m2.resolved_id
+                    """)
+                else:
+                    self.adapter.execute("""
+                        CREATE OR REPLACE TABLE idr_work.expanded_cluster_entities AS
+                        SELECT entity_key FROM idr_work.matched_hist_entities
+                    """)
+
+                # Step 2c: Add expanded historical entities to entities_delta for label propagation
+                # (watermark_value is NULL to prevent artificially advancing source table watermarks)
+                split_expr = self._dialect["split_part"]("e.entity_key", ":", 1)
+                self.adapter.execute(f"""
+                    INSERT INTO idr_work.entities_delta (run_id, table_id, entity_key, watermark_value)
+                    SELECT
+                        '{self.run_id}' AS run_id,
+                        {split_expr} AS table_id,
+                        e.entity_key,
+                        NULL AS watermark_value
+                    FROM idr_work.expanded_cluster_entities e
+                    WHERE e.entity_key NOT IN (
+                        SELECT entity_key FROM idr_work.entities_delta WHERE run_id = '{self.run_id}'
+                    )
+                """)
+
+                # Step 2d: Combine delta identifiers with historical cluster identifiers
+                self.adapter.execute("""
+                    CREATE OR REPLACE TABLE idr_work.identifiers_all AS
+                    SELECT entity_key, identifier_type, identifier_value_norm, is_hashed, max_group_size
+                    FROM idr_work.identifiers_delta
+                    UNION
+                    SELECT h.entity_key, h.identifier_type, h.identifier_value_norm, h.is_hashed, 10000 AS max_group_size
+                    FROM idr_work.expanded_cluster_entities exp
+                    JOIN idr_out.identity_identifiers_current h
+                      ON exp.entity_key = h.entity_key
+                """)
+            except Exception as e:
+                self.logger.warning(f"Candidate expansion failed, falling back to delta: {e}")
+                self.adapter.execute("""
+                    CREATE OR REPLACE TABLE idr_work.identifiers_all AS
+                    SELECT * FROM idr_work.identifiers_delta
+                """)
+        else:
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.identifiers_all AS
+                SELECT * FROM idr_work.identifiers_delta
+            """)
 
         count = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.identifiers_all")
         return count or 0

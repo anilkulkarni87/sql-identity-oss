@@ -58,16 +58,17 @@
 
         {{ log("LP iteration " ~ (i+1) ~ ": " ~ delta ~ " changes", info=True) }}
 
-        {# Swap tables #}
-        {% set swap %}
-            drop table if exists {{ target.schema }}_idr_work.lp_labels;
-            {% if target.type == 'bigquery' %}
-            alter table {{ target.schema }}_idr_work.lp_labels_next rename to lp_labels
-            {% else %}
-            alter table {{ target.schema }}_idr_work.lp_labels_next rename to {{ target.schema }}_idr_work.lp_labels
-            {% endif %}
+        {# Swap tables using dialect-safe single-statement CTAS + DROP #}
+        {% set swap_copy %}
+            create or replace table {{ target.schema }}_idr_work.lp_labels as
+            select * from {{ target.schema }}_idr_work.lp_labels_next
         {% endset %}
-        {% do run_query(swap) %}
+        {% do run_query(swap_copy) %}
+
+        {% set swap_drop %}
+            drop table if exists {{ target.schema }}_idr_work.lp_labels_next
+        {% endset %}
+        {% do run_query(swap_drop) %}
 
         {% if delta == 0 %}
             {{ log("LP: Converged after " ~ (i+1) ~ " iterations", info=True) }}

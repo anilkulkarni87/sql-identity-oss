@@ -105,38 +105,84 @@ export default function Explorer() {
 
             {/* Graph Visualization */}
             {selectedCluster && clusterDetail && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Graph */}
-                    <div className="lg:col-span-2 bg-gray-800 rounded-xl p-4 h-[500px]">
-                        <h3 className="text-lg font-semibold mb-4">
-                            Cluster: {selectedCluster.slice(0, 20)}...
-                        </h3>
-                        <IdentityGraph
-                            elements={graphElements}
-                        />
-                    </div>
-
-                    {/* Edge Details */}
-                    <div className="bg-gray-800 rounded-xl p-4">
-                        <h3 className="text-lg font-semibold mb-4">Edge Details</h3>
-                        <div className="space-y-3 max-h-[450px] overflow-y-auto">
-                            {clusterDetail.edges.map((edge, i) => (
-                                <div key={i} className="p-3 bg-gray-700 rounded-lg text-sm">
-                                    <div className="flex justify-between text-gray-400">
-                                        <span>{edge.left_entity_key.slice(0, 10)}...</span>
-                                        <span>↔</span>
-                                        <span>{edge.right_entity_key.slice(0, 10)}...</span>
-                                    </div>
-                                    <div className="mt-2">
-                                        <span className="px-2 py-1 bg-blue-600/30 text-blue-300 rounded text-xs">
-                                            {edge.identifier_type}
+                <div className="space-y-6">
+                    {/* Golden Profile Banner */}
+                    {clusterDetail.golden_profile && Object.keys(clusterDetail.golden_profile).length > 0 && (
+                        <div className="bg-gray-800 rounded-xl p-4 border border-blue-500/30">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-3">
+                                    <h3 className="text-lg font-semibold text-blue-400">
+                                        Unified Golden Profile
+                                    </h3>
+                                    {clusterDetail.super_cluster_id && (
+                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-purple-900/40 text-purple-300 border border-purple-700/60">
+                                            Super Cluster: {clusterDetail.super_cluster_id.slice(0, 16)}
                                         </span>
-                                        <p className="mt-1 font-mono text-xs text-gray-300 truncate">
-                                            {edge.identifier_value}
-                                        </p>
-                                    </div>
+                                    )}
                                 </div>
-                            ))}
+                                <span className="text-xs font-mono text-gray-400">
+                                    {clusterDetail.resolved_id}
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                {Object.entries(clusterDetail.golden_profile).map(([key, val]) => (
+                                    <div key={key} className="bg-gray-900/60 rounded-lg p-3 border border-gray-700">
+                                        <span className="text-xs uppercase tracking-wider text-gray-400 block">
+                                            {key}
+                                        </span>
+                                        <span className="text-sm font-medium text-gray-100 mt-1 block truncate" title={String(val ?? '—')}>
+                                            {val !== null && val !== undefined && val !== '' ? String(val) : '—'}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Graph */}
+                        <div className="lg:col-span-2 bg-gray-800 rounded-xl p-4 h-[500px]">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-semibold">
+                                    Cluster: {selectedCluster.slice(0, 20)}...
+                                </h3>
+                                {clusterDetail.super_cluster_id && (
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-purple-900/40 text-purple-300 border border-purple-700/60">
+                                        Fuzzy Super-Cluster: {clusterDetail.super_cluster_id.slice(0, 16)}
+                                    </span>
+                                )}
+                            </div>
+                            <IdentityGraph
+                                elements={graphElements}
+                            />
+                        </div>
+
+                        {/* Edge Details */}
+                        <div className="bg-gray-800 rounded-xl p-4">
+                            <h3 className="text-lg font-semibold mb-4">Edge Details ({clusterDetail.edges.length})</h3>
+                            <div className="space-y-3 max-h-[450px] overflow-y-auto">
+                                {clusterDetail.edges.length === 0 ? (
+                                    <p className="text-sm text-gray-400">Singleton entity cluster (no connecting edges).</p>
+                                ) : (
+                                    clusterDetail.edges.map((edge, i) => (
+                                        <div key={i} className="p-3 bg-gray-700 rounded-lg text-sm">
+                                            <div className="flex justify-between text-gray-400">
+                                                <span>{edge.left_entity_key.slice(0, 10)}...</span>
+                                                <span>↔</span>
+                                                <span>{edge.right_entity_key.slice(0, 10)}...</span>
+                                            </div>
+                                            <div className="mt-2">
+                                                <span className="px-2 py-1 bg-blue-600/30 text-blue-300 rounded text-xs">
+                                                    {edge.identifier_type}
+                                                </span>
+                                                <p className="mt-1 font-mono text-xs text-gray-300 truncate">
+                                                    {edge.identifier_value}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

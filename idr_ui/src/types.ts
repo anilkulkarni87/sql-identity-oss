@@ -23,15 +23,23 @@ export interface SourceConfig {
 }
 
 export interface MatchingRule {
-    id: number;
+    id: number | string;
     type: string; // 'EXACT' or 'FUZZY'
     match_keys: string[]; // For EXACT: identifiers to match
     priority: number;
     canonicalize?: 'LOWERCASE' | 'UPPERCASE' | 'EXACT';
     // Fuzzy Specific
     blocking_key?: string;
+    fuzzy_attribute?: string;
     score_expr?: string;
     threshold?: number;
+}
+
+export interface ExclusionRule {
+    type: string;
+    value: string;
+    match?: 'EXACT' | 'LIKE';
+    reason?: string;
 }
 
 export interface SurvivorshipRule {
@@ -46,6 +54,7 @@ export interface IDRConfig {
     rules?: MatchingRule[];
     fuzzy_rules?: MatchingRule[];
     survivorship?: SurvivorshipRule[];
+    exclusions?: ExclusionRule[];
 }
 
 export interface TableColumn {

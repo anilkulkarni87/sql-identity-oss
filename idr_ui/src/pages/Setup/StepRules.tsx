@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2, Info } from "lucide-react";
-import { IDRConfig, MatchingRule } from '../../types';
+import { GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2, ShieldAlert } from "lucide-react";
+import { ExclusionRule, IDRConfig, MatchingRule } from '../../types';
 import { api } from '../../api/client';
 
 interface StepRulesProps {
@@ -19,28 +19,44 @@ interface FuzzyTemplate {
 
 export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     const [rules, setRules] = useState<MatchingRule[]>([]);
+    const [exclusions, setExclusions] = useState<ExclusionRule[]>(config.exclusions || []);
+    const [newExclType, setNewExclType] = useState<string>('');
+    const [newExclValue, setNewExclValue] = useState<string>('');
+    const [newExclMatch, setNewExclMatch] = useState<'EXACT' | 'LIKE'>('EXACT');
     const [availableTypes, setAvailableTypes] = useState<string[]>([]);
+    const [availableAttributes, setAvailableAttributes] = useState<string[]>([]);
     const [fuzzyTemplates, setFuzzyTemplates] = useState<FuzzyTemplate[]>([]);
 
     useEffect(() => {
         // Initialize rules (combine exact and fuzzy)
         const combined: MatchingRule[] = [
             ...(config.rules || []),
-            ...(config.fuzzy_rules || [])
+            ...(config.fuzzy_rules || []).map(f => ({ ...f, type: 'FUZZY' }))
         ].sort((a, b) => a.priority - b.priority);
 
         if (combined.length > 0) {
             setRules(combined);
         }
+        setExclusions(config.exclusions || []);
 
-        // Available match keys
+        // Available match keys & attributes
         const typeSet = new Set<string>();
+        const attrSet = new Set<string>();
         (config.sources || []).forEach(src => {
             (src.identifiers || []).forEach(id => {
                 if (id.is_match_key !== false) typeSet.add(id.type);
             });
+            (src.attributes || []).forEach(attr => {
+                if (attr.name) attrSet.add(attr.name);
+            });
         });
-        setAvailableTypes(Array.from(typeSet).sort());
+        const typesArr = Array.from(typeSet).sort();
+        const attrsArr = Array.from(attrSet).sort();
+        setAvailableTypes(typesArr);
+        setAvailableAttributes(attrsArr.length > 0 ? attrsArr : typesArr);
+        if (typesArr.length > 0 && !newExclType) {
+            setNewExclType(typesArr[0]);
+        }
 
         // Fetch fuzzy templates
         api.getFuzzyTemplates()
@@ -48,6 +64,11 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
             .catch(err => console.error("Failed to fetch templates", err));
 
     }, [config]);
+
+    const resolveTemplateSql = (templateSql: string, colName: string) => {
+        const safeCol = colName || availableAttributes[0] || availableTypes[0] || 'first_name';
+        return templateSql.replace(/\{col\}/g, safeCol);
+    };
 
     const updatePriorities = (newRules: MatchingRule[]) => {
         setRules(newRules.map((r, i) => ({ ...r, priority: i + 1 })));
@@ -64,9 +85,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     };
 
     const deleteRule = (idx: number) => {
-        if (confirm("Remove this rule?")) {
-            updatePriorities(rules.filter((_, i) => i !== idx));
-        }
+        updatePriorities(rules.filter((_, i) => i !== idx));
     };
 
     const addExactRule = (type: string) => {
@@ -81,18 +100,16 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     };
 
     const addFuzzyRule = () => {
-        if (fuzzyTemplates.length === 0 && availableTypes.length > 0) {
-            console.warn("No templates available but adding fallback fuzzy rule");
-        }
-
-        const tmpl = fuzzyTemplates[0] || { sql_template: '', default_threshold: 0.85 };
+        const defaultAttr = availableAttributes[0] || availableTypes[0] || 'first_name';
+        const tmpl = fuzzyTemplates[0] || { sql_template: 'jaro_winkler_similarity(<a>.{col}, <b>.{col})', default_threshold: 0.85 };
         const newRule: MatchingRule = {
             id: generateId(),
             type: 'FUZZY',
-            match_keys: [], // Unused for fuzzy
+            match_keys: [],
             priority: rules.length + 1,
-            blocking_key: availableTypes[0] || '', // Default to first available
-            score_expr: tmpl.sql_template,
+            blocking_key: availableTypes[0] || '',
+            fuzzy_attribute: defaultAttr,
+            score_expr: resolveTemplateSql(tmpl.sql_template, defaultAttr),
             threshold: tmpl.default_threshold
         };
         updatePriorities([...rules, newRule]);
@@ -100,7 +117,15 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
 
     const updateRuleField = (idx: number, field: keyof MatchingRule, value: any) => {
         const newRules = [...rules];
-        newRules[idx] = { ...newRules[idx], [field]: value };
+        const current = { ...newRules[idx], [field]: value };
+        if (field === 'fuzzy_attribute' && current.score_expr) {
+            // Re-substitute attribute name inside <a>.<col> and <b>.<col>
+            current.score_expr = current.score_expr
+                .replace(/\{col\}/g, value)
+                .replace(/<a>\.[a-zA-Z0-9_]+/g, `<a>.${value}`)
+                .replace(/<b>\.[a-zA-Z0-9_]+/g, `<b>.${value}`);
+        }
+        newRules[idx] = current;
         setRules(newRules);
     };
 
@@ -108,13 +133,30 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
         const tmpl = fuzzyTemplates.find(t => t.id === tmplId);
         if (tmpl) {
             const newRules = [...rules];
+            const col = newRules[idx].fuzzy_attribute || availableAttributes[0] || availableTypes[0] || 'first_name';
             newRules[idx] = {
                 ...newRules[idx],
-                score_expr: tmpl.sql_template,
+                fuzzy_attribute: col,
+                score_expr: resolveTemplateSql(tmpl.sql_template, col),
                 threshold: tmpl.default_threshold
             };
             setRules(newRules);
         }
+    };
+
+    const addExclusion = () => {
+        const trimmed = newExclValue.trim();
+        if (!trimmed) return;
+        const type = newExclType || availableTypes[0] || 'email';
+        setExclusions(prev => [
+            ...prev,
+            { type, value: trimmed, match: newExclMatch, reason: 'UI exclusion' }
+        ]);
+        setNewExclValue('');
+    };
+
+    const removeExclusion = (idx: number) => {
+        setExclusions(prev => prev.filter((_, i) => i !== idx));
     };
 
     const generateId = () => Math.floor(Math.random() * 1000000);
@@ -125,9 +167,12 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
             return;
         }
         const exact = rules.filter(r => r.type === 'EXACT');
-        const fuzzy = rules.filter(r => r.type === 'FUZZY');
+        const fuzzy = rules.filter(r => r.type === 'FUZZY').map(r => ({
+            ...r,
+            score_expr: resolveTemplateSql(r.score_expr || '', r.fuzzy_attribute || availableAttributes[0] || 'first_name')
+        }));
 
-        onNext({ ...config, rules: exact, fuzzy_rules: fuzzy });
+        onNext({ ...config, rules: exact, fuzzy_rules: fuzzy, exclusions });
     };
 
     const btnClass = "px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50";
@@ -183,7 +228,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                         </select>
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-2 gap-4 bg-gray-900/50 p-3 rounded border border-gray-700">
+                                    <div className="grid grid-cols-3 gap-3 bg-gray-900/50 p-3 rounded border border-gray-700">
                                         <div>
                                             <label className="text-xs text-gray-500 block mb-1">Blocking Key</label>
                                             <select
@@ -191,7 +236,19 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                                 onChange={(e) => updateRuleField(idx, 'blocking_key', e.target.value)}
                                                 className="w-full bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-purple-500"
                                             >
-                                                {availableTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                                                {Array.from(new Set([...availableTypes, ...availableAttributes])).map(t => (
+                                                    <option key={t} value={t}>{t}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-500 block mb-1">Compare Attribute</label>
+                                            <select
+                                                value={rule.fuzzy_attribute || availableAttributes[0] || ''}
+                                                onChange={(e) => updateRuleField(idx, 'fuzzy_attribute', e.target.value)}
+                                                className="w-full bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-purple-500"
+                                            >
+                                                {availableAttributes.map(a => <option key={a} value={a}>{a}</option>)}
                                             </select>
                                         </div>
                                         <div>
@@ -205,7 +262,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                                 {fuzzyTemplates.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
                                             </select>
                                         </div>
-                                        <div className="col-span-2">
+                                        <div className="col-span-3">
                                             <div className="flex justify-between text-xs text-gray-500 mb-1">
                                                 <span>Threshold</span>
                                                 <span className="text-purple-300 font-mono">{rule.threshold}</span>
@@ -217,6 +274,13 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                                 className="w-full accent-purple-500"
                                             />
                                         </div>
+                                        {rule.score_expr && (
+                                            <div className="col-span-3">
+                                                <span className="text-[11px] font-mono text-gray-500 block truncate" title={rule.score_expr}>
+                                                    SQL: {rule.score_expr}
+                                                </span>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -247,17 +311,67 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                 </div>
 
 
-                <div className="bg-blue-900/10 border border-blue-900/50 rounded-lg p-3 mt-2">
-                    <div className="flex gap-3">
-                        <Info className="w-5 h-5 text-blue-400 mt-0.5" />
-                        <div className="text-sm">
-                            <h4 className="font-medium text-blue-300">Need to block specific values?</h4>
-                            <p className="text-gray-400 mt-1">
-                                To prevent common values (like <code className="bg-gray-800 px-1 py-0.5 rounded text-gray-300">test@test.com</code>) from linking users,
-                                insert them into the <code className="bg-gray-800 px-1 py-0.5 rounded text-gray-300">idr_meta.identifier_exclusion</code> table.
-                            </p>
-                        </div>
+                {/* Interactive Identifier Exclusions Editor */}
+                <div className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 mt-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <ShieldAlert className="w-4 h-4 text-amber-400" />
+                        <h4 className="font-medium text-sm text-gray-200">Identifier Exclusions (Blocklist)</h4>
                     </div>
+                    <p className="text-xs text-gray-400">
+                        Prevent placeholder values (e.g. <code className="bg-gray-900 px-1 py-0.5 rounded">test@test.com</code>, <code className="bg-gray-900 px-1 py-0.5 rounded">000-000-0000</code>) from linking unrelated entities.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                        <select
+                            value={newExclType || availableTypes[0] || ''}
+                            onChange={(e) => setNewExclType(e.target.value)}
+                            className="bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-2 py-1.5"
+                        >
+                            {availableTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <select
+                            value={newExclMatch}
+                            onChange={(e) => setNewExclMatch(e.target.value as 'EXACT' | 'LIKE')}
+                            className="bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-2 py-1.5"
+                        >
+                            <option value="EXACT">EXACT</option>
+                            <option value="LIKE">LIKE (%)</option>
+                        </select>
+                        <input
+                            type="text"
+                            value={newExclValue}
+                            onChange={(e) => setNewExclValue(e.target.value)}
+                            placeholder="Value or pattern (e.g. test@test.com)"
+                            className="flex-1 min-w-[180px] bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-3 py-1.5"
+                        />
+                        <button
+                            type="button"
+                            onClick={addExclusion}
+                            className="px-3 py-1.5 bg-amber-600/30 border border-amber-600/60 hover:bg-amber-600/50 text-amber-200 rounded text-xs font-medium"
+                        >
+                            + Add Exclusion
+                        </button>
+                    </div>
+                    {exclusions.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-2">
+                            {exclusions.map((ex, i) => (
+                                <span
+                                    key={`${ex.type}-${ex.value}-${i}`}
+                                    className="inline-flex items-center gap-2 px-2.5 py-1 bg-gray-900 border border-gray-700 rounded-full text-xs text-gray-300"
+                                >
+                                    <span className="text-amber-400 font-semibold">{ex.type}</span>
+                                    <span className="text-gray-500">({ex.match || 'EXACT'})</span>
+                                    <span className="font-mono">{ex.value}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => removeExclusion(i)}
+                                        className="text-gray-500 hover:text-red-400"
+                                    >
+                                        ×
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
 
