@@ -15,25 +15,25 @@ This comprehensive, step-by-step walkthrough is designed for testing **SQL Ident
     ---
     Choose between real synthetic parquet files from `Ecommerce_synthetic` or zero-install SQL generation.
     
-    [:octicons-arrow-right-24: Ingestion Options](#-part-2-ingest-test-data)
+    [:octicons-arrow-right-24: Ingestion Options](#part-2-ingest-test-data)
 
 -   **2. Interactive Web UI**
     ---
     Walk through the 6-Step Setup Wizard (`/setup`) and visually explore the Golden Profile graph in `/explorer`.
     
-    [:octicons-arrow-right-24: UI Walkthrough](#-part-3-testing-via-the-interactive-web-ui)
+    [:octicons-arrow-right-24: UI Walkthrough](#part-3-testing-via-the-interactive-web-ui)
 
 -   **3. Autonomous AI MCP Tools**
     ---
     Run `discover_and_suggest_rules`, `simulate_rule_impact`, and `resolve_customer_360` from Python or AI assistants.
     
-    [:octicons-arrow-right-24: Agentic Tools](#-part-4-testing-the-new-agentic-mcp-tools)
+    [:octicons-arrow-right-24: Agentic Tools](#part-4-testing-the-new-agentic-mcp-tools)
 
 -   **4. Delta Lake Verification**
     ---
     Inspect final Golden Customer Profiles, cluster memberships, and cardinality audit logs in Databricks SQL.
     
-    [:octicons-arrow-right-24: SQL Queries](#-part-5-inspect-results-directly-in-databricks-sql)
+    [:octicons-arrow-right-24: SQL Queries](#part-5-inspect-results-directly-in-databricks-sql)
 
 </div>
 

@@ -109,3 +109,44 @@ def test_discover_and_suggest_rules_output_file(profiler_duckdb, tmp_path):
     assert "sources:" in out_yaml.read_text()
     assert res.get("saved_to_file") == str(out_yaml.resolve())
 
+
+def test_profiler_rejects_date_as_phone_and_excludes_non_identity_tables(profiler_duckdb):
+    """Verify that temporal columns (e.g. end_date) are never classified as phone, and non-customer tables are excluded."""
+    # Create an experiments table with dates that could falsely match phone digits if dashes were removed
+    profiler_duckdb.execute("""
+        CREATE TABLE ecommerce_test.experiments (
+            experiment_id VARCHAR,
+            name VARCHAR,
+            status VARCHAR,
+            start_date VARCHAR,
+            end_date VARCHAR
+        )
+    """)
+    profiler_duckdb.execute("""
+        INSERT INTO ecommerce_test.experiments VALUES
+            ('exp_1', 'Checkout Flow A/B', 'ACTIVE', '2026-01-01', '2026-03-31'),
+            ('exp_2', 'Search Relevance Test', 'COMPLETED', '2025-11-01', '2026-02-28')
+    """)
+
+    profiler = IDRDataProfiler(profiler_duckdb)
+    result = profiler.profile_and_generate_config(
+        ["ecommerce_test.customers", "ecommerce_test.experiments"],
+        sample_size=100
+    )
+
+    assert result["status"] == "SUCCESS"
+    cfg = result["suggested_config"]
+    source_tables = [s["table"] for s in cfg["sources"]]
+
+    # customers has valid identifiers, so it MUST be included
+    assert "ecommerce_test.customers" in source_tables
+
+    # experiments has NO identifiers (end_date must NOT be tagged as phone), so it MUST be excluded from sources
+    assert "ecommerce_test.experiments" not in source_tables
+
+    # Check diagnostic reason
+    diag = result["profiling_diagnostics"]["ecommerce_test.experiments"]
+    assert diag["included"] is False
+    assert "0 customer identifiers" in diag["reason"]
+
+

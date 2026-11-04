@@ -12,25 +12,25 @@ Install **SQL Identity Resolution (`sql-identity-resolution`)** using `pip` extr
     ---
     Install via `pip` with warehouse-specific adapters for pipelines, jobs, and local exploration.
     
-    [:octicons-arrow-right-24: Pip Installation](#-pip-installation-by-warehouse)
+    [:octicons-arrow-right-24: Pip Installation](#pip-installation-by-warehouse)
 
 -   **🐳 Local Docker Compose**
     ---
     Spin up the React Web UI, FastAPI backend, and embedded DuckDB with a single command.
     
-    [:octicons-arrow-right-24: Docker Setup](#-docker-compose-environments)
+    [:octicons-arrow-right-24: Docker Setup](#docker-compose-environments)
 
 -   **🤖 AI Agent MCP Server**
     ---
     Connect Claude Desktop, Cursor, or custom LLM agents directly to your identity graph.
     
-    [:octicons-arrow-right-24: MCP Setup](#-mcp-server-for-ai-assistants)
+    [:octicons-arrow-right-24: MCP Setup](#mcp-server-for-ai-assistants)
 
 -   **🏭 Production & Enterprise**
     ---
     Deploy pinned Docker images with Prometheus observability, Redis caching, or SSO/OIDC.
     
-    [:octicons-arrow-right-24: Production Config](#-docker-compose-environments)
+    [:octicons-arrow-right-24: Production Config](#docker-compose-environments)
 
 </div>
 

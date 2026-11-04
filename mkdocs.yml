@@ -4,6 +4,10 @@ site_url: https://anilkulkarni87.github.io/sql-identity-oss/
 repo_url: https://github.com/anilkulkarni87/sql-identity-oss
 repo_name: sql-identity-oss
 
+exclude_docs: |
+  README.md
+
+
 theme:
   name: material
   palette:

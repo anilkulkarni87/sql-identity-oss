@@ -1,9 +1,9 @@
 """
-Statistical data profiler for SQL Identity Resolution.
+Production-grade statistical profiler for SQL Identity Resolution.
 
 Profiles live warehouse tables, computes statistical distributions (null ratios,
 uniqueness ratios, cardinality), executes regex pattern matching on actual sample
-values (RFC 5322 emails, E.164 phone formats, UUIDs), detects entity keys and
+values (RFC 5322 emails, E.164 phone formats), detects row entity keys and
 watermarks with mathematical validation, flags supernode risks, and generates
 validated IDR configurations.
 """
@@ -11,21 +11,18 @@ validated IDR configurations.
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-# Pre-compiled regex patterns for live value inspection
+# Pre-compiled regex patterns
 _EMAIL_RE = re.compile(
     r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
 )
 _PHONE_FORMATTED_RE = re.compile(
     r"^(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}$"
 )
-_PHONE_DIGITS_RE = re.compile(r"^\+?[0-9]{7,15}$")
-_UUID_RE = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+_PHONE_DIGITS_RE = re.compile(r"^\+?[0-9]{10,15}$")
+_DATE_OR_TS_RE = re.compile(
+    r"^(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2})"
 )
 _HEX_TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,64}$")
-_ISO_TIMESTAMP_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}"
-)
 
 
 def is_system_table(table_name: str) -> bool:
@@ -46,10 +43,10 @@ class ColumnProfile:
         self.distinct_count: int = 0
         self.null_ratio: float = 1.0
         self.uniqueness_ratio: float = 0.0
+        self.is_temporal: bool = False
+        self.is_entity_key: bool = False
         self.detected_identifier_type: Optional[str] = None
         self.detection_confidence: float = 0.0
-        self.is_entity_key_candidate: bool = False
-        self.is_watermark_candidate: bool = False
         self.max_frequency_count: int = 1
         self.sample_values: List[str] = []
         self.frequent_values: List[Tuple[str, int]] = []
@@ -80,9 +77,36 @@ class IDRDataProfiler:
         except Exception:
             return []
 
+    def _is_temporal_column(self, col_name: str, col_type: str, values: List[str]) -> bool:
+        """Verify if column represents a date, time, timestamp, or temporal period."""
+        type_str = col_type.lower()
+        if any(t in type_str for t in ("timestamp", "date", "datetime", "timestamptz", "time")):
+            return True
+
+        name = col_name.lower()
+        # Semantic naming cues
+        temporal_names = (
+            "date", "_date", "start_date", "end_date", "order_date", "birth_date", "dob",
+            "_at", "created_at", "updated_at", "modified_at", "assigned_at", "enrolled_at",
+            "_ts", "timestamp", "time", "event_time", "period"
+        )
+        if any(w in name for w in temporal_names):
+            if values:
+                matches = sum(1 for v in values if _DATE_OR_TS_RE.match(v))
+                if (matches / len(values)) >= 0.4:
+                    return True
+            return True
+
+        if values:
+            matches = sum(1 for v in values if _DATE_OR_TS_RE.match(v))
+            if (matches / len(values)) >= 0.70:
+                return True
+
+        return False
+
     def profile_columns(
         self,
-        table_fqn: str,
+        table_name_short: str,
         columns: List[Dict[str, str]],
         rows: List[Dict[str, Any]],
     ) -> Dict[str, ColumnProfile]:
@@ -90,6 +114,7 @@ class IDRDataProfiler:
         sample_count = len(rows)
         profiles: Dict[str, ColumnProfile] = {}
 
+        # 1. First pass: statistical distribution and temporal detection
         for col_info in columns:
             col_name = col_info["name"].lower()
             col_type = col_info.get("type", "").lower()
@@ -100,7 +125,6 @@ class IDRDataProfiler:
                 profiles[col_name] = prof
                 continue
 
-            # Extract non-null stringified values
             values = []
             for r in rows:
                 v = r.get(col_name) if isinstance(r, dict) else None
@@ -120,89 +144,116 @@ class IDRDataProfiler:
                 prof.max_frequency_count = counter.most_common(1)[0][1] if counter else 1
                 prof.sample_values = values[:5]
 
-            # 1. Check for Watermark viability
-            if self._is_timestamp_column(prof, values):
-                prof.is_watermark_candidate = True
+            # Check temporal
+            prof.is_temporal = self._is_temporal_column(col_name, col_type, values)
+            profiles[col_name] = prof
 
-            # 2. Value Pattern Recognition on actual sample values
-            id_type, conf = self._classify_identifier_by_values(prof, values)
+        # 2. Second pass: Identify Table Entity Primary Key (Row PK)
+        # Entity PK must be 100% unique (or >= 0.99) and 0% nulls, and NOT temporal
+        pk_candidates = [
+            p for p in profiles.values()
+            if p.null_ratio == 0.0 and p.uniqueness_ratio >= 0.99 and not p.is_temporal
+        ]
+
+        entity_pk_col = None
+        if pk_candidates:
+            # Score primary key candidates: prefer table-specific PK (e.g. order_id in orders)
+            def _score_pk(p: ColumnProfile) -> int:
+                score = int(p.uniqueness_ratio * 100)
+                name = p.name
+                # If name matches singular table name + "_id" (e.g. customer_id in customers)
+                table_clean = table_name_short.rstrip("s")
+                if name == f"{table_clean}_id" or name == f"{table_name_short}_id":
+                    score += 200
+                elif name == "id":
+                    score += 150
+                elif name.endswith("_id") or name.endswith("_key"):
+                    score += 100
+                return score
+
+            pk_candidates.sort(key=_score_pk, reverse=True)
+            entity_pk_col = pk_candidates[0].name
+            profiles[entity_pk_col].is_entity_key = True
+        else:
+            # Fallback to column with highest uniqueness
+            non_temp = [p for p in profiles.values() if not p.is_temporal and p.non_null_count > 0]
+            if non_temp:
+                non_temp.sort(key=lambda p: (p.uniqueness_ratio, -p.null_ratio), reverse=True)
+                entity_pk_col = non_temp[0].name
+                profiles[entity_pk_col].is_entity_key = True
+
+        # 3. Third pass: Classify customer identifiers on remaining columns
+        for col_name, prof in profiles.items():
+            if prof.is_entity_key or prof.is_temporal:
+                continue
+
+            values = [str(r.get(col_name)).strip() for r in rows if r.get(col_name) is not None]
+            id_type, conf = self._classify_identifier(prof, values)
             if id_type and conf >= 0.65:
                 prof.detected_identifier_type = id_type
                 prof.detection_confidence = conf
 
-            # 3. Check for Entity Key viability
-            # Must be strictly unique (or >= 0.99 in large samples) and zero nulls
-            # Cannot be an identifier (like email or phone)
-            if (
-                prof.null_ratio == 0.0
-                and prof.uniqueness_ratio >= 0.99
-                and not prof.detected_identifier_type
-                and not prof.is_watermark_candidate
-            ):
-                prof.is_entity_key_candidate = True
-
-            profiles[col_name] = prof
-
         return profiles
 
-    def _is_timestamp_column(self, prof: ColumnProfile, values: List[str]) -> bool:
-        """Verify if column represents a timestamp or watermark."""
-        type_str = prof.declared_type
-        if any(t in type_str for t in ("timestamp", "date", "datetime", "timestamptz")):
-            return True
-
-        if values:
-            matches = sum(1 for v in values if _ISO_TIMESTAMP_RE.match(v))
-            if (matches / len(values)) >= 0.8:
-                return True
-
-        if any(w in prof.name for w in ("updated", "modified", "timestamp", "created", "event_time")):
-            return True
-
-        return False
-
-    def _classify_identifier_by_values(
+    def _classify_identifier(
         self, prof: ColumnProfile, values: List[str]
     ) -> Tuple[Optional[str], float]:
-        """Inspect actual values to determine if this column is an identifier."""
+        """Inspect actual values and semantics to detect cross-channel customer identifiers."""
         if not values or prof.null_ratio > 0.85:
             return None, 0.0
 
         n = len(values)
+        name = prof.name
 
-        # A. Email Pattern Matching (RFC 5322 regex on actual strings)
+        # Temporal columns are never identifiers
+        if prof.is_temporal:
+            return None, 0.0
+
+        # Numeric metric columns are never identifiers (price, cost, amount, quantity, rating, etc.)
+        metric_names = (
+            "price", "cost", "amount", "value", "quantity", "qty", "rating",
+            "score", "count", "pct", "percent", "rate", "weight", "total", "subtotal"
+        )
+        if any(m in name for m in metric_names):
+            return None, 0.0
+
+        # A. Email Pattern Matching (RFC 5322 regex on actual values)
         email_matches = sum(1 for v in values if _EMAIL_RE.match(v))
         if (email_matches / n) >= 0.70:
             return "email", round(email_matches / n, 2)
 
-        # B. Phone Pattern Matching (E.164, formatted or digit strings)
+        # B. Phone Pattern Matching
+        # Must NOT look like a date or year (e.g. 2026-03-31 or 20260331)
         phone_matches = 0
         for v in values:
-            clean_digits = re.sub(r"[\s\-\(\)\.]", "", v)
-            if _PHONE_DIGITS_RE.match(clean_digits) and len(clean_digits) in range(7, 16):
-                phone_matches += 1
-            elif _PHONE_FORMATTED_RE.match(v):
+            if _DATE_OR_TS_RE.match(v):
+                continue
+            clean = re.sub(r"[\s\-\(\)\.]", "", v)
+            # Filter out 8-digit dates (YYYYMMDD starting with 19 or 20)
+            if len(clean) == 8 and (clean.startswith("19") or clean.startswith("20")):
+                continue
+            if _PHONE_DIGITS_RE.match(clean) or _PHONE_FORMATTED_RE.match(v):
                 phone_matches += 1
 
-        if (phone_matches / n) >= 0.70:
+        # Phone requires either semantic name clue or very high pattern match
+        phone_name_hint = any(k in name for k in ("phone", "mobile", "cell", "tel", "contact_no", "msisdn"))
+        if phone_name_hint and (phone_matches / n) >= 0.50:
+            return "phone", round(phone_matches / n, 2)
+        elif (phone_matches / n) >= 0.85 and len(values[0]) >= 10:
             return "phone", round(phone_matches / n, 2)
 
-        # C. UUID / Device ID Pattern Matching
-        uuid_matches = sum(1 for v in values if _UUID_RE.match(v) or _HEX_TOKEN_RE.match(v))
-        if (uuid_matches / n) >= 0.70:
-            if any(d in prof.name for d in ("device", "idfa", "gaid", "cookie")):
-                return "device_id", round(uuid_matches / n, 2)
-            return "uuid", round(uuid_matches / n, 2)
+        # C. Cross-table Customer Entity Reference (Foreign Key to Customer)
+        if any(k in name for k in ("customer_id", "user_id", "client_id", "account_id")):
+            return "customer_id", 0.95
 
-        # D. Loyalty / Membership ID Pattern Matching
-        if any(k in prof.name for k in ("loyalty", "rewards", "member", "card_no", "membership")):
-            if prof.uniqueness_ratio >= 0.5:
+        # D. Loyalty / Membership ID
+        if any(k in name for k in ("loyalty_id", "member_id", "card_no", "rewards_id", "loyalty")):
+            if prof.uniqueness_ratio >= 0.4:
                 return "loyalty", 0.90
 
-        # E. Account / External Identifier
-        if any(k in prof.name for k in ("account_num", "acct_id", "external_id", "cust_id")):
-            if prof.uniqueness_ratio >= 0.80 and not prof.is_entity_key_candidate:
-                return "account_id", 0.85
+        # E. Device / Cookie / Anonymous Web Visitor ID
+        if any(k in name for k in ("device_id", "cookie_id", "idfa", "gaid", "visitor_id", "session_id")):
+            return "device_id", 0.85
 
         return None, 0.0
 
@@ -213,11 +264,11 @@ class IDRDataProfiler:
     ) -> Dict[str, Any]:
         """
         Execute live profiling across candidate tables, validate invariants,
-        and generate a complete IDR configuration.
+        filter out non-identity tables, and generate an IDR configuration.
         """
         sources = []
         profiling_diagnostics = {}
-        all_detected_identifiers: Dict[str, int] = {}  # id_type -> observed max group in sample
+        all_detected_identifiers: Dict[str, int] = {}
         all_detected_attributes: Set[str] = set()
         discovered_exclusions = []
 
@@ -232,49 +283,25 @@ class IDRDataProfiler:
             if not cols:
                 continue
 
+            # Short table name (e.g. 'experiments' from 'ecommerce_synth.experiments')
+            table_name_short = fqn.split(".")[-1].lower()
+
             # 2. Fetch sample data
             sample_rows = self.sample_table(fqn, sample_size=sample_size)
 
             # 3. Compute statistical column profiles
-            col_profiles = self.profile_columns(fqn, cols, sample_rows)
+            col_profiles = self.profile_columns(table_name_short, cols, sample_rows)
 
-            # 4. Determine verified Entity Primary Key
-            pk_candidates = [
-                p for p in col_profiles.values()
-                if p.is_entity_key_candidate
-            ]
+            # 4. Extract verified Entity Key
+            entity_keys = [p.name for p in col_profiles.values() if p.is_entity_key]
+            entity_key_col = entity_keys[0] if entity_keys else cols[0]["name"].lower()
 
-            entity_key_col = None
-            if pk_candidates:
-                def _pk_rank(p: ColumnProfile) -> int:
-                    score = int(p.uniqueness_ratio * 100)
-                    if any(k in p.name for k in ("id", "key", "customer", "user", "account", "client")):
-                        score += 50
-                    if p.name.endswith("_id") or p.name == "id":
-                        score += 30
-                    return score
-
-                pk_candidates.sort(key=_pk_rank, reverse=True)
-                entity_key_col = pk_candidates[0].name
-            else:
-                # Pick the column with highest uniqueness that is not an identifier
-                valid_cols = [
-                    p for p in col_profiles.values()
-                    if p.non_null_count > 0 and not p.detected_identifier_type and not p.is_watermark_candidate
-                ]
-                if valid_cols:
-                    valid_cols.sort(key=lambda p: (p.uniqueness_ratio, -p.null_ratio), reverse=True)
-                    entity_key_col = valid_cols[0].name
-
-            if not entity_key_col and cols:
-                entity_key_col = cols[0]["name"].lower()
-
-            # 5. Determine verified Watermark
+            # 5. Extract verified Watermark
             wm_candidates = [
-                p for p in col_profiles.values()
-                if p.is_watermark_candidate and p.name != entity_key_col
+                p.name for p in col_profiles.values()
+                if p.is_temporal and p.name != entity_key_col
             ]
-            watermark_col = wm_candidates[0].name if wm_candidates else None
+            watermark_col = wm_candidates[0] if wm_candidates else None
 
             # 6. Extract Identifiers & Attributes
             table_identifiers = []
@@ -290,12 +317,10 @@ class IDRDataProfiler:
                         "expr": p.name,
                         "confidence": p.detection_confidence,
                     })
-                    # Track max observed repetition in sample to size max_group_size dynamically
                     prev_max = all_detected_identifiers.get(p.detected_identifier_type, 1)
                     all_detected_identifiers[p.detected_identifier_type] = max(prev_max, p.max_frequency_count)
 
                     # Data-driven supernode outlier detection:
-                    # If an identifier appears >= 4 times AND represents >= 5% of sampled rows, flag as outlier
                     for val, count in p.frequent_values:
                         if len(sample_rows) >= 5 and count >= 3 and (count / len(sample_rows)) >= 0.08:
                             discovered_exclusions.append({
@@ -304,15 +329,24 @@ class IDRDataProfiler:
                                 "match_type": "EXACT",
                                 "reason": f"High repetition ({count} occurrences in {len(sample_rows)} sampled rows) in {fqn}.{p.name}",
                             })
-
                 else:
-                    # Every other column with non-null data is an attribute of the entity
+                    # Every other column with data is an attribute of the record
                     if p.non_null_count > 0:
                         table_attributes.append({
                             "name": p.name,
                             "expr": p.name,
                         })
                         all_detected_attributes.add(p.name)
+
+            # CRITICAL RULE: A table CANNOT participate in Identity Resolution without identifiers!
+            # If a table has 0 identifiers (like 'products' or 'stores' or 'experiments'), exclude it from sources!
+            if not table_identifiers:
+                profiling_diagnostics[fqn] = {
+                    "included": False,
+                    "reason": "Excluded: Table contains 0 customer identifiers (no email, phone, loyalty, or customer_id).",
+                    "sample_rows_analyzed": len(sample_rows),
+                }
+                continue
 
             table_id = fqn.replace(".", "_")
             source_entry = {
@@ -330,29 +364,21 @@ class IDRDataProfiler:
             sources.append(source_entry)
 
             profiling_diagnostics[fqn] = {
+                "included": True,
                 "sample_rows_analyzed": len(sample_rows),
                 "selected_entity_key": entity_key_col,
                 "selected_watermark": watermark_col,
-                "columns": {
-                    p.name: {
-                        "null_ratio": round(p.null_ratio, 2),
-                        "uniqueness_ratio": round(p.uniqueness_ratio, 2),
-                        "detected_type": p.detected_identifier_type or "attribute",
-                        "sample_values": p.sample_values[:3],
-                    }
-                    for p in col_profiles.values()
-                },
+                "identifiers_mapped": [i["expr"] for i in table_identifiers],
             }
 
         # 7. Adaptive Matching Rules based on observed frequency
         rules = []
         priority = 1
-        order_pref = {"email": 1, "phone": 2, "loyalty": 3, "account_id": 4, "device_id": 5, "uuid": 6}
+        order_pref = {"email": 1, "phone": 2, "loyalty": 3, "customer_id": 4, "device_id": 5}
         sorted_id_types = sorted(all_detected_identifiers.keys(), key=lambda k: order_pref.get(k, 10))
 
         for id_type in sorted_id_types:
             observed_max = all_detected_identifiers.get(id_type, 1)
-            # Statistically scale max_group_size based on observed sample degree
             adaptive_max = max(15, min(500, observed_max * 10))
             rules.append({
                 "id": f"exact_{id_type}",
@@ -366,11 +392,9 @@ class IDRDataProfiler:
 
         # 8. Adaptive Survivorship Strategies based on watermark presence
         survivorship = []
-        # Check if sources have watermark columns
         has_watermark = any(s.get("watermark_column") for s in sources)
 
         for attr in sorted(all_detected_attributes):
-            # If table has watermark, use RECENCY; otherwise use PRIORITY or FREQUENCY
             strategy = "RECENCY" if has_watermark else "PRIORITY"
             rule_entry = {"attribute": attr, "strategy": strategy}
             if strategy == "PRIORITY" and sources:
