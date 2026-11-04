@@ -88,3 +88,24 @@ def test_profiler_inspects_values_and_rejects_false_positives(profiler_duckdb):
 
     # 9. IDR config validator must pass
     assert validate_config(cfg) is True
+
+
+def test_discover_and_suggest_rules_output_file(profiler_duckdb, tmp_path):
+    """Verify discover_and_suggest_rules saves YAML to output_file."""
+    from idr_core.connection_manager import ConnectionManager
+    from idr_mcp import server as mcp_server
+
+    ConnectionManager.instance().set_adapter(profiler_duckdb, {"platform": "duckdb"})
+    out_yaml = tmp_path / "suggested_idr_config.yaml"
+
+    res = mcp_server.discover_and_suggest_rules(
+        table_fqn="ecommerce_test.customers",
+        output_file=str(out_yaml),
+    )
+
+    assert res.get("status") == "SUCCESS"
+    assert out_yaml.exists()
+    assert out_yaml.stat().st_size > 50
+    assert "sources:" in out_yaml.read_text()
+    assert res.get("saved_to_file") == str(out_yaml.resolve())
+

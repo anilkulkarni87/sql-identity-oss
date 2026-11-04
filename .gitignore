@@ -48,6 +48,8 @@ htmlcov/
 idr_core_extracted/
 metrics.json
 benchmark_results.json
+test_mcp.py
+idr_config.yaml
 profile_reports/
 test_data/
 

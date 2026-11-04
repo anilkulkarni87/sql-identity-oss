@@ -479,7 +479,11 @@ def dry_run_pipeline(run_mode: str = "FULL", max_iters: int = 30) -> Dict[str, A
 
 @mcp.tool()
 def discover_and_suggest_rules(
-    table_fqn: str = None, schema: str = None, sample_size: int = 500, max_tables: int = None
+    table_fqn: str = None,
+    schema: str = None,
+    sample_size: int = 500,
+    max_tables: int = None,
+    output_file: str = None,
 ) -> Dict[str, Any]:
     """
     Profile warehouse tables, detect PII and identity attributes using statistical profiling,
@@ -490,6 +494,7 @@ def discover_and_suggest_rules(
         schema: Optional schema name (e.g. 'ecommerce_demo') to discover tables in.
         sample_size: Maximum sample rows for profile analysis (default: 500).
         max_tables: Optional maximum tables to profile (default: None = all user tables).
+        output_file: Optional file path to persist the generated configuration YAML/JSON.
     """
     try:
         adapter = get_adapter()
@@ -539,7 +544,38 @@ def discover_and_suggest_rules(
             }
 
         profiler = IDRDataProfiler(adapter)
-        return profiler.profile_and_generate_config(candidate_tables, sample_size=sample_size)
+        result = profiler.profile_and_generate_config(candidate_tables, sample_size=sample_size)
+
+        # Optional persistence to file (YAML/JSON)
+        if output_file and result.get("suggested_config"):
+            cfg = result["suggested_config"]
+            import os
+
+            target_path = os.path.abspath(output_file)
+            parent_dir = os.path.dirname(target_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+
+            if output_file.endswith(".json"):
+                import json
+
+                with open(target_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2)
+            else:
+                try:
+                    import yaml
+
+                    with open(target_path, "w", encoding="utf-8") as f:
+                        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+                except ImportError:
+                    import json
+
+                    with open(target_path, "w", encoding="utf-8") as f:
+                        json.dump(cfg, f, indent=2)
+
+            result["saved_to_file"] = target_path
+
+        return result
 
     except Exception as e:
         return {"error": f"Failed to profile and suggest rules: {str(e)}"}
