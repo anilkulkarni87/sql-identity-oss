@@ -22,9 +22,14 @@ theme:
   features:
     - content.code.copy
     - content.code.annotate
+    - content.tabs.link
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
     - navigation.tabs
     - navigation.sections
     - navigation.expand
+    - navigation.path
     - navigation.top
     - search.suggest
     - search.highlight
@@ -54,9 +59,13 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.details
+  - pymdownx.keys
+  - pymdownx.inlinehilite
   - admonition
   - tables
   - attr_list
+  - md_in_html
 
 nav:
   - Home: index.md

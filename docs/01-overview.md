@@ -39,7 +39,7 @@ flowchart TD
         CLI["CLI Tool (idr)"]
         UI["Web UI (React Dashboard)"]
         API["FastAPI REST Backend"]
-        MCP["MCP Server (14 AI Agent Tools)"]
+        MCP["MCP Server (17 AI Agent Tools)"]
         DBT["dbt Package (dbt_idr)"]
     end
 
