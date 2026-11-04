@@ -197,6 +197,12 @@ def test_mcp_discover_and_suggest_rules(mcp_duckdb):
     assert any(r["match_keys"] == ["email"] for r in cfg["rules"])
     assert any(s["attribute"] == "first_name" for s in cfg["survivorship"])
 
+    # Test targeted table profiling via table_fqn
+    res_table = mcp_server.discover_and_suggest_rules(table_fqn="raw.customers")
+    assert res_table.get("status") == "SUCCESS", res_table
+    assert res_table["tables_profiled"] == 1
+    assert res_table["suggested_config"]["sources"][0]["table"] == "raw.customers"
+
 
 def test_mcp_simulate_rule_impact(mcp_duckdb):
     """Test Direction 1: Safe dry-run rule impact and supernode risk simulation."""

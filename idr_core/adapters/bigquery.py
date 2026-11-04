@@ -189,23 +189,37 @@ class BigQueryAdapter(IDRAdapter):
         return [{"name": field.name.lower(), "type": field.field_type} for field in table.schema]
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
-        """List tables in a dataset."""
-        if not schema:
-            return []
-
-        dataset_id = self.dataset_mapping.get(schema, schema)
-        # Use simple string dataset_id, client handles project prefix if needed or we prepend
-        # client.list_tables expects dataset reference
-        if "." not in dataset_id:
-            dataset_ref = f"{self.project}.{dataset_id}"
+        """List tables in a dataset, or all datasets if schema is None."""
+        if schema:
+            datasets = [self.dataset_mapping.get(schema, schema)]
         else:
-            dataset_ref = dataset_id
+            try:
+                datasets = [
+                    d.dataset_id
+                    for d in self.client.list_datasets()
+                    if not (
+                        d.dataset_id.startswith("idr_meta")
+                        or d.dataset_id.startswith("idr_work")
+                        or d.dataset_id.startswith("idr_out")
+                    )
+                ]
+            except Exception:
+                datasets = []
 
-        try:
-            tables = list(self.client.list_tables(dataset_ref))
-            return [f"{t.dataset_id}.{t.table_id}" for t in tables]
-        except Exception:
-            return []
+        all_tables = []
+        for dataset_id in datasets:
+            if "." not in dataset_id:
+                dataset_ref = f"{self.project}.{dataset_id}"
+            else:
+                dataset_ref = dataset_id
+
+            try:
+                tables = list(self.client.list_tables(dataset_ref))
+                all_tables.extend([f"{t.dataset_id}.{t.table_id}" for t in tables])
+            except Exception:
+                continue
+
+        return all_tables
 
     def close(self) -> None:
         """No-op - BigQuery client doesn't need explicit close."""

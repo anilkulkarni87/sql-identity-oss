@@ -163,32 +163,67 @@ class DatabricksAdapter(IDRAdapter):
                 return columns
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
-        """List tables in a schema."""
-        if not schema:
-            return []
-
-        # Relaxed validation: Allow dots for Unity Catalog (catalog.schema)
+        """List tables in a schema, or across user schemas if schema is None."""
         import re
 
-        if not re.match(r"^[a-zA-Z0-9_\.]+$", schema):
-            # If strictly needed, we could allow more chars but for "setup wizard" simplicity,
-            # we assume standard schema names. If complex chars needed, we would need robust escaping.
-            raise ValueError(
-                f"Invalid schema name: {schema} (Only alphanumeric, underscore, dot allowed)"
-            )
-
-        query = f"SHOW TABLES IN {schema}"
-
-        if self.is_spark:
-            result = self.conn_obj.sql(query).collect()
-            # Spark SHOW TABLES returns: database, tableName, isTemporary
-            return [f"{row['database']}.{row['tableName']}" for row in result]
+        if schema:
+            if not re.match(r"^[a-zA-Z0-9_\.]+$", schema):
+                raise ValueError(
+                    f"Invalid schema name: {schema} (Only alphanumeric, underscore, dot allowed)"
+                )
+            target_schemas = [schema]
         else:
-            with self.conn_obj.cursor() as cur:
-                cur.execute(query)
-                result = cur.fetchall()
-                # DBAPI fetchall returns tuples. Usually (database, tableName, isTemporary)
-                return [f"{row[0]}.{row[1]}" for row in result]
+            # Discover user schemas if not specified
+            target_schemas = []
+            try:
+                if self.is_spark:
+                    schema_rows = self.conn_obj.sql("SHOW SCHEMAS").collect()
+                    for r in schema_rows:
+                        name = r[0]
+                        if name and name.lower() not in (
+                            "information_schema",
+                            "sys",
+                            "idr_meta",
+                            "idr_work",
+                            "idr_out",
+                        ):
+                            target_schemas.append(name)
+                else:
+                    with self.conn_obj.cursor() as cur:
+                        cur.execute("SHOW SCHEMAS")
+                        schema_rows = cur.fetchall()
+                        for r in schema_rows:
+                            name = r[0]
+                            if name and name.lower() not in (
+                                "information_schema",
+                                "sys",
+                                "idr_meta",
+                                "idr_work",
+                                "idr_out",
+                            ):
+                                target_schemas.append(name)
+            except Exception:
+                target_schemas = ["default"]
+
+            if not target_schemas:
+                target_schemas = ["default"]
+
+        all_tables = []
+        for s in target_schemas:
+            query = f"SHOW TABLES IN {s}"
+            try:
+                if self.is_spark:
+                    result = self.conn_obj.sql(query).collect()
+                    all_tables.extend([f"{row['database']}.{row['tableName']}" for row in result])
+                else:
+                    with self.conn_obj.cursor() as cur:
+                        cur.execute(query)
+                        result = cur.fetchall()
+                        all_tables.extend([f"{row[0]}.{row[1]}" for row in result])
+            except Exception:
+                continue
+
+        return all_tables
 
     def close(self) -> None:
         """No-op - Spark session lifecycle managed by Databricks."""

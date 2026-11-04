@@ -478,12 +478,27 @@ def dry_run_pipeline(run_mode: str = "FULL", max_iters: int = 30) -> Dict[str, A
 
 
 @mcp.tool()
-def discover_and_suggest_rules(table_fqn: str = None, sample_size: int = 500) -> Dict[str, Any]:
+def discover_and_suggest_rules(
+    table_fqn: str = None, schema: str = None, sample_size: int = 500
+) -> Dict[str, Any]:
     """
     Profile warehouse tables, detect PII and identity attributes using semantic analysis,
     and generate an automated, production-ready declarative IDR configuration (Direction 1).
+
+    Parameters:
+        table_fqn: Optional fully-qualified table name (e.g. 'ecommerce_demo.customers').
+        schema: Optional schema name (e.g. 'ecommerce_demo') to discover tables in.
+        sample_size: Maximum sample rows for profile analysis (default: 500).
     """
-    adapter = get_adapter()
+    try:
+        adapter = get_adapter()
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "error": str(e),
+            "hint": "Please call mcp.connect_from_env() or configure connection environment variables (IDR_PLATFORM, etc.).",
+        }
+
     sample_size = min(max(sample_size, 50), 2000)
 
     try:
@@ -491,7 +506,7 @@ def discover_and_suggest_rules(table_fqn: str = None, sample_size: int = 500) ->
         if table_fqn:
             candidate_tables = [table_fqn]
         else:
-            all_tables = adapter.list_tables()
+            all_tables = adapter.list_tables(schema=schema)
             # Filter out system and framework schemas
             candidate_tables = [
                 t for t in all_tables
@@ -500,7 +515,12 @@ def discover_and_suggest_rules(table_fqn: str = None, sample_size: int = 500) ->
 
         if not candidate_tables:
             return {
-                "error": "No user data tables found to profile. Please provide a table_fqn or ensure source tables exist."
+                "status": "NO_TABLES_FOUND",
+                "tables_profiled": 0,
+                "detected_identifiers": [],
+                "detected_attributes": [],
+                "suggested_config": {"sources": [], "rules": [], "survivorship": [], "exclusions": []},
+                "error": f"No user data tables found to profile{f' in schema {schema}' if schema else ''}. Please provide table_fqn='schema.table' or pass schema='...'.",
             }
 
         sources = []
@@ -880,10 +900,16 @@ def connect_from_env():
         elif platform == "databricks":
             from databricks import sql
 
+            host = _get_env("DATABRICKS_HOST")
+            if host:
+                host = host.replace("https://", "").replace("http://", "").rstrip("/")
+            http_path = _get_env("DATABRICKS_HTTP_PATH")
+            token = _get_env("DATABRICKS_TOKEN")
+
             conn = sql.connect(
-                server_hostname=_get_env("DATABRICKS_HOST"),
-                http_path=_get_env("DATABRICKS_HTTP_PATH"),
-                access_token=_get_env("DATABRICKS_TOKEN"),
+                server_hostname=host,
+                http_path=http_path,
+                access_token=token,
             )
             from idr_core.adapters.databricks import DatabricksAdapter
 
