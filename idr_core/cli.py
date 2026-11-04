@@ -401,6 +401,16 @@ def handle_run(args) -> int:
 
 def handle_serve(args) -> int:
     """Handle serve command."""
+    # Ensure dev auth is allowed by default for local CLI serving
+    os.environ.setdefault("IDR_ALLOW_INSECURE_DEV_AUTH", "true")
+
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:
+        pass
+
     try:
         import uvicorn
     except ImportError:

@@ -101,9 +101,22 @@ def test_get_current_user_dev_mode_returns_default_user(monkeypatch):
 def test_get_current_user_dev_mode_fails_closed_without_override(monkeypatch):
     monkeypatch.setattr(deps, "OIDC_ISSUER", "")
     monkeypatch.setattr(deps, "ALLOW_INSECURE_DEV_AUTH", False)
+    monkeypatch.delenv("IDR_ALLOW_INSECURE_DEV_AUTH", raising=False)
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(deps.get_current_user(token=None))
 
     assert exc.value.status_code == 503
     assert "Authentication is not configured" in exc.value.detail
+
+
+def test_get_current_user_dev_mode_allows_via_dynamic_env(monkeypatch):
+    """Verify dynamic env var IDR_ALLOW_INSECURE_DEV_AUTH=true works even if module was loaded when False."""
+    monkeypatch.setattr(deps, "OIDC_ISSUER", "")
+    monkeypatch.setattr(deps, "ALLOW_INSECURE_DEV_AUTH", False)
+    monkeypatch.setenv("IDR_ALLOW_INSECURE_DEV_AUTH", "true")
+
+    user = asyncio.run(deps.get_current_user(token=None))
+    assert user["sub"] == "dev-user"
+    assert user["roles"] == ["admin"]
+

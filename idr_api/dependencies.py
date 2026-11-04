@@ -3,6 +3,13 @@ import time
 from asyncio import Lock
 from typing import Any, Dict, Optional
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -39,6 +46,14 @@ OIDC_JWKS_HTTP_TIMEOUT_SECONDS = float(os.getenv("IDR_AUTH_JWKS_HTTP_TIMEOUT_SEC
 ALLOW_INSECURE_DEV_AUTH = (
     os.getenv("IDR_ALLOW_INSECURE_DEV_AUTH", "false").strip().lower() in {"1", "true", "yes", "on"}
 )
+
+
+def _is_dev_auth_allowed() -> bool:
+    """Check if insecure dev auth is permitted (checks module constant or dynamic env)."""
+    if ALLOW_INSECURE_DEV_AUTH:
+        return True
+    return os.getenv("IDR_ALLOW_INSECURE_DEV_AUTH", "false").strip().lower() in {"1", "true", "yes", "on"}
+
 ENFORCE_RBAC = (
     os.getenv("IDR_ENFORCE_RBAC", "false").strip().lower() in {"1", "true", "yes", "on"}
 )
@@ -227,7 +242,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     """
     # 1. Unconfigured Auth
     if not OIDC_ISSUER:
-        if not ALLOW_INSECURE_DEV_AUTH:
+        if not _is_dev_auth_allowed():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
