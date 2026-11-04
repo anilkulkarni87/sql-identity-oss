@@ -45,6 +45,7 @@ Solutions and diagnostic steps for common identity resolution and warehouse issu
      INSERT INTO idr_meta.identifier_exclusion (identifier_type, identifier_value_pattern, match_type, reason)
      VALUES ('email', 'shared_kiosk@store.com', 'EXACT', 'Shared store device');
      ```
+
   2. Set `max_group_size` on the matching rule (e.g. `100` or `5000`). Oversized groups will be automatically skipped and logged to `idr_out.skipped_identifier_groups`.
 
 ### Label Propagation Not Converging
@@ -55,6 +56,7 @@ Solutions and diagnostic steps for common identity resolution and warehouse issu
     ```bash
     idr run --platform [platform] --mode FULL --max-iters 50
     ```
+
   - Inspect `idr_out.skipped_identifier_groups` to check for unintentional hubs connecting disparate networks.
 
 ---

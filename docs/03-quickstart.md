@@ -94,7 +94,7 @@ Open [http://localhost:3000](http://localhost:3000) for the UI and [http://local
 
 ## 🤖 4. AI Agent Integration via MCP
 
-IDR includes a native **FastMCP** server providing 14 agent tools for Cursor, Claude Desktop, and LLM orchestration frameworks.
+IDR includes a native **FastMCP** server providing 17 agent tools for Cursor, Claude Desktop, and LLM orchestration frameworks.
 
 ### Running the MCP Server
 ```bash

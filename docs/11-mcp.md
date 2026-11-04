@@ -23,6 +23,7 @@ idr mcp
 ## 🔒 PII Masking & Privacy Controls
 
 By default (`IDR_PII_ACCESS=masked` or unset), the MCP server automatically redacts sensitive attributes (emails, phone numbers, names):
+
 - `john.doe@example.com` becomes `jo***om`
 - `555-0199` becomes `55***99`
 

@@ -23,7 +23,7 @@ python tools/scale_test/run_scale_and_mcp_benchmark.py --rows 250000 --incr-rows
    - **Connected-Component Completeness**: 0 cross-cluster edges.
    - **Minimum-Label Determinism**: `resolved_id == MIN(entity_key)` for every cluster.
    - **Golden Profile Bijectivity**: Exactly 1 Golden Profile per cluster.
-6. **MCP Latency Verification**: Benchmarks all 14 MCP agent tools against the 260,000-entity graph (sub-second response times).
+6. **MCP Latency Verification**: Benchmarks all 17 MCP agent tools against the 260,000-entity graph (sub-second response times).
 
 ---
 

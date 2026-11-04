@@ -151,7 +151,7 @@ idr quickstart [--rows=10000] [--output=quickstart_demo.duckdb] [--seed=42]
 
 ### 5. `idr mcp`
 
-Launches the Model Context Protocol (MCP) server, exposing 14 operational tools to AI assistants (Claude Desktop, Cursor, Antigravity).
+Launches the Model Context Protocol (MCP) server, exposing 17 operational tools to AI assistants (Claude Desktop, Cursor, Antigravity).
 
 ```bash
 idr mcp [--transport=stdio|sse]

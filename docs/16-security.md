@@ -24,6 +24,7 @@ GRANT ALL ON SCHEMA idr_out TO ROLE IDR_EXECUTOR;
 
 ### BigQuery
 Use a dedicated Service Account with granular IAM roles.
+
 *   `roles/bigquery.jobUser` (Project level)
 *   `roles/bigquery.dataViewer` (Source datasets)
 *   `roles/bigquery.dataEditor` (IDR datasets)
@@ -48,6 +49,7 @@ Use a dedicated Service Account with granular IAM roles.
 ## API Token Validation
 
 The API validates bearer tokens against OIDC JWKS with:
+
 - `kid`-based signing key selection
 - Audience and issuer enforcement
 - JWKS cache with configurable TTL (`IDR_AUTH_JWKS_TTL_SECONDS`)

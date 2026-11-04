@@ -16,6 +16,7 @@ UPDATE idr_meta.rule SET max_group_size = 1 WHERE identifier_type = 'SSN';
 ```
 
 **What happens when exceeded:**
+
 1. Identifier group is skipped
 2. Entities become singletons (resolved_id = entity_key)
 3. Logged to `idr_out.skipped_identifier_groups`

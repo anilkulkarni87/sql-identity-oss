@@ -43,6 +43,7 @@ jobs:
 ### Lockfile Enforcement
 
 CI dependency installation uses pinned lockfiles:
+
 - `requirements/ci.lock` for test, lint, and DDL validation jobs
 - `requirements/release.lock` for package/release artifact jobs
 - `requirements/docs.lock` for docs workflow
@@ -52,6 +53,7 @@ UI dependencies are verified with `npm ci` to enforce `idr_ui/package-lock.json`
 ### SBOM Verification
 
 `test.yml` includes an `sbom-verify` job that:
+
 1. Builds Python artifacts (`dist/*`)
 2. Builds API and UI Docker images
 3. Generates SPDX JSON SBOMs for each artifact/image
@@ -61,6 +63,7 @@ UI dependencies are verified with `npm ci` to enforce `idr_ui/package-lock.json`
 ### Enterprise E2E Gate
 
 `test.yml` includes `enterprise-e2e` that validates the enterprise stack end-to-end:
+
 1. Boots `docker-compose.enterprise.yml`
 2. Verifies Keycloak realm bootstrap
 3. Verifies API health and Prometheus health
@@ -72,6 +75,7 @@ UI dependencies are verified with `npm ci` to enforce `idr_ui/package-lock.json`
 ### Release Workflow
 
 `release.yml` is tag-driven (`v*`) and produces reproducible artifacts:
+
 - Python wheel + sdist
 - Wheel install smoke check
 - GHCR images for `idr-api` and `idr-ui`

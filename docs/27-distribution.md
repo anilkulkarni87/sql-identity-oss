@@ -59,13 +59,16 @@ docker compose up --build
 ## CI Lockfiles
 
 Pinned lockfiles used in automation:
+
 - `requirements/ci.lock`
 - `requirements/release.lock`
 - `requirements/docs.lock`
 
 UI dependency lockfile:
+
 - `idr_ui/package-lock.json` (validated in CI via `npm ci`)
 
 Enterprise session-store extension:
+
 - `IDR_SESSION_STORE_CLASS=idr_enterprise.session_store.EnterpriseInMemoryConnectionSessionStore`
 - Redis-backed option: `IDR_SESSION_STORE_CLASS=idr_enterprise.session_store.RedisConnectionSessionStore`

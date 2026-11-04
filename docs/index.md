@@ -23,7 +23,7 @@ Unifying fragmented customer records across CRM, point-of-sale, e-commerce, mobi
 * **Deterministic & Fully Auditable**: Every edge, link, and cluster decision is documented with confidence scores, rule IDs, and full lineage. No probabilistic hallucinations.
 * **Anchor-Based Edge Building ($O(N)$ vs $O(N^2)$)**: Avoids Cartesian blowouts on common identifiers by connecting groups via star-topology anchor edges.
 * **Pure SQL Connected Components**: Distributed Label Propagation executes natively in SQL without requiring graph database infrastructure (Neo4j, AWS Neptune).
-* **AI-Ready with Model Context Protocol (MCP)**: Native MCP server exposing 14 tools for AI agents (Cursor, Claude Desktop, Antigravity) to inspect, configure, and operate identity pipelines.
+* **AI-Ready with Model Context Protocol (MCP)**: Native MCP server exposing 17 tools for AI agents (Cursor, Claude Desktop, Antigravity) to inspect, configure, autonomously profile schemas, simulate rule risks, and resolve Customer 360 contexts.
 * **Rich Developer Ecosystem**: First-class Python CLI (`idr`), FastAPI REST service, Prometheus metrics, interactive React Web UI, and dbt package (`dbt_idr`).
 
 ---
@@ -41,6 +41,7 @@ idr quickstart
 ```
 
 This single command:
+
 1. Synthesizes 10,000 multi-source customer records across Web, Store, Mobile, and Call Center.
 2. Injects cross-channel identifier overlaps (Email, Phone, Loyalty ID).
 3. Provisions schemas (`idr_meta`, `idr_work`, `idr_out`) and applies matching rules.
@@ -134,7 +135,7 @@ flowchart TD
     # packages.yml
     packages:
       - package: anilkulkarni87/dbt_idr
-        version: 0.5.1
+        version: 0.6.0
     ```
 
 ---

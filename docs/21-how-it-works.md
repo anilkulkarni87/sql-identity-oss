@@ -39,6 +39,7 @@ Here is how SQL Identity Resolution connects them deterministically in standard 
 Raw data is notoriously inconsistent—casing differs, phones have dashes or parentheses, and whitespace creeps in.
 
 The engine normalizes all extracted identifiers into uniform tokens:
+
 * `john.smith@gmail.com` -> `john.smith@gmail.com` (lowercased)
 * `(555) 019-2834` -> `5550192834` (digits only)
 * `555-019-2834` -> `5550192834` (digits only)

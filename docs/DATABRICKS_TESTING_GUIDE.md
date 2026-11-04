@@ -150,6 +150,7 @@ The Web UI provides a 6-step Setup Wizard, an Explorer for customer graph visual
     cd /Users/harihiom/Anil/git/sql-identity-oss
     idr serve --port 8000
     ```
+
     * Swagger UI documentation: `http://localhost:8000/docs`
     * Prometheus metrics: `http://localhost:8000/metrics`
 
@@ -158,6 +159,7 @@ The Web UI provides a 6-step Setup Wizard, an Explorer for customer graph visual
     cd /Users/harihiom/Anil/git/sql-identity-oss/idr_ui
     npm run dev
     ```
+
     * Access the web dashboard: `http://localhost:5173`
 
 ---

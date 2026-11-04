@@ -8,6 +8,7 @@ Scaling identity resolution to tens or hundreds of millions of entities introduc
 
 ### Problem A: The Supernode Phenomenon
 A "supernode" occurs when an identifier is shared across a massive number of records. Common real-world examples:
+
 * Placeholder emails: `test@test.com`, `noemail@store.com`, `guest@checkout.com`
 * Default phone numbers: `000-000-0000`, `123-456-7890`, company switchboards
 * Null or empty strings that bypassed ingestion validation

@@ -1,6 +1,7 @@
 # Schema & Data Model Reference
 
 IDR organizes all state into three schemas across all 4 supported data warehouses:
+
 1. **`idr_meta`**: Configuration, rules, mappings, and watermarks.
 2. **`idr_work`**: Transient staging tables used during pipeline execution.
 3. **`idr_out`**: Production identity graph, resolved clusters, golden profiles, and telemetry.

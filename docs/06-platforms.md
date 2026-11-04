@@ -35,6 +35,7 @@ idr run --platform duckdb --db production.duckdb --mode FULL
   SET memory_limit = '16GB';
   SET threads = 8;
   ```
+
 - Use DuckDB `:memory:` mode in automated unit/integration tests to eliminate disk I/O and avoid file lock contention.
 
 ---
@@ -79,6 +80,7 @@ idr run --platform snowflake --mode FULL
   ALTER TABLE idr_out.identity_edges_current CLUSTER BY (identifier_type);
   ALTER TABLE idr_out.identity_identifiers_current CLUSTER BY (identifier_type);
   ```
+
 - **Warehouse Sizing**: Use a Medium or Large warehouse for initial full loads (>10M rows); an X-Small or Small warehouse is sufficient for daily incremental (`INCR`) runs.
 
 ---
@@ -101,6 +103,7 @@ export IDR_PROJECT="my-gcp-project-id"
 ```
 
 Required IAM Roles for the service account:
+
 - `roles/bigquery.dataEditor` (or `roles/bigquery.dataOwner` if resetting datasets)
 - `roles/bigquery.jobUser`
 

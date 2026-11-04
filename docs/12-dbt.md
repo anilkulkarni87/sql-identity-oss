@@ -11,6 +11,7 @@ packages:
 ```
 
 Seed configuration:
+
 - `idr_sources.csv`
 - `idr_rules.csv`
 - `idr_identifier_mappings.csv`
@@ -26,5 +27,6 @@ dbt run --select dbt_idr
 ```
 
 Notes:
+
 - Fuzzy matching is not supported in dbt.
 - Golden profiles support RECENCY and PRIORITY.

@@ -55,11 +55,13 @@ A common pitfall in identity resolution is "cluster explosion"—a shared identi
 
 ### Exact & Wildcard Blocklists (`idr_meta.identifier_exclusion`)
 Before any edges are formed, identifiers are checked against an exclusion registry:
+
 * **Exact match**: Excludes placeholder emails like `test@test.com`, `unknown@gmail.com`.
 * **Domain wildcard**: Excludes high-volume corporate email addresses or common generic domains.
 
 ### Group Size Capping (`max_group_size`)
 Every rule specifies a `max_group_size` (default: 50):
+
 * If an identifier matches $N > \text{max\_group\_size}$ distinct entities, the group is **not linked**.
 * Instead, it is routed to `idr_out.skipped_identifier_groups` with the reason `EXCEEDS_MAX_GROUP_SIZE`.
 * This ensures that edge generation runtime and memory footprint remain deterministic and sub-linear.
@@ -75,6 +77,7 @@ $$\text{Edges}_{\text{complete}} = \frac{N(N - 1)}{2} \in O(N^2)$$
 For a group of 1,000 records, a complete graph creates 499,500 edges.
 
 Instead, `sql-identity-oss` employs **Anchor-Based Edge Construction**:
+
 1. Within each identifier group, the entity with the lowest lexicographical `entity_key` is designated as the **Anchor**.
 2. Directed or undirected edges are formed exclusively between each member and the anchor:
 
@@ -99,6 +102,7 @@ Connected components are resolved using an iterative SQL technique called **Labe
 1. **Initialization**: Every entity starts with its own `entity_key` as its initial cluster label.
 2. **Propagation Step**: In each iteration $k$, every node queries all its immediate neighbors across the edge table and adopts the **minimum label**:
    $$\text{Label}_{v}^{(k+1)} = \min \left( \text{Label}_{v}^{(k)}, \min_{u \in \text{Neighbors}(v)} \text{Label}_{u}^{(k)} \right)$$
+
 3. **Convergence**: The algorithm tracks the number of nodes whose label changed during the iteration.
    * If $\Delta = 0$, the graph has reached a fixed-point equilibrium: all nodes in each connected component share the identical minimum `resolved_id`.
    * Execution terminates automatically or halts when `max_lp_iterations` (default: 30) is reached.

@@ -1,6 +1,7 @@
 # Metrics Reference
 
 Metrics are available in two forms:
+
 - Warehouse-level run metrics in `idr_out.*` tables.
 - API operational metrics exposed in Prometheus format at `/metrics`.
 
@@ -20,9 +21,11 @@ Metrics are available in two forms:
 ### Prometheus Endpoint
 
 The API exposes:
+
 - `GET /metrics` (Prometheus/OpenMetrics text payload)
 
 Core API metrics:
+
 - `idr_http_requests_total{method,path,status}`
 - `idr_http_request_duration_seconds{method,path}`
 - `idr_api_db_connected`
