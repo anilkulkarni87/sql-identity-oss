@@ -6,9 +6,9 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width,initial-scale=1" name="viewport"/>
 <meta content="Production-grade deterministic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks" name="description"/>
-<link href="https://anilkulkarni87.github.io/sql-identity-resolution/20-data-model/" rel="canonical"/>
-<link href="../21-how-it-works/" rel="prev"/>
-<link href="../02-installation/" rel="next"/>
+<link href="https://anilkulkarni87.github.io/sql-identity-oss/20-data-model/" rel="canonical"/>
+<link href="../19-matching-algorithm/" rel="prev"/>
+<link href="../08-schema/" rel="next"/>
 <link href="../assets/images/favicon.png" rel="icon"/>
 <meta content="mkdocs-1.6.1, mkdocs-material-9.5.47" name="generator"/>
 <title>Data Model - SQL Identity Resolution</title>
@@ -24,7 +24,7 @@
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox"/>
 <label class="md-overlay" for="__drawer"></label>
 <div data-md-component="skip">
-<a class="md-skip" href="#data-model">
+<a class="md-skip" href="#data-model-schema-architecture">
           Skip to content
         </a>
 </div>
@@ -97,12 +97,12 @@
 </div>
 </div>
 <div class="md-header__source">
-<a class="md-source" data-md-component="source" href="https://github.com/anilkulkarni87/sql-identity-resolution" title="Go to repository">
+<a class="md-source" data-md-component="source" href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository">
 <div class="md-source__icon md-icon">
 <svg viewbox="0 0 496 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
 </div>
 <div class="md-source__repository">
-    sql-identity-resolution
+    sql-identity-oss
   </div>
 </a>
 </div>
@@ -112,19 +112,37 @@
 <nav aria-label="Tabs" class="md-tabs" data-md-component="tabs">
 <div class="md-grid">
 <ul class="md-tabs__list">
-<li class="md-tabs__item md-tabs__item--active">
+<li class="md-tabs__item">
+<a class="md-tabs__link" href="..">
+        
+  
+    
+  
+  Home
+
+      </a>
+</li>
+<li class="md-tabs__item">
 <a class="md-tabs__link" href="../01-overview/">
           
   
-  Act I: The Vision
+  Getting Started
+
+        </a>
+</li>
+<li class="md-tabs__item md-tabs__item--active">
+<a class="md-tabs__link" href="../19-matching-algorithm/">
+          
+  
+  Core Concepts
 
         </a>
 </li>
 <li class="md-tabs__item">
-<a class="md-tabs__link" href="../02-installation/">
+<a class="md-tabs__link" href="../06-platforms/">
           
   
-  Act II: Start Here
+  Supported Warehouses
 
         </a>
 </li>
@@ -132,7 +150,7 @@
 <a class="md-tabs__link" href="../04-configuration/">
           
   
-  Act III: Configuration
+  Configuration &amp; Operations
 
         </a>
 </li>
@@ -140,15 +158,15 @@
 <a class="md-tabs__link" href="../05-cli/">
           
   
-  Act IV: Operations
+  Interfaces &amp; Tooling
 
         </a>
 </li>
 <li class="md-tabs__item">
-<a class="md-tabs__link" href="../10-api/">
+<a class="md-tabs__link" href="../13-scale-testing/">
           
   
-  Act V: Advanced
+  Testing &amp; Benchmarks
 
         </a>
 </li>
@@ -168,34 +186,55 @@
     SQL Identity Resolution
   </label>
 <div class="md-nav__source">
-<a class="md-source" data-md-component="source" href="https://github.com/anilkulkarni87/sql-identity-resolution" title="Go to repository">
+<a class="md-source" data-md-component="source" href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository">
 <div class="md-source__icon md-icon">
 <svg viewbox="0 0 496 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
 </div>
 <div class="md-source__repository">
-    sql-identity-resolution
+    sql-identity-oss
   </div>
 </a>
 </div>
 <ul class="md-nav__list" data-md-scrollfix="">
-<li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
-<input checked="" class="md-nav__toggle md-toggle" id="__nav_1" type="checkbox"/>
-<label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="..">
 <span class="md-ellipsis">
-    Act I: The Vision
+    Home
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+<span class="md-ellipsis">
+    Getting Started
   </span>
 <span class="md-nav__icon md-icon"></span>
 </label>
-<nav aria-expanded="true" aria-labelledby="__nav_1_label" class="md-nav" data-md-level="1">
-<label class="md-nav__title" for="__nav_1">
+<nav aria-expanded="false" aria-labelledby="__nav_2_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_2">
 <span class="md-nav__icon md-icon"></span>
-            Act I: The Vision
+            Getting Started
           </label>
 <ul class="md-nav__list" data-md-scrollfix="">
 <li class="md-nav__item">
 <a class="md-nav__link" href="../01-overview/">
 <span class="md-ellipsis">
     Overview
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../03-quickstart/">
+<span class="md-ellipsis">
+    Quickstart
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../02-installation/">
+<span class="md-ellipsis">
+    Installation
   </span>
 </a>
 </li>
@@ -210,6 +249,37 @@
 <a class="md-nav__link" href="../21-how-it-works/">
 <span class="md-ellipsis">
     How It Works
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../27-distribution/">
+<span class="md-ellipsis">
+    Distribution &amp; Deployment
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+<span class="md-ellipsis">
+    Core Concepts
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_3_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_3">
+<span class="md-nav__icon md-icon"></span>
+            Core Concepts
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../19-matching-algorithm/">
+<span class="md-ellipsis">
+    Matching Algorithm
   </span>
 </a>
 </li>
@@ -233,134 +303,87 @@
     </label>
 <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#diagram">
+<a class="md-nav__link" href="#three-tier-schema-architecture">
 <span class="md-ellipsis">
-      Diagram
+      🏛️ Three-Tier Schema Architecture
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#key-concepts">
+<a class="md-nav__link" href="#1-metadata-schema-idr_meta">
 <span class="md-ellipsis">
-      Key Concepts
+      1. Metadata Schema (idr_meta)
     </span>
 </a>
-<nav aria-label="Key Concepts" class="md-nav">
+<nav aria-label="1. Metadata Schema (idr_meta)" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#entities">
+<a class="md-nav__link" href="#key-tables">
 <span class="md-ellipsis">
-      Entities
-    </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="#identifiers">
-<span class="md-ellipsis">
-      Identifiers
-    </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="#clusters">
-<span class="md-ellipsis">
-      Clusters
-    </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="#golden-profile">
-<span class="md-ellipsis">
-      Golden Profile
+      Key Tables:
     </span>
 </a>
 </li>
 </ul>
 </nav>
 </li>
-</ul>
-</nav>
-</li>
-</ul>
-</nav>
-</li>
-<li class="md-nav__item md-nav__item--nested">
-<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_2" type="checkbox"/>
-<label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-<span class="md-ellipsis">
-    Act II: Start Here
-  </span>
-<span class="md-nav__icon md-icon"></span>
-</label>
-<nav aria-expanded="false" aria-labelledby="__nav_2_label" class="md-nav" data-md-level="1">
-<label class="md-nav__title" for="__nav_2">
-<span class="md-nav__icon md-icon"></span>
-            Act II: Start Here
-          </label>
-<ul class="md-nav__list" data-md-scrollfix="">
 <li class="md-nav__item">
-<a class="md-nav__link" href="../02-installation/">
+<a class="md-nav__link" href="#2-working-schema-idr_work">
 <span class="md-ellipsis">
-    Installation
-  </span>
+      2. Working Schema (idr_work)
+    </span>
 </a>
-</li>
+<nav aria-label="2. Working Schema (idr_work)" class="md-nav">
+<ul class="md-nav__list">
 <li class="md-nav__item">
-<a class="md-nav__link" href="../27-distribution/">
+<a class="md-nav__link" href="#key-tables_1">
 <span class="md-ellipsis">
-    Distribution Paths
-  </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="../03-quickstart/">
-<span class="md-ellipsis">
-    Quickstart
-  </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="../21-how-it-works/">
-<span class="md-ellipsis">
-    How It Works
-  </span>
+      Key Tables:
+    </span>
 </a>
 </li>
 </ul>
 </nav>
 </li>
-<li class="md-nav__item md-nav__item--nested">
-<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_3" type="checkbox"/>
-<label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
-<span class="md-ellipsis">
-    Act III: Configuration
-  </span>
-<span class="md-nav__icon md-icon"></span>
-</label>
-<nav aria-expanded="false" aria-labelledby="__nav_3_label" class="md-nav" data-md-level="1">
-<label class="md-nav__title" for="__nav_3">
-<span class="md-nav__icon md-icon"></span>
-            Act III: Configuration
-          </label>
-<ul class="md-nav__list" data-md-scrollfix="">
 <li class="md-nav__item">
-<a class="md-nav__link" href="../04-configuration/">
+<a class="md-nav__link" href="#3-output-schema-idr_out">
 <span class="md-ellipsis">
-    Configuration
-  </span>
+      3. Output Schema (idr_out)
+    </span>
 </a>
+<nav aria-label="3. Output Schema (idr_out)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#key-tables_2">
+<span class="md-ellipsis">
+      Key Tables:
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#entity-relationship-summary">
+<span class="md-ellipsis">
+      🔗 Entity-Relationship Summary
+    </span>
+</a>
+</li>
+</ul>
+</nav>
 </li>
 <li class="md-nav__item">
 <a class="md-nav__link" href="../08-schema/">
 <span class="md-ellipsis">
-    Schema Reference
+    Schema &amp; DDL Reference
   </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="../19-matching-algorithm/">
+<a class="md-nav__link" href="../07-pipeline/">
 <span class="md-ellipsis">
-    Matching Algorithm
+    Pipeline Stages
   </span>
 </a>
 </li>
@@ -371,69 +394,34 @@
 <input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_4" type="checkbox"/>
 <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
 <span class="md-ellipsis">
-    Act IV: Operations
+    Supported Warehouses
   </span>
 <span class="md-nav__icon md-icon"></span>
 </label>
 <nav aria-expanded="false" aria-labelledby="__nav_4_label" class="md-nav" data-md-level="1">
 <label class="md-nav__title" for="__nav_4">
 <span class="md-nav__icon md-icon"></span>
-            Act IV: Operations
+            Supported Warehouses
           </label>
 <ul class="md-nav__list" data-md-scrollfix="">
 <li class="md-nav__item">
-<a class="md-nav__link" href="../05-cli/">
-<span class="md-ellipsis">
-    CLI Reference
-  </span>
-</a>
-</li>
-<li class="md-nav__item">
 <a class="md-nav__link" href="../06-platforms/">
 <span class="md-ellipsis">
-    Platforms
+    Platforms Overview
   </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="../07-pipeline/">
+<a class="md-nav__link" href="../24-sizing/">
 <span class="md-ellipsis">
-    Pipeline Details
+    Sizing &amp; Hardware
   </span>
 </a>
 </li>
 <li class="md-nav__item">
 <a class="md-nav__link" href="../25-scaling/">
 <span class="md-ellipsis">
-    Scaling &amp; Sizing
-  </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="../16-security/">
-<span class="md-ellipsis">
-    Security
-  </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="../15-ci-cd/">
-<span class="md-ellipsis">
-    CI/CD
-  </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="../14-troubleshooting/">
-<span class="md-ellipsis">
-    Troubleshooting
-  </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="../26-production-hardening/">
-<span class="md-ellipsis">
-    Production Hardening
+    Scaling Strategies
   </span>
 </a>
 </li>
@@ -444,34 +432,72 @@
 <input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5" type="checkbox"/>
 <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
 <span class="md-ellipsis">
-    Act V: Advanced
+    Configuration &amp; Operations
   </span>
 <span class="md-nav__icon md-icon"></span>
 </label>
 <nav aria-expanded="false" aria-labelledby="__nav_5_label" class="md-nav" data-md-level="1">
 <label class="md-nav__title" for="__nav_5">
 <span class="md-nav__icon md-icon"></span>
-            Act V: Advanced
+            Configuration &amp; Operations
           </label>
 <ul class="md-nav__list" data-md-scrollfix="">
 <li class="md-nav__item">
-<a class="md-nav__link" href="../10-api/">
+<a class="md-nav__link" href="../04-configuration/">
 <span class="md-ellipsis">
-    API
+    Configuration
   </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="../11-mcp/">
+<a class="md-nav__link" href="../26-production-hardening/">
 <span class="md-ellipsis">
-    MCP Server
+    Production Hardening
   </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="../12-dbt/">
+<a class="md-nav__link" href="../16-security/">
 <span class="md-ellipsis">
-    DBT Integration
+    Security &amp; Governance
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../15-ci-cd/">
+<span class="md-ellipsis">
+    CI/CD Automation
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../14-troubleshooting/">
+<span class="md-ellipsis">
+    Troubleshooting
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+<span class="md-ellipsis">
+    Interfaces &amp; Tooling
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_6_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_6">
+<span class="md-nav__icon md-icon"></span>
+            Interfaces &amp; Tooling
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../05-cli/">
+<span class="md-ellipsis">
+    CLI Reference
   </span>
 </a>
 </li>
@@ -483,9 +509,61 @@
 </a>
 </li>
 <li class="md-nav__item">
+<a class="md-nav__link" href="../10-api/">
+<span class="md-ellipsis">
+    REST API &amp; Metrics
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../11-mcp/">
+<span class="md-ellipsis">
+    MCP Server (AI Agents)
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../12-dbt/">
+<span class="md-ellipsis">
+    dbt Integration
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+<span class="md-ellipsis">
+    Testing &amp; Benchmarks
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_7">
+<span class="md-nav__icon md-icon"></span>
+            Testing &amp; Benchmarks
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../13-scale-testing/">
+<span class="md-ellipsis">
+    Scale Testing
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../17-e2e-testing/">
+<span class="md-ellipsis">
+    End-to-End Testing
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
 <a class="md-nav__link" href="../22-metrics/">
 <span class="md-ellipsis">
-    Metrics
+    Metrics Reference
   </span>
 </a>
 </li>
@@ -514,50 +592,72 @@
     </label>
 <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#diagram">
+<a class="md-nav__link" href="#three-tier-schema-architecture">
 <span class="md-ellipsis">
-      Diagram
+      🏛️ Three-Tier Schema Architecture
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#key-concepts">
+<a class="md-nav__link" href="#1-metadata-schema-idr_meta">
 <span class="md-ellipsis">
-      Key Concepts
+      1. Metadata Schema (idr_meta)
     </span>
 </a>
-<nav aria-label="Key Concepts" class="md-nav">
+<nav aria-label="1. Metadata Schema (idr_meta)" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#entities">
+<a class="md-nav__link" href="#key-tables">
 <span class="md-ellipsis">
-      Entities
-    </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="#identifiers">
-<span class="md-ellipsis">
-      Identifiers
-    </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="#clusters">
-<span class="md-ellipsis">
-      Clusters
-    </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="#golden-profile">
-<span class="md-ellipsis">
-      Golden Profile
+      Key Tables:
     </span>
 </a>
 </li>
 </ul>
 </nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-working-schema-idr_work">
+<span class="md-ellipsis">
+      2. Working Schema (idr_work)
+    </span>
+</a>
+<nav aria-label="2. Working Schema (idr_work)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#key-tables_1">
+<span class="md-ellipsis">
+      Key Tables:
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-output-schema-idr_out">
+<span class="md-ellipsis">
+      3. Output Schema (idr_out)
+    </span>
+</a>
+<nav aria-label="3. Output Schema (idr_out)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#key-tables_2">
+<span class="md-ellipsis">
+      Key Tables:
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#entity-relationship-summary">
+<span class="md-ellipsis">
+      🔗 Entity-Relationship Summary
+    </span>
+</a>
 </li>
 </ul>
 </nav>
@@ -566,27 +666,84 @@
 </div>
 <div class="md-content" data-md-component="content">
 <article class="md-content__inner md-typeset">
-<h1 id="data-model">Data Model</h1>
-<p>Conceptual Entity-Relationship Diagram.</p>
-<h2 id="diagram">Diagram</h2>
+<h1 id="data-model-schema-architecture">Data Model &amp; Schema Architecture</h1>
+<p>SQL Identity Resolution is structured around a three-tier schema architecture designed for high-concurrency warehouses, transactional isolation, and complete auditability.</p>
+<hr/>
+<h2 id="three-tier-schema-architecture">🏛️ Three-Tier Schema Architecture</h2>
+<pre class="mermaid"><code>flowchart TD
+    subgraph MetaSchema["1. Configuration &amp; Rules (idr_meta)"]
+        IM["identifier_mapping&lt;br/&gt;(Source extraction rules)"]
+        IE["identifier_exclusion&lt;br/&gt;(Blocklisted values &amp; wildcards)"]
+        SR["survivorship_rules&lt;br/&gt;(Golden profile precedence)"]
+        RC["run_control&lt;br/&gt;(State, watermark &amp; iteration bounds)"]
+    end
+
+    subgraph WorkSchema["2. Transient Pipeline State (idr_work)"]
+        ENT["entities_work&lt;br/&gt;(Extracted entity rows)"]
+        IDN["identifiers_work&lt;br/&gt;(Normalized &amp; hashed PII)"]
+        EDG["edges_work&lt;br/&gt;(Anchor-based graph edges)"]
+        LP["label_propagation_work&lt;br/&gt;(Iterative cluster state)"]
+    end
+
+    subgraph OutSchema["3. Serving &amp; Analytics (idr_out)"]
+        CLUST["identity_clusters_current&lt;br/&gt;(Active resolved clusters)"]
+        MEMB["identity_resolved_membership_current&lt;br/&gt;(Entity -&gt; Cluster mapping)"]
+        GOLD["golden_customer_profiles&lt;br/&gt;(Consolidated golden records)"]
+        AUD["identity_run_audit&lt;br/&gt;(Lineage, run metrics &amp; timing)"]
+    end
+
+    MetaSchema --&gt; WorkSchema
+    WorkSchema --&gt; OutSchema</code></pre>
+<hr/>
+<h2 id="1-metadata-schema-idr_meta">1. Metadata Schema (<code>idr_meta</code>)</h2>
+<p>Stores rule definitions, source mappings, attribute priority matrices, and pipeline configuration. Changes to this schema take effect on the next pipeline execution.</p>
+<h3 id="key-tables">Key Tables:</h3>
+<ul>
+<li><strong><code>identifier_mapping</code></strong>: Defines which columns from source tables contain identifiers (e.g., <code>EMAIL</code>, <code>PHONE</code>, <code>ACCOUNT_ID</code>), the extraction SQL expression, and the <code>max_group_size</code> threshold.</li>
+<li><strong><code>identifier_exclusion</code></strong>: Contains exact match strings (e.g. <code>test@example.com</code>, <code>0000000000</code>) and wildcard patterns that must be filtered out before graph construction.</li>
+<li><strong><code>survivorship_rules</code></strong>: Configures rule priority (<code>SOURCE_PRIORITY</code>, <code>MOST_RECENT</code>, <code>MOST_FREQUENT</code>) on an attribute-by-attribute basis for constructing golden customer profiles.</li>
+<li><strong><code>run_control</code></strong>: Tracks execution parameters, incremental watermarks, and convergence tolerances.</li>
+</ul>
+<hr/>
+<h2 id="2-working-schema-idr_work">2. Working Schema (<code>idr_work</code>)</h2>
+<p>Isolated workspace used during pipeline execution. In <code>INCR</code> mode, only affected subgraphs and delta entities are processed in this tier, leaving production serving tables untouched until commitment.</p>
+<h3 id="key-tables_1">Key Tables:</h3>
+<ul>
+<li><strong><code>entities_work</code></strong>: Entity keys extracted from source records with primary source timestamps and system origins.</li>
+<li><strong><code>identifiers_work</code></strong>: Extracted PII values after case normalization, whitespace trimming, regex cleansing, and cryptographic hashing.</li>
+<li><strong><code>edges_work</code></strong>: The materialized graph edges formed between entities. In strict deterministic mode, this table contains star-topology anchor edges connecting entities sharing identical identifiers.</li>
+<li><strong><code>label_propagation_work</code></strong>: Working table storing the current cluster label assignments during iterative SQL execution. Tracks label delta counts after each step until $\Delta = 0$.</li>
+</ul>
+<hr/>
+<h2 id="3-output-schema-idr_out">3. Output Schema (<code>idr_out</code>)</h2>
+<p>The consumption and serving layer queried by downstream analytics, Reverse ETL, Customer Data Platforms (CDPs), CRM syncs, and BI tools.</p>
+<h3 id="key-tables_2">Key Tables:</h3>
+<ul>
+<li><strong><code>identity_clusters_current</code></strong>: One row per distinct real-world entity / customer cluster:</li>
+<li><code>resolved_id</code>: Primary key of the resolved entity.</li>
+<li><code>cluster_size</code>: Number of distinct records grouped into this cluster.</li>
+<li><code>confidence_score</code>: Weighted confidence calculation (0.00 to 1.00) based on identifier quality.</li>
+<li><code>created_at</code> / <code>updated_at</code>: Cluster lifecycle timestamps.</li>
+<li><strong><code>identity_resolved_membership_current</code></strong>: Fast lookup table mapping every source record to its resolved identity:</li>
+<li><code>entity_key</code>: Unique record key (<code>source_system:source_pck</code>).</li>
+<li><code>resolved_id</code>: Canonical cluster identifier.</li>
+<li><code>is_anchor</code>: Boolean indicating whether this entity serves as the cluster's anchor.</li>
+<li><strong><code>golden_customer_profiles</code></strong>: The unified customer record created by applying survivorship rules across all linked entities:</li>
+<li>Canonical names, primary email, primary phone, postal address.</li>
+<li>Unified identifiers array (e.g. all known emails or device tokens associated with this person).</li>
+<li><strong><code>identity_run_audit</code></strong>: Granular execution log recording run mode (<code>FULL</code> vs <code>INCR</code>), stage timings, input row counts, edges materialized, clusters resolved, and convergence iteration counts.</li>
+<li><strong><code>skipped_identifier_groups</code></strong>: Audit table documenting identifier values that exceeded <code>max_group_size</code> or matched exclusion filters, preserving data quality observability.</li>
+</ul>
+<hr/>
+<h2 id="entity-relationship-summary">🔗 Entity-Relationship Summary</h2>
 <pre class="mermaid"><code>erDiagram
-    SourceTable ||--o{ IdentifierMapping : defines
-    Rule ||--o{ IdentifierMapping : uses
-    Entity ||--o{ Identifier : has
-    Entity }o--|| Cluster : belongs_to
-    Cluster ||--|| GoldenProfile : has</code></pre>
-<h2 id="key-concepts">Key Concepts</h2>
-<h3 id="entities">Entities</h3>
-<p>A distinct record from a source table (e.g., a row in <code>Salesforce.Contacts</code>).
-*   Key: <code>entity_key</code> (Source + PCK)</p>
-<h3 id="identifiers">Identifiers</h3>
-<p>A piece of evidence used to link entities (e.g., <code>john@example.com</code>).
-*   Type: <code>EMAIL</code>, <code>PHONE</code>, <code>DEVICE_ID</code>.</p>
-<h3 id="clusters">Clusters</h3>
-<p>A group of entities resolved to the same real-world person.
-*   Key: <code>resolved_id</code>.</p>
-<h3 id="golden-profile">Golden Profile</h3>
-<p>The consolidated "Best Version" of the person, derived from all entities in the cluster using <strong>Survivorship Rules</strong>.</p>
+    SOURCE_TABLES ||--o{ IDENTIFIER_MAPPING : "configured by"
+    IDENTIFIER_MAPPING ||--o{ IDENTIFIERS_WORK : "extracts"
+    IDENTIFIERS_WORK ||--o{ EDGES_WORK : "generates anchor edges"
+    EDGES_WORK ||--o{ LABEL_PROPAGATION_WORK : "propagates labels"
+    LABEL_PROPAGATION_WORK ||--|| IDENTITY_RESOLVED_MEMBERSHIP_CURRENT : "materializes"
+    IDENTITY_RESOLVED_MEMBERSHIP_CURRENT }o--|| IDENTITY_CLUSTERS_CURRENT : "belongs to"
+    IDENTITY_CLUSTERS_CURRENT ||--|| GOLDEN_CUSTOMER_PROFILES : "consolidates into"</code></pre>
 </article>
 </div>
 <script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>

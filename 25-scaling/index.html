@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://anilkulkarni87.github.io/sql-identity-resolution/25-scaling/">
+        <link rel="canonical" href="https://anilkulkarni87.github.io/sql-identity-oss/25-scaling/">
       
       
-        <link rel="prev" href="../07-pipeline/">
+        <link rel="prev" href="../24-sizing/">
       
       
-        <link rel="next" href="../16-security/">
+        <link rel="next" href="../04-configuration/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Scaling & Sizing - SQL Identity Resolution</title>
+        <title>Scaling Strategies - SQL Identity Resolution</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#scaling-considerations" class="md-skip">
+        <a href="#scaling-strategies-high-volume-operations" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Scaling & Sizing
+              Scaling Strategies
             
           </span>
         </div>
@@ -189,13 +189,13 @@
     
     
       <div class="md-header__source">
-        <a href="https://github.com/anilkulkarni87/sql-identity-resolution" title="Go to repository" class="md-source" data-md-component="source">
+        <a href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
   </div>
   <div class="md-source__repository">
-    sql-identity-resolution
+    sql-identity-oss
   </div>
 </a>
       </div>
@@ -218,13 +218,30 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
     
       <li class="md-tabs__item">
         <a href="../01-overview/" class="md-tabs__link">
           
   
-  Act I: The Vision
+  Getting Started
 
         </a>
       </li>
@@ -239,10 +256,30 @@
     
     
       <li class="md-tabs__item">
-        <a href="../02-installation/" class="md-tabs__link">
+        <a href="../19-matching-algorithm/" class="md-tabs__link">
           
   
-  Act II: Start Here
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../06-platforms/" class="md-tabs__link">
+          
+  
+  Supported Warehouses
 
         </a>
       </li>
@@ -260,27 +297,7 @@
         <a href="../04-configuration/" class="md-tabs__link">
           
   
-  Act III: Configuration
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-    
-  
-  
-    
-    
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../05-cli/" class="md-tabs__link">
-          
-  
-  Act IV: Operations
+  Configuration & Operations
 
         </a>
       </li>
@@ -295,10 +312,28 @@
     
     
       <li class="md-tabs__item">
-        <a href="../10-api/" class="md-tabs__link">
+        <a href="../05-cli/" class="md-tabs__link">
           
   
-  Act V: Advanced
+  Interfaces & Tooling
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../13-scale-testing/" class="md-tabs__link">
+          
+  
+  Testing & Benchmarks
 
         </a>
       </li>
@@ -338,18 +373,38 @@
   </label>
   
     <div class="md-nav__source">
-      <a href="https://github.com/anilkulkarni87/sql-identity-resolution" title="Go to repository" class="md-source" data-md-component="source">
+      <a href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
   </div>
   <div class="md-source__repository">
-    sql-identity-resolution
+    sql-identity-oss
   </div>
 </a>
     </div>
   
   <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
     
       
       
@@ -372,24 +427,24 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   <span class="md-ellipsis">
-    Act I: The Vision
+    Getting Started
   </span>
   
 
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_1">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
-            Act I: The Vision
+            Getting Started
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -405,6 +460,48 @@
   
   <span class="md-ellipsis">
     Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-quickstart/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Quickstart
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-installation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
   </span>
   
 
@@ -463,144 +560,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../20-data-model/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Data Model
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    Act II: Start Here
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            Act II: Start Here
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../02-installation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Installation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../27-distribution/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Distribution Paths
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../03-quickstart/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Quickstart
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../21-how-it-works/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    How It Works
+    Distribution & Deployment
   </span>
   
 
@@ -645,7 +609,7 @@
             
   
   <span class="md-ellipsis">
-    Act III: Configuration
+    Core Concepts
   </span>
   
 
@@ -655,7 +619,7 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
-            Act III: Configuration
+            Core Concepts
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -666,11 +630,32 @@
   
   
     <li class="md-nav__item">
-      <a href="../04-configuration/" class="md-nav__link">
+      <a href="../19-matching-algorithm/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Configuration
+    Matching Algorithm
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../20-data-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Data Model
   </span>
   
 
@@ -691,7 +676,7 @@
         
   
   <span class="md-ellipsis">
-    Schema Reference
+    Schema & DDL Reference
   </span>
   
 
@@ -708,11 +693,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../19-matching-algorithm/" class="md-nav__link">
+      <a href="../07-pipeline/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Matching Algorithm
+    Pipeline Stages
   </span>
   
 
@@ -760,7 +745,7 @@
             
   
   <span class="md-ellipsis">
-    Act IV: Operations
+    Supported Warehouses
   </span>
   
 
@@ -770,30 +755,9 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
-            Act IV: Operations
+            Supported Warehouses
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../05-cli/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    CLI Reference
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
             
               
                 
@@ -806,7 +770,7 @@
         
   
   <span class="md-ellipsis">
-    Platforms
+    Platforms Overview
   </span>
   
 
@@ -823,11 +787,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../07-pipeline/" class="md-nav__link">
+      <a href="../24-sizing/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Pipeline Details
+    Sizing & Hardware
   </span>
   
 
@@ -857,7 +821,7 @@
           
   
   <span class="md-ellipsis">
-    Scaling & Sizing
+    Scaling Strategies
   </span>
   
 
@@ -868,7 +832,7 @@
         
   
   <span class="md-ellipsis">
-    Scaling & Sizing
+    Scaling Strategies
   </span>
   
 
@@ -890,28 +854,82 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#bottlenecks" class="md-nav__link">
+  <a href="#1-tackling-graph-bottlenecks" class="md-nav__link">
     <span class="md-ellipsis">
-      Bottlenecks
+      ⚡ 1. Tackling Graph Bottlenecks
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Bottlenecks">
+    <nav class="md-nav" aria-label="⚡ 1. Tackling Graph Bottlenecks">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-supernodes-giant-groups" class="md-nav__link">
+  <a href="#problem-a-the-supernode-phenomenon" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Supernodes (Giant Groups)
+      Problem A: The Supernode Phenomenon
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Problem A: The Supernode Phenomenon">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#solutions-in-sql-identity-oss" class="md-nav__link">
+    <span class="md-ellipsis">
+      Solutions in sql-identity-oss:
     </span>
   </a>
   
 </li>
         
+      </ul>
+    </nav>
+  
+</li>
+        
           <li class="md-nav__item">
-  <a href="#2-deep-chains" class="md-nav__link">
+  <a href="#problem-b-deep-linear-chains-convergence-latency" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Deep Chains
+      Problem B: Deep Linear Chains &amp; Convergence Latency
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Problem B: Deep Linear Chains & Convergence Latency">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Solutions:
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-incremental-mode-mode-incr" class="md-nav__link">
+    <span class="md-ellipsis">
+      🔄 2. Incremental Mode (--mode INCR)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔄 2. Incremental Mode (--mode INCR)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-incremental-mode-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      How Incremental Mode Works:
     </span>
   </a>
   
@@ -923,20 +941,44 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#partitioning" class="md-nav__link">
+  <a href="#3-physical-storage-clustering-optimization" class="md-nav__link">
     <span class="md-ellipsis">
-      Partitioning
+      🗄️ 3. Physical Storage &amp; Clustering Optimization
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🗄️ 3. Physical Storage & Clustering Optimization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#snowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snowflake
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#incremental-mode" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#bigquery" class="md-nav__link">
     <span class="md-ellipsis">
-      Incremental Mode
+      BigQuery
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#databricks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Databricks
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -944,90 +986,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../16-security/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Security
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../15-ci-cd/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    CI/CD
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../14-troubleshooting/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Troubleshooting
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../26-production-hardening/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Production Hardening
-  </span>
-  
-
-      </a>
     </li>
   
 
@@ -1068,7 +1026,7 @@
             
   
   <span class="md-ellipsis">
-    Act V: Advanced
+    Configuration & Operations
   </span>
   
 
@@ -1078,7 +1036,7 @@
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
-            Act V: Advanced
+            Configuration & Operations
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -1089,11 +1047,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../10-api/" class="md-nav__link">
+      <a href="../04-configuration/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    API
+    Configuration
   </span>
   
 
@@ -1110,11 +1068,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../11-mcp/" class="md-nav__link">
+      <a href="../26-production-hardening/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    MCP Server
+    Production Hardening
   </span>
   
 
@@ -1131,11 +1089,123 @@
   
   
     <li class="md-nav__item">
-      <a href="../12-dbt/" class="md-nav__link">
+      <a href="../16-security/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    DBT Integration
+    Security & Governance
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../15-ci-cd/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CI/CD Automation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../14-troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Interfaces & Tooling
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Interfaces & Tooling
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-cli/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CLI Reference
   </span>
   
 
@@ -1173,11 +1243,165 @@
   
   
     <li class="md-nav__item">
+      <a href="../10-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    REST API & Metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-mcp/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MCP Server (AI Agents)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../12-dbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dbt Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Testing & Benchmarks
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Testing & Benchmarks
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../13-scale-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Scale Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../17-e2e-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    End-to-End Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../22-metrics/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Metrics
+    Metrics Reference
   </span>
   
 
@@ -1242,28 +1466,82 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#bottlenecks" class="md-nav__link">
+  <a href="#1-tackling-graph-bottlenecks" class="md-nav__link">
     <span class="md-ellipsis">
-      Bottlenecks
+      ⚡ 1. Tackling Graph Bottlenecks
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Bottlenecks">
+    <nav class="md-nav" aria-label="⚡ 1. Tackling Graph Bottlenecks">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-supernodes-giant-groups" class="md-nav__link">
+  <a href="#problem-a-the-supernode-phenomenon" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Supernodes (Giant Groups)
+      Problem A: The Supernode Phenomenon
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Problem A: The Supernode Phenomenon">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#solutions-in-sql-identity-oss" class="md-nav__link">
+    <span class="md-ellipsis">
+      Solutions in sql-identity-oss:
     </span>
   </a>
   
 </li>
         
+      </ul>
+    </nav>
+  
+</li>
+        
           <li class="md-nav__item">
-  <a href="#2-deep-chains" class="md-nav__link">
+  <a href="#problem-b-deep-linear-chains-convergence-latency" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Deep Chains
+      Problem B: Deep Linear Chains &amp; Convergence Latency
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Problem B: Deep Linear Chains & Convergence Latency">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Solutions:
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-incremental-mode-mode-incr" class="md-nav__link">
+    <span class="md-ellipsis">
+      🔄 2. Incremental Mode (--mode INCR)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔄 2. Incremental Mode (--mode INCR)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-incremental-mode-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      How Incremental Mode Works:
     </span>
   </a>
   
@@ -1275,20 +1553,44 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#partitioning" class="md-nav__link">
+  <a href="#3-physical-storage-clustering-optimization" class="md-nav__link">
     <span class="md-ellipsis">
-      Partitioning
+      🗄️ 3. Physical Storage &amp; Clustering Optimization
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🗄️ 3. Physical Storage & Clustering Optimization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#snowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snowflake
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#incremental-mode" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#bigquery" class="md-nav__link">
     <span class="md-ellipsis">
-      Incremental Mode
+      BigQuery
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#databricks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Databricks
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1310,26 +1612,66 @@
   
 
 
-<h1 id="scaling-considerations">Scaling Considerations</h1>
-<p>Strategies for processing 100M+ entities.</p>
-<h2 id="bottlenecks">Bottlenecks</h2>
-<h3 id="1-supernodes-giant-groups">1. Supernodes (Giant Groups)</h3>
-<p>A single identifier (e.g., <code>null</code>) connecting 1M records creates 1 trillion potential edges ($N^2$).
-*   <strong>Fix</strong>: Use <code>identifier_exclusion</code> table.
-*   <strong>Fix</strong>: Set <code>max_group_size</code> (default 50) in rules.</p>
-<h3 id="2-deep-chains">2. Deep Chains</h3>
-<p>A string of A-&gt;B-&gt;C...-&gt;Z that requires many Label Propagation iterations.
-*   <strong>Fix</strong>: Increase <code>max_lp_iterations</code>.
-*   <strong>Fix</strong>: Investigate data quality (shared devices/phones).</p>
-<h2 id="partitioning">Partitioning</h2>
-<p>For tables &gt; 100GB:
-*   Cluster <code>identifiers</code> by <code>(identifier_type, identifier_value_norm)</code>.
-*   Cluster <code>edges</code> by <code>identifier_type</code>.</p>
-<h2 id="incremental-mode">Incremental Mode</h2>
-<p>Use <code>idr run --mode INCR</code> for daily updates. It only processes:
-1.  New records.
-2.  Records connected to new records.
-This reduces volume by 95%+.</p>
+<h1 id="scaling-strategies-high-volume-operations">Scaling Strategies &amp; High-Volume Operations</h1>
+<p>Scaling identity resolution to tens or hundreds of millions of entities introduces unique graph and database challenges. This guide outlines battle-tested architectural strategies to process high-volume workloads reliably and cost-effectively.</p>
+<hr />
+<h2 id="1-tackling-graph-bottlenecks">⚡ 1. Tackling Graph Bottlenecks</h2>
+<h3 id="problem-a-the-supernode-phenomenon">Problem A: The Supernode Phenomenon</h3>
+<p>A "supernode" occurs when an identifier is shared across a massive number of records. Common real-world examples:
+* Placeholder emails: <code>test@test.com</code>, <code>noemail@store.com</code>, <code>guest@checkout.com</code>
+* Default phone numbers: <code>000-000-0000</code>, <code>123-456-7890</code>, company switchboards
+* Null or empty strings that bypassed ingestion validation</p>
+<p>If an identifier is shared by 100,000 records, building an unconstrained clique creates:
+$$\frac{100,000 \times 99,999}{2} \approx 5 \text{ Billion Edges}$$</p>
+<p>This will exhaust warehouse memory, cause query spills, and merge unrelated customers into a single gargantuan cluster.</p>
+<h4 id="solutions-in-sql-identity-oss">Solutions in <code>sql-identity-oss</code>:</h4>
+<ol>
+<li><strong><code>max_group_size</code> Thresholding</strong>: Set per-rule in <code>idr_meta.identifier_mapping</code> (default: 50). Groups exceeding this size are safely bypassed from edge formation and logged to <code>idr_out.skipped_identifier_groups</code>.</li>
+<li><strong>Exclusion Registry</strong>: Maintain exact and domain wildcard exclusions in <code>idr_meta.identifier_exclusion</code>.</li>
+<li><strong>Anchor Topology</strong>: Even within allowed groups ($N \le 50$), only $N - 1$ edges are formed instead of $N(N - 1) / 2$.</li>
+</ol>
+<hr />
+<h3 id="problem-b-deep-linear-chains-convergence-latency">Problem B: Deep Linear Chains &amp; Convergence Latency</h3>
+<p>When individuals share intermediate devices or addresses across extended time periods, long chains can emerge ($A \leftrightarrow B \leftrightarrow C \leftrightarrow \dots \leftrightarrow Z$).
+In naive label propagation, propagating the minimum label through a chain of diameter $D$ requires $D$ iterative SQL steps.</p>
+<h4 id="solutions">Solutions:</h4>
+<ol>
+<li><strong>Tune <code>max_lp_iterations</code></strong>: The default is 30 iterations. Most enterprise datasets converge in 4 to 8 iterations. If iteration counts consistently approach 30, investigate whether false-positive linkages (e.g. shared family phones or retail store devices) are creating artificial bridges.</li>
+<li><strong>Bi-directional Edge Doubling</strong>: Edges are evaluated symmetrically (<code>src -&gt; dst</code> and <code>dst -&gt; src</code>), ensuring labels propagate in both directions concurrently and halving the required steps to span a chain.</li>
+</ol>
+<hr />
+<h2 id="2-incremental-mode-mode-incr">🔄 2. Incremental Mode (<code>--mode INCR</code>)</h2>
+<p>Running full identity resolution (<code>FULL</code> mode) across 100M records daily is compute-inefficient. Instead, use <strong>Incremental Resolution</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span>snowflake<span class="w"> </span>--mode<span class="w"> </span>INCR
+</code></pre></div>
+<h3 id="how-incremental-mode-works">How Incremental Mode Works:</h3>
+<ol>
+<li><strong>Delta Entity Identification</strong>: Inspects source tables using high-watermark timestamps (<code>updated_at &gt; last_successful_run_at</code>).</li>
+<li><strong>Impacted Subgraph Discovery</strong>: Identifies all existing entities and clusters that share identifiers with the incoming delta entities.</li>
+<li><strong>Localized Label Propagation</strong>: Re-evaluates label propagation <strong>only within the impacted connected components</strong>.</li>
+<li><strong>Target Table Merge</strong>: Uses atomic warehouse <code>MERGE INTO</code> statements to update <code>identity_clusters_current</code> and <code>identity_resolved_membership_current</code> without touching unaffected clusters.</li>
+</ol>
+<p><strong>Impact</strong>: In typical production retail environments where 2-5% of profiles change daily, incremental mode reduces processed edge volume by <strong>90-95%</strong>, cutting runtime and warehouse credits by up to <strong>80%</strong>.</p>
+<hr />
+<h2 id="3-physical-storage-clustering-optimization">🗄️ 3. Physical Storage &amp; Clustering Optimization</h2>
+<p>When tables in <code>idr_work</code> and <code>idr_out</code> exceed 100GB, optimize warehouse physical layout:</p>
+<h3 id="snowflake">Snowflake</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">identity_resolved_membership_current</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">CLUSTER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="p">(</span><span class="n">resolved_id</span><span class="p">,</span><span class="w"> </span><span class="n">entity_key</span><span class="p">);</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">identity_clusters_current</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="k">CLUSTER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="p">(</span><span class="n">resolved_id</span><span class="p">);</span>
+</code></pre></div>
+<h3 id="bigquery">BigQuery</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">-- Partition by extraction date and cluster by hash</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">idr_work</span><span class="p">.</span><span class="n">identifiers_work</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">PARTITION</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="nb">DATE</span><span class="p">(</span><span class="n">extracted_at</span><span class="p">)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">CLUSTER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">identifier_type</span><span class="p">,</span><span class="w"> </span><span class="n">identifier_hash</span><span class="p">;</span>
+</code></pre></div>
+<h3 id="databricks">Databricks</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">OPTIMIZE</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">identity_resolved_membership_current</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">ZORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="p">(</span><span class="n">resolved_id</span><span class="p">,</span><span class="w"> </span><span class="n">entity_key</span><span class="p">);</span>
+</code></pre></div>
 
 
 
