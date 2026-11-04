@@ -17,6 +17,7 @@
 <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
 <link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet"/>
 <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<link href="../stylesheets/extra.css" rel="stylesheet"/>
 <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
 </head>
 <body data-md-color-accent="indigo" data-md-color-primary="indigo" data-md-color-scheme="default" dir="ltr">
@@ -640,40 +641,45 @@
 <p><strong>SQL Identity Resolution (<code>sql-identity-oss</code>)</strong> is a warehouse-native, deterministic identity resolution and customer 360 engine designed for modern data platforms. It unifies customer profiles across CRM, point-of-sale, e-commerce, mobile, and customer service systems directly inside your data warehouse—<strong>without black-box ML, external SaaS data exports, or vendor lock-in</strong>.</p>
 <hr/>
 <h2 id="core-capabilities">Core Capabilities</h2>
-<pre class="mermaid"><code>flowchart LR
-    subgraph Sources["1. Source Systems"]
+<pre class="mermaid"><code>flowchart TD
+    subgraph Sources["1. Raw Source Systems"]
+        direction LR
         CRM["CRM Accounts"]
-        Web["Web &amp; E-comm"]
+        Web["Web &amp; E-Commerce"]
         POS["In-Store POS"]
-        App["Mobile App"]
+        App["Mobile App Events"]
     end
 
-    subgraph CoreEngine["2. IDR Engine (idr_core)"]
-        Extract["Entity &amp; Identifier Extraction"]
-        Edges["Anchor-Based Edge Building"]
-        LP["Distributed Label Propagation"]
-        Fuzzy["Probabilistic Refinement (Optional)"]
-        Profile["Golden Profile Survivorship"]
+    subgraph CoreEngine["2. Core Resolution Engine (idr_core)"]
+        direction TB
+        Extract["Entity &amp; Identifier Extraction (Normalize &amp; Hash PII)"]
+        Edges["Anchor-Based Graph Construction (O(N) Star Edges)"]
+        LP["Distributed Label Propagation (Iterative SQL Transitive Closure)"]
+        Fuzzy["Probabilistic Refinement (Optional Similarity Scoring)"]
+        Profile["Golden Profile Survivorship (Attribute Resolution)"]
+        Extract --&gt; Edges --&gt; LP --&gt; Fuzzy --&gt; Profile
     end
 
-    subgraph DataWarehouse["3. Supported Data Warehouses"]
-        DuckDB["DuckDB (Local / In-Memory)"]
-        Snowflake["Snowflake (Snowpark / DB-API)"]
-        BigQuery["Google Cloud BigQuery"]
-        Databricks["Databricks (Spark / Unity Catalog)"]
+    subgraph DataWarehouse["3. Supported Data Warehouses (Native Execution)"]
+        direction LR
+        DuckDB["DuckDB&lt;br/&gt;(Local / In-Memory)"]
+        Snowflake["Snowflake&lt;br/&gt;(Snowpark / DB-API)"]
+        BigQuery["Google Cloud BigQuery&lt;br/&gt;(Serverless Slots)"]
+        Databricks["Databricks&lt;br/&gt;(Spark / Unity Catalog)"]
     end
 
     subgraph Interfaces["4. Interfaces &amp; Consumption"]
+        direction LR
         CLI["CLI Tool (idr)"]
-        UI["Web UI (React SPA)"]
+        UI["Web UI (React Dashboard)"]
         API["FastAPI REST Backend"]
         MCP["MCP Server (14 AI Agent Tools)"]
         DBT["dbt Package (dbt_idr)"]
     end
 
-    Sources --&gt; CoreEngine
-    CoreEngine --&gt; DataWarehouse
-    DataWarehouse --&gt; Interfaces</code></pre>
+    Sources ==&gt; CoreEngine
+    CoreEngine ==&gt; DataWarehouse
+    DataWarehouse ==&gt; Interfaces</code></pre>
 <h3 id="1-deterministic-first-graph-construction">1. Deterministic-First Graph Construction</h3>
 <ul>
 <li>Matches entities using high-confidence identifiers (<code>email</code>, <code>phone</code>, <code>loyalty_id</code>, <code>device_id</code>, <code>account_id</code>).</li>

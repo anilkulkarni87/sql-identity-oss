@@ -16,6 +16,7 @@
 <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
 <link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet"/>
 <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<link href="stylesheets/extra.css" rel="stylesheet"/>
 <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
 </head>
 <body data-md-color-accent="indigo" data-md-color-primary="indigo" data-md-color-scheme="default" dir="ltr">
@@ -709,31 +710,34 @@
 </table>
 <hr/>
 <h2 id="architectural-pipeline">🧩 Architectural Pipeline</h2>
-<pre class="mermaid"><code>flowchart LR
-    subgraph Sources["Raw Sources"]
+<pre class="mermaid"><code>flowchart TD
+    subgraph Sources["1. Raw Source Systems"]
+        direction LR
         CRM["CRM Accounts"]
-        Web["E-Commerce"]
-        POS["Retail POS"]
+        Web["E-Commerce Orders"]
+        POS["Retail POS Records"]
     end
 
-    subgraph Stages["6 Pluggable Pipeline Stages"]
-        S1["1. Extraction&lt;br/&gt;(Normalize PII)"]
-        S2["2. Graph Building&lt;br/&gt;(Anchor-based Edges)"]
-        S3["3. Clustering&lt;br/&gt;(Label Propagation)"]
-        S4["4. Metrics&lt;br/&gt;(Graph &amp; Quality)"]
-        S5["5. Output&lt;br/&gt;(Golden Profiles)"]
-        S6["6. Reconciliation&lt;br/&gt;(History &amp; Lineage)"]
+    subgraph Stages["2. Pluggable SQL Pipeline Stages"]
+        direction TB
+        S1["1. Extraction &amp; Normalization&lt;br/&gt;(Cleanse &amp; hash PII identifiers)"]
+        S2["2. Graph Construction&lt;br/&gt;(Anchor-based N-1 star topology edges)"]
+        S3["3. Clustering &amp; Connected Components&lt;br/&gt;(Iterative SQL label propagation)"]
+        S4["4. Graph &amp; Quality Metrics&lt;br/&gt;(Confidence scoring &amp; cluster size telemetry)"]
+        S5["5. Golden Profile Output&lt;br/&gt;(Survivorship rules: recency, priority, frequency)"]
+        S6["6. Reconciliation &amp; Lineage&lt;br/&gt;(Audit trail &amp; delta watermarks)"]
+        S1 --&gt; S2 --&gt; S3 --&gt; S4 --&gt; S5 --&gt; S6
     end
 
-    subgraph Targets["Target Schema (idr_out)"]
+    subgraph Targets["3. Serving Schema (idr_out)"]
+        direction LR
         Clusters["identity_clusters_current"]
         Membership["identity_resolved_membership_current"]
         Profiles["golden_customer_profiles"]
     end
 
-    Sources --&gt; S1
-    S1 --&gt; S2 --&gt; S3 --&gt; S4 --&gt; S5 --&gt; S6
-    S6 --&gt; Targets</code></pre>
+    Sources ==&gt; S1
+    S6 ==&gt; Targets</code></pre>
 <hr/>
 <h2 id="multiple-ways-to-operate">🛠️ Multiple Ways to Operate</h2>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:5"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio"/><input id="__tabbed_1_2" name="__tabbed_1" type="radio"/><input id="__tabbed_1_3" name="__tabbed_1" type="radio"/><input id="__tabbed_1_4" name="__tabbed_1" type="radio"/><input id="__tabbed_1_5" name="__tabbed_1" type="radio"/><div class="tabbed-labels"><label for="__tabbed_1_1">CLI</label><label for="__tabbed_1_2">FastAPI &amp; REST</label><label for="__tabbed_1_3">Model Context Protocol (MCP)</label><label for="__tabbed_1_4">React Web UI</label><label for="__tabbed_1_5">dbt Integration</label></div>
