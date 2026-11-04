@@ -319,6 +319,17 @@ class OutputStage(BaseStage):
             self.logger.warning(f"Profile generation failed: {e}", extra={"run_id": self.run_id})
             self._warnings.append(f"Profile generation failed: {str(e)}")
 
+        # Return total golden profiles or clusters generated
+        try:
+            res = self.adapter.query("SELECT COUNT(*) as cnt FROM idr_out.golden_profiles")
+            return int(res[0]["cnt"]) if res else 0
+        except Exception:
+            try:
+                res = self.adapter.query("SELECT COUNT(*) as cnt FROM idr_out.identity_clusters_current")
+                return int(res[0]["cnt"]) if res else 0
+            except Exception:
+                return 0
+
     def generate_dry_run_output(self) -> None:
         """Generate dry run analysis without updating production tables."""
         # Analyze what would change

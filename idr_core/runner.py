@@ -250,8 +250,8 @@ class IDRRunner:
                     "Materializing final output tables...",
                     extra={"run_id": self.run_id, "stage": "output_generation"},
                 )
-                output.generate_output()
-                self._end_stage("output_generation")
+                output_rows = output.generate_output()
+                self._end_stage("output_generation", output_rows or 0)
                 status = "SUCCESS"
             else:
                 self._start_stage("dry_run_analysis")

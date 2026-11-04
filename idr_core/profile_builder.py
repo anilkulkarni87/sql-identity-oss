@@ -65,8 +65,13 @@ class ProfileBuilder:
         # 4. Execute final Create Table As Select (CTAS)
         select_clause = ",\n    ".join(selection_columns)
 
+        # Databricks Delta Lake requires timestampNtz feature enabled when projecting Parquet timestamps without timezone
+        tblproperties_clause = ""
+        if self.dialect_name == "databricks":
+            tblproperties_clause = "\n            TBLPROPERTIES ('delta.feature.timestampNtz' = 'supported')"
+
         final_sql = f"""
-            CREATE OR REPLACE TABLE idr_out.golden_profiles AS
+            CREATE OR REPLACE TABLE idr_out.golden_profiles{tblproperties_clause} AS
             WITH staging AS (
                 {staging_cte}
             )
