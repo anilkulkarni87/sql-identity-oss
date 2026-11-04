@@ -1,0 +1,90 @@
+"""
+Tests for idr_core.profiler (IDRDataProfiler).
+"""
+
+import duckdb
+import pytest
+
+from idr_core.adapters.duckdb import DuckDBAdapter
+from idr_core.config import validate_config
+from idr_core.profiler import IDRDataProfiler
+
+
+@pytest.fixture
+def profiler_duckdb():
+    conn = duckdb.connect(":memory:")
+    adapter = DuckDBAdapter(conn)
+
+    conn.execute("CREATE SCHEMA IF NOT EXISTS ecommerce_test")
+    conn.execute("""
+        CREATE TABLE ecommerce_test.customers (
+            customer_id VARCHAR,
+            first_name VARCHAR,
+            last_name VARCHAR,
+            contact_email VARCHAR,
+            mailing_address VARCHAR,
+            email_verified BOOLEAN,
+            mobile_no VARCHAR,
+            created_at TIMESTAMP
+        )
+    """)
+
+    # Populate with realistic data including dummy supernode values
+    conn.execute("""
+        INSERT INTO ecommerce_test.customers VALUES
+            ('c1', 'Alice', 'Smith', 'alice@corp.com', '123 Main St', TRUE, '555-0101', '2026-01-01 10:00:00'),
+            ('c2', 'Bob', 'Jones', 'bob@corp.com', '456 Oak Ave', TRUE, '555-0102', '2026-01-02 11:00:00'),
+            ('c3', 'Charlie', 'Brown', 'charlie@corp.com', '789 Pine Rd', FALSE, '555-0103', '2026-01-03 12:00:00'),
+            ('c4', 'Dummy1', 'Shared', 'shared_support@example.com', 'PO Box 1', TRUE, '555-9999', '2026-01-04 13:00:00'),
+            ('c5', 'Dummy2', 'Shared', 'shared_support@example.com', 'PO Box 2', TRUE, '555-9999', '2026-01-05 14:00:00'),
+            ('c6', 'Dummy3', 'Shared', 'shared_support@example.com', 'PO Box 3', TRUE, '555-9999', '2026-01-06 15:00:00')
+    """)
+
+    return adapter
+
+
+def test_profiler_inspects_values_and_rejects_false_positives(profiler_duckdb):
+    """Verify that profiler inspects actual values, not just naive column names."""
+    profiler = IDRDataProfiler(profiler_duckdb)
+    result = profiler.profile_and_generate_config(["ecommerce_test.customers"], sample_size=100)
+
+    assert result["status"] == "SUCCESS"
+    assert result["tables_profiled"] == 1
+    assert result["is_valid_idr_config"] is True
+
+    cfg = result["suggested_config"]
+    source = cfg["sources"][0]
+
+    # 1. Entity Key must be customer_id (100% unique, zero nulls)
+    assert source["entity_key"] == "customer_id"
+
+    # 2. Watermark must be created_at (timestamp)
+    assert source["watermark_column"] == "created_at"
+
+    # 3. contact_email should be recognized as email
+    id_map = {i["type"]: i["expr"] for i in source["identifiers"]}
+    assert id_map.get("email") == "contact_email"
+
+    # 4. mobile_no should be recognized as phone
+    assert id_map.get("phone") == "mobile_no"
+
+    # 5. mailing_address and email_verified MUST NOT be treated as identifiers!
+    assert "mailing_address" not in id_map.values()
+    assert "email_verified" not in id_map.values()
+
+    # 6. Attributes should include first_name and last_name
+    attrs = {a["name"] for a in source["attributes"]}
+    assert "first_name" in attrs
+    assert "last_name" in attrs
+
+    # 7. Supernode detection: shared_support@example.com and 555-9999 should be auto-flagged in exclusions
+    excl_vals = {e["value"] for e in cfg["exclusions"]}
+    assert "shared_support@example.com" in excl_vals or "555-9999" in excl_vals
+
+    # 8. Rules must be generated and valid
+    rule_keys = [r["match_keys"] for r in cfg["rules"]]
+    assert ["email"] in rule_keys
+    assert ["phone"] in rule_keys
+
+    # 9. IDR config validator must pass
+    assert validate_config(cfg) is True

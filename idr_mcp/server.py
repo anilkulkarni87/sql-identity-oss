@@ -479,16 +479,17 @@ def dry_run_pipeline(run_mode: str = "FULL", max_iters: int = 30) -> Dict[str, A
 
 @mcp.tool()
 def discover_and_suggest_rules(
-    table_fqn: str = None, schema: str = None, sample_size: int = 500
+    table_fqn: str = None, schema: str = None, sample_size: int = 500, max_tables: int = None
 ) -> Dict[str, Any]:
     """
-    Profile warehouse tables, detect PII and identity attributes using semantic analysis,
+    Profile warehouse tables, detect PII and identity attributes using statistical profiling,
     and generate an automated, production-ready declarative IDR configuration (Direction 1).
 
     Parameters:
         table_fqn: Optional fully-qualified table name (e.g. 'ecommerce_demo.customers').
         schema: Optional schema name (e.g. 'ecommerce_demo') to discover tables in.
         sample_size: Maximum sample rows for profile analysis (default: 500).
+        max_tables: Optional maximum tables to profile (default: None = all user tables).
     """
     try:
         adapter = get_adapter()
@@ -499,19 +500,23 @@ def discover_and_suggest_rules(
             "hint": "Please call mcp.connect_from_env() or configure connection environment variables (IDR_PLATFORM, etc.).",
         }
 
-    sample_size = min(max(sample_size, 50), 2000)
+    sample_size = min(max(sample_size, 50), 5000)
 
     try:
+        from idr_core.profiler import IDRDataProfiler, is_system_table
+
         candidate_tables = []
         if table_fqn:
             candidate_tables = [table_fqn]
         else:
             all_tables = adapter.list_tables(schema=schema)
-            # Filter out system and framework schemas
+            # Filter out system and framework schemas dynamically across all catalogs
             candidate_tables = [
                 t for t in all_tables
-                if not (t.startswith("idr_meta.") or t.startswith("idr_work.") or t.startswith("idr_out."))
-            ][:8]
+                if not is_system_table(t)
+            ]
+            if max_tables and max_tables > 0:
+                candidate_tables = candidate_tables[:max_tables]
 
         if not candidate_tables:
             available_schemas = []
@@ -533,128 +538,8 @@ def discover_and_suggest_rules(
                 "hint": f"Available schemas found in Databricks: {available_schemas}. Please pass schema='<name>' using one of these schemas, or specify table_fqn='schema.table'.",
             }
 
-        sources = []
-        rules = []
-        detected_id_types = set()
-        detected_attrs = set()
-
-        for fqn in candidate_tables:
-            if hasattr(adapter, "get_table_columns"):
-                cols = adapter.get_table_columns(fqn)
-            elif hasattr(adapter, "get_columns"):
-                cols = adapter.get_columns(fqn)
-            else:
-                continue
-
-            if not cols:
-                continue
-
-            table_id = fqn.replace(".", "_")
-            col_names = [c["name"] for c in cols]
-
-            # 1. Identify primary entity key
-            pk_candidates = [
-                c for c in col_names
-                if c.lower() in ("id", "customer_id", "user_id", "client_id", "entity_id", "account_id")
-            ]
-            entity_key_col = pk_candidates[0] if pk_candidates else col_names[0]
-
-            # 2. Identify watermark column
-            wm_candidates = [
-                c for c in col_names
-                if any(w in c.lower() for w in ("updated", "modified", "timestamp", "created", "event_time"))
-            ]
-            watermark_col = wm_candidates[0] if wm_candidates else None
-
-            # 3. Classify identifiers and attributes
-            table_identifiers = []
-            table_attributes = []
-
-            for col in col_names:
-                c_lower = col.lower()
-                if col == entity_key_col or col == watermark_col:
-                    continue
-
-                if any(k in c_lower for k in ("email", "mail")):
-                    table_identifiers.append({"type": "email", "expr": col})
-                    detected_id_types.add("email")
-                elif any(k in c_lower for k in ("phone", "mobile", "cell", "tel")):
-                    table_identifiers.append({"type": "phone", "expr": col})
-                    detected_id_types.add("phone")
-                elif any(k in c_lower for k in ("loyalty", "member_id", "card_no", "rewards")):
-                    table_identifiers.append({"type": "loyalty", "expr": col})
-                    detected_id_types.add("loyalty")
-                elif any(k in c_lower for k in ("device", "idfa", "gaid", "cookie")):
-                    table_identifiers.append({"type": "device_id", "expr": col})
-                    detected_id_types.add("device_id")
-                elif any(k in c_lower for k in ("first_name", "fname")):
-                    table_attributes.append({"name": "first_name", "expr": col})
-                    detected_attrs.add("first_name")
-                elif any(k in c_lower for k in ("last_name", "lname", "surname")):
-                    table_attributes.append({"name": "last_name", "expr": col})
-                    detected_attrs.add("last_name")
-                elif any(k in c_lower for k in ("name", "full_name")):
-                    table_attributes.append({"name": "full_name", "expr": col})
-                    detected_attrs.add("full_name")
-                elif any(k in c_lower for k in ("address", "city", "state", "zip", "postal")):
-                    table_attributes.append({"name": col, "expr": col})
-                    detected_attrs.add(col)
-
-            source_def = {
-                "id": table_id,
-                "table": fqn,
-                "entity_key": entity_key_col,
-                "identifiers": table_identifiers,
-                "attributes": table_attributes,
-            }
-            if watermark_col:
-                source_def["watermark_column"] = watermark_col
-            sources.append(source_def)
-
-        # 4. Generate matching rules based on detected identifiers
-        priority = 1
-        for id_type in sorted(detected_id_types):
-            max_group = 50 if id_type == "email" else (25 if id_type == "phone" else 10)
-            rules.append({
-                "id": f"exact_{id_type}",
-                "type": "EXACT",
-                "match_keys": [id_type],
-                "priority": priority,
-                "max_group_size": max_group,
-            })
-            priority += 1
-
-        # 5. Generate survivorship strategies
-        survivorship = []
-        for attr in sorted(detected_attrs):
-            strategy = "PRIORITY" if "name" in attr else "RECENCY"
-            rule_entry = {"attribute": attr, "strategy": strategy}
-            if strategy == "PRIORITY" and sources:
-                rule_entry["source_priority"] = [s["table"] for s in sources]
-            survivorship.append(rule_entry)
-
-        # 6. Default placeholder exclusions
-        exclusions = [
-            {"type": "email", "pattern": "test@test.com", "match_type": "EXACT", "reason": "Test account"},
-            {"type": "email", "pattern": "%@example.com", "match_type": "LIKE", "reason": "Example domain"},
-            {"type": "phone", "pattern": "0000000000", "match_type": "EXACT", "reason": "Placeholder phone"},
-            {"type": "phone", "pattern": "1234567890", "match_type": "EXACT", "reason": "Sequential dummy phone"},
-        ]
-
-        suggested_config = {
-            "sources": sources,
-            "rules": rules,
-            "survivorship": survivorship,
-            "exclusions": exclusions,
-        }
-
-        return {
-            "status": "SUCCESS",
-            "tables_profiled": len(sources),
-            "detected_identifiers": list(detected_id_types),
-            "detected_attributes": list(detected_attrs),
-            "suggested_config": suggested_config,
-        }
+        profiler = IDRDataProfiler(adapter)
+        return profiler.profile_and_generate_config(candidate_tables, sample_size=sample_size)
 
     except Exception as e:
         return {"error": f"Failed to profile and suggest rules: {str(e)}"}
