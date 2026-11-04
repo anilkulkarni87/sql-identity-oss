@@ -410,6 +410,16 @@ def handle_serve(args) -> int:
         )
         return 1
 
+    try:
+        import idr_api.main  # noqa: F401
+    except ImportError as exc:
+        print(
+            f"❌ Failed to load 'idr_api': {exc}\n"
+            "Ensure the package is installed in your active environment: pip install -e '.[all]'",
+            file=sys.stderr,
+        )
+        return 1
+
     print(f"🚀 Starting IDR API Server on {args.host}:{args.port}")
     uvicorn.run("idr_api.main:app", host=args.host, port=args.port, reload=args.reload)
     return 0
