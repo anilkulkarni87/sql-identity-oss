@@ -13,7 +13,7 @@ Usage:
     result = runner.run()
 """
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 from .config import load_config, validate_config
 from .runner import IDRRunner, RunConfig, RunResult

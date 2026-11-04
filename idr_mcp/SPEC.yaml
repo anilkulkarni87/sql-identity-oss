@@ -86,3 +86,62 @@ tools:
     input: {}
     output:
       sources: [{ table_id, table_fqn, entity_type, is_active }]
+
+  - name: list_skipped_groups
+    input: { limit?: number }
+    output:
+      skipped_groups: [{ identifier_type, identifier_value_norm, group_size, skip_reason }]
+
+  - name: get_metrics_summary
+    input: {}
+    output:
+      total_clusters: number
+      total_entities: number
+      total_edges: number
+      avg_confidence_score: number
+
+  - name: explain_cluster
+    input: { resolved_id: string }
+    output:
+      resolved_id: string
+      cluster_metadata: object
+      members: array
+      edges: array
+      golden_profile: object
+
+  - name: dry_run_pipeline
+    input: { run_mode?: string, max_iters?: number }
+    output:
+      status: string
+      dry_run_summary?: object
+
+  - name: discover_and_suggest_rules
+    description: Profile warehouse tables, detect PII and identity attributes, and generate recommended YAML configuration.
+    input: { table_fqn?: string, sample_size?: number }
+    output:
+      status: string
+      tables_profiled: number
+      detected_identifiers: array
+      detected_attributes: array
+      suggested_config: object
+
+  - name: simulate_rule_impact
+    description: Simulate adding or modifying a matching rule against warehouse data without mutating tables.
+    input: { rule: object, dialect?: string }
+    output:
+      status: string
+      eligible_entities: number
+      simulated_anchor_edges: number
+      risk_level: string
+      risk_reasons: array
+
+  - name: resolve_customer_360
+    description: Single-call Customer 360 context grounding for AI agents and RAG pipelines.
+    input: { identifier_value: string, identifier_type?: string }
+    output:
+      found: boolean
+      resolved_id?: string
+      golden_profile?: object
+      linked_accounts?: array
+      known_identifiers?: array
+      risk_flags?: array
