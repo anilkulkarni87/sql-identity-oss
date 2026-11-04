@@ -514,13 +514,23 @@ def discover_and_suggest_rules(
             ][:8]
 
         if not candidate_tables:
+            available_schemas = []
+            if hasattr(adapter, "list_schemas"):
+                try:
+                    available_schemas = adapter.list_schemas()
+                except Exception:
+                    pass
+
             return {
                 "status": "NO_TABLES_FOUND",
                 "tables_profiled": 0,
                 "detected_identifiers": [],
                 "detected_attributes": [],
                 "suggested_config": {"sources": [], "rules": [], "survivorship": [], "exclusions": []},
-                "error": f"No user data tables found to profile{f' in schema {schema}' if schema else ''}. Please provide table_fqn='schema.table' or pass schema='...'.",
+                "error": f"No user data tables found to profile in schema '{schema or 'default'}'.",
+                "available_schemas": available_schemas,
+                "active_catalog": getattr(adapter, "catalog", None),
+                "hint": f"Available schemas found in Databricks: {available_schemas}. Please pass schema='<name>' using one of these schemas, or specify table_fqn='schema.table'.",
             }
 
         sources = []
@@ -906,14 +916,18 @@ def connect_from_env():
             http_path = _get_env("DATABRICKS_HTTP_PATH")
             token = _get_env("DATABRICKS_TOKEN")
 
-            conn = sql.connect(
-                server_hostname=host,
-                http_path=http_path,
-                access_token=token,
-            )
+            catalog = _get_env("DATABRICKS_CATALOG")
+            connect_kwargs = {
+                "server_hostname": host,
+                "http_path": http_path,
+                "access_token": token,
+            }
+            if catalog:
+                connect_kwargs["catalog"] = catalog
+
+            conn = sql.connect(**connect_kwargs)
             from idr_core.adapters.databricks import DatabricksAdapter
 
-            catalog = _get_env("DATABRICKS_CATALOG")
             manager.set_adapter(
                 DatabricksAdapter(conn, catalog=catalog), {"platform": "databricks"}
             )

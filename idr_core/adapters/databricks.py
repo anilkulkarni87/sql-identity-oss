@@ -42,8 +42,12 @@ class DatabricksAdapter(IDRAdapter):
         if catalog:
             if self.is_spark:
                 self.conn_obj.sql(f"USE CATALOG {catalog}")
-            # For DBAPI, catalog is usually set in connect(), but we can try USE
-            # Note: databricks-sql-connector usually sets catalog in connect params
+            else:
+                try:
+                    with self.conn_obj.cursor() as cur:
+                        cur.execute(f"USE CATALOG {catalog}")
+                except Exception:
+                    pass
 
     @property
     def dialect(self) -> str:
@@ -162,64 +166,84 @@ class DatabricksAdapter(IDRAdapter):
                         columns.append({"name": col_name.lower(), "type": row[1]})
                 return columns
 
+    def list_schemas(self) -> List[str]:
+        """List available schemas/databases in the active catalog."""
+        schemas = []
+        queries = []
+        if self.catalog:
+            queries.append(f"SHOW SCHEMAS IN {self.catalog}")
+        queries.append("SHOW SCHEMAS")
+
+        for query in queries:
+            try:
+                if self.is_spark:
+                    rows = self.conn_obj.sql(query).collect()
+                    schemas = [r[0] for r in rows if r[0]]
+                else:
+                    with self.conn_obj.cursor() as cur:
+                        cur.execute(query)
+                        rows = cur.fetchall()
+                        schemas = [r[0] for r in rows if r[0]]
+                if schemas:
+                    break
+            except Exception:
+                continue
+
+        return schemas
+
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
         """List tables in a schema, or across user schemas if schema is None."""
         import re
 
+        target_schemas = []
         if schema:
             if not re.match(r"^[a-zA-Z0-9_\.]+$", schema):
                 raise ValueError(
                     f"Invalid schema name: {schema} (Only alphanumeric, underscore, dot allowed)"
                 )
-            target_schemas = [schema]
+            target_schemas.append(schema)
+            # Also try qualifying with catalog if not already qualified
+            if self.catalog and "." not in schema:
+                target_schemas.append(f"{self.catalog}.{schema}")
         else:
-            # Discover user schemas if not specified
-            target_schemas = []
-            try:
-                if self.is_spark:
-                    schema_rows = self.conn_obj.sql("SHOW SCHEMAS").collect()
-                    for r in schema_rows:
-                        name = r[0]
-                        if name and name.lower() not in (
-                            "information_schema",
-                            "sys",
-                            "idr_meta",
-                            "idr_work",
-                            "idr_out",
-                        ):
-                            target_schemas.append(name)
-                else:
-                    with self.conn_obj.cursor() as cur:
-                        cur.execute("SHOW SCHEMAS")
-                        schema_rows = cur.fetchall()
-                        for r in schema_rows:
-                            name = r[0]
-                            if name and name.lower() not in (
-                                "information_schema",
-                                "sys",
-                                "idr_meta",
-                                "idr_work",
-                                "idr_out",
-                            ):
-                                target_schemas.append(name)
-            except Exception:
-                target_schemas = ["default"]
-
+            found = self.list_schemas()
+            target_schemas = [
+                s
+                for s in found
+                if s.lower()
+                not in (
+                    "information_schema",
+                    "sys",
+                    "idr_meta",
+                    "idr_work",
+                    "idr_out",
+                )
+            ]
             if not target_schemas:
                 target_schemas = ["default"]
 
         all_tables = []
+        seen = set()
+
         for s in target_schemas:
             query = f"SHOW TABLES IN {s}"
             try:
                 if self.is_spark:
                     result = self.conn_obj.sql(query).collect()
-                    all_tables.extend([f"{row['database']}.{row['tableName']}" for row in result])
+                    for row in result:
+                        tbl = f"{row['database']}.{row['tableName']}"
+                        if tbl not in seen:
+                            seen.add(tbl)
+                            all_tables.append(tbl)
                 else:
                     with self.conn_obj.cursor() as cur:
                         cur.execute(query)
                         result = cur.fetchall()
-                        all_tables.extend([f"{row[0]}.{row[1]}" for row in result])
+                        for row in result:
+                            tbl = f"{row[0]}.{row[1]}"
+                            if tbl not in seen:
+                                seen.add(tbl)
+                                all_tables.append(tbl)
             except Exception:
                 continue
 
