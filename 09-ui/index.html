@@ -741,11 +741,13 @@
 <hr/>
 <h2 id="running-the-web-ui">🚀 Running the Web UI</h2>
 <h3 id="option-1-docker-compose-recommended">Option 1: Docker Compose (Recommended)</h3>
-<p><div class="highlight"><pre><span></span><code><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build
 </code></pre></div>
-- <strong>Web UI</strong>: <a href="http://localhost:3000">http://localhost:3000</a>
-- <strong>FastAPI Backend</strong>: <a href="http://localhost:8000">http://localhost:8000</a>
-- <strong>API Documentation</strong>: <a href="http://localhost:8000/docs">http://localhost:8000/docs</a></p>
+<ul>
+<li><strong>Web UI</strong>: <a href="http://localhost:3000">http://localhost:3000</a></li>
+<li><strong>FastAPI Backend</strong>: <a href="http://localhost:8000">http://localhost:8000</a></li>
+<li><strong>API Documentation</strong>: <a href="http://localhost:8000/docs">http://localhost:8000/docs</a></li>
+</ul>
 <h3 id="option-2-local-development">Option 2: Local Development</h3>
 <div class="highlight"><pre><span></span><code><a href="#__codelineno-1-1" id="__codelineno-1-1" name="__codelineno-1-1"></a><span class="c1"># Terminal 1: Backend</span>
 <a href="#__codelineno-1-2" id="__codelineno-1-2" name="__codelineno-1-2"></a>idr<span class="w"> </span>serve<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
@@ -758,12 +760,12 @@
 <hr/>
 <h2 id="1-setup-wizard-setup">🧙‍♂️ 1. Setup Wizard (<code>/setup</code>)</h2>
 <p>The 6-step guided wizard configures and tests your entire identity resolution workflow without manual SQL or YAML editing.</p>
-<pre class="mermaid"><code>flowchart LR
-    S1["1. Connect"] --&gt; S2["2. Discover"]
-    S2 --&gt; S3["3. Map"]
-    S3 --&gt; S4["4. Rules"]
-    S4 --&gt; S5["5. Survivorship"]
-    S5 --&gt; S6["6. Review &amp; Run"]</code></pre>
+<pre class="mermaid"><code>flowchart TD
+    S1["1. Connect&lt;br/&gt;(Warehouse Credentials &amp; Validation)"] --&gt; S2["2. Discover&lt;br/&gt;(Schema Discovery &amp; Table Inspection)"]
+    S2 --&gt; S3["3. Map&lt;br/&gt;(Identifiers, Entity Keys &amp; Attributes)"]
+    S3 --&gt; S4["4. Rules&lt;br/&gt;(Matching Rules, Priorities &amp; Safeguards)"]
+    S4 --&gt; S5["5. Survivorship&lt;br/&gt;(Golden Attribute Survivorship Strategies)"]
+    S5 --&gt; S6["6. Review &amp; Run&lt;br/&gt;(Dry-Run Scorecard &amp; Live Pipeline Run)"]</code></pre>
 <h3 id="step-1-connect">Step 1: Connect</h3>
 <ul>
 <li>Select your target warehouse platform (<strong>DuckDB</strong>, <strong>Snowflake</strong>, <strong>BigQuery</strong>, or <strong>Databricks</strong>).</li>

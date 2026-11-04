@@ -1762,10 +1762,12 @@
 
 
 <h1 id="schema-data-model-reference">Schema &amp; Data Model Reference</h1>
-<p>IDR organizes all state into three schemas across all 4 supported data warehouses:
-1. <strong><code>idr_meta</code></strong>: Configuration, rules, mappings, and watermarks.
-2. <strong><code>idr_work</code></strong>: Transient staging tables used during pipeline execution.
-3. <strong><code>idr_out</code></strong>: Production identity graph, resolved clusters, golden profiles, and telemetry.</p>
+<p>IDR organizes all state into three schemas across all 4 supported data warehouses:</p>
+<ol>
+<li><strong><code>idr_meta</code></strong>: Configuration, rules, mappings, and watermarks.</li>
+<li><strong><code>idr_work</code></strong>: Transient staging tables used during pipeline execution.</li>
+<li><strong><code>idr_out</code></strong>: Production identity graph, resolved clusters, golden profiles, and telemetry.</li>
+</ol>
 <hr />
 <h2 id="1-metadata-schema-idr_meta">1. Metadata Schema (<code>idr_meta</code>)</h2>
 <h3 id="idr_metasource_table"><code>idr_meta.source_table</code></h3>

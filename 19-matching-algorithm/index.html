@@ -714,22 +714,28 @@
 <p>A common pitfall in identity resolution is "cluster explosion"—a shared identifier (like <code>support@company.com</code>, <code>000-000-0000</code>, or a shared office phone) linking hundreds of thousands of unrelated individuals into a massive "super-cluster".</p>
 <p><code>sql-identity-oss</code> enforces two layers of cardinality protection:</p>
 <h3 id="exact-wildcard-blocklists-idr_metaidentifier_exclusion">Exact &amp; Wildcard Blocklists (<code>idr_meta.identifier_exclusion</code>)</h3>
-<p>Before any edges are formed, identifiers are checked against an exclusion registry:
-* <strong>Exact match</strong>: Excludes placeholder emails like <code>test@test.com</code>, <code>unknown@gmail.com</code>.
-* <strong>Domain wildcard</strong>: Excludes high-volume corporate email addresses or common generic domains.</p>
+<p>Before any edges are formed, identifiers are checked against an exclusion registry:</p>
+<ul>
+<li><strong>Exact match</strong>: Excludes placeholder emails like <code>test@test.com</code>, <code>unknown@gmail.com</code>.</li>
+<li><strong>Domain wildcard</strong>: Excludes high-volume corporate email addresses or common generic domains.</li>
+</ul>
 <h3 id="group-size-capping-max_group_size">Group Size Capping (<code>max_group_size</code>)</h3>
-<p>Every rule specifies a <code>max_group_size</code> (default: 50):
-* If an identifier matches $N &gt; \text{max_group_size}$ distinct entities, the group is <strong>not linked</strong>.
-* Instead, it is routed to <code>idr_out.skipped_identifier_groups</code> with the reason <code>EXCEEDS_MAX_GROUP_SIZE</code>.
-* This ensures that edge generation runtime and memory footprint remain deterministic and sub-linear.</p>
+<p>Every rule specifies a <code>max_group_size</code> (default: 50):</p>
+<ul>
+<li>If an identifier matches $N &gt; \text{max_group_size}$ distinct entities, the group is <strong>not linked</strong>.</li>
+<li>Instead, it is routed to <code>idr_out.skipped_identifier_groups</code> with the reason <code>EXCEEDS_MAX_GROUP_SIZE</code>.</li>
+<li>This ensures that edge generation runtime and memory footprint remain deterministic and sub-linear.</li>
+</ul>
 <hr/>
 <h2 id="3-anchor-based-edge-building-on-vs-on2">3. Anchor-Based Edge Building ($O(N)$ vs $O(N^2)$)</h2>
 <p>Traditional entity resolution connects all pairs within an identifier group, creating a complete graph $K_N$:</p>
 <p>$$\text{Edges}_{\text{complete}} = \frac{N(N - 1)}{2} \in O(N^2)$$</p>
 <p>For a group of 1,000 records, a complete graph creates 499,500 edges.</p>
-<p>Instead, <code>sql-identity-oss</code> employs <strong>Anchor-Based Edge Construction</strong>:
-1. Within each identifier group, the entity with the lowest lexicographical <code>entity_key</code> is designated as the <strong>Anchor</strong>.
-2. Directed or undirected edges are formed exclusively between each member and the anchor:</p>
+<p>Instead, <code>sql-identity-oss</code> employs <strong>Anchor-Based Edge Construction</strong>:</p>
+<ol>
+<li>Within each identifier group, the entity with the lowest lexicographical <code>entity_key</code> is designated as the <strong>Anchor</strong>.</li>
+<li>Directed or undirected edges are formed exclusively between each member and the anchor:</li>
+</ol>
 <p>$$\text{Edges}_{\text{anchor}} = N - 1 \in O(N)$$</p>
 <div class="highlight"><pre><span></span><code><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a>Complete Graph (O(N^2))            Anchor Graph (O(N))
 <a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>      A --- B                            A (Anchor)
@@ -743,9 +749,13 @@
 <p>Connected components are resolved using an iterative SQL technique called <strong>Label Propagation</strong>:</p>
 <ol>
 <li><strong>Initialization</strong>: Every entity starts with its own <code>entity_key</code> as its initial cluster label.</li>
-<li><strong>Propagation Step</strong>: In each iteration $k$, every node queries all its immediate neighbors across the edge table and adopts the <strong>minimum label</strong>:
-   $$\text{Label}<em v="v">{v}^{(k+1)} = \min \left( \text{Label}</em> \right)$$}^{(k)}, \min_{u \in \text{Neighbors}(v)} \text{Label}_{u}^{(k)</li>
-<li><strong>Convergence</strong>: The algorithm tracks the number of nodes whose label changed during the iteration.</li>
+<li>
+<p><strong>Propagation Step</strong>: In each iteration $k$, every node queries all its immediate neighbors across the edge table and adopts the <strong>minimum label</strong>:
+   $$\text{Label}<em v="v">{v}^{(k+1)} = \min \left( \text{Label}</em> \right)$$}^{(k)}, \min_{u \in \text{Neighbors}(v)} \text{Label}_{u}^{(k)</p>
+</li>
+<li>
+<p><strong>Convergence</strong>: The algorithm tracks the number of nodes whose label changed during the iteration.</p>
+</li>
 <li>If $\Delta = 0$, the graph has reached a fixed-point equilibrium: all nodes in each connected component share the identical minimum <code>resolved_id</code>.</li>
 <li>Execution terminates automatically or halts when <code>max_lp_iterations</code> (default: 30) is reached.</li>
 <li><strong>Monotonicity Guarantee</strong>: Labels only ever decrease ($\text{Label}^{(k+1)} \le \text{Label}^{(k)}$). Because the label space is finite and bounded below by the minimum node ID in the component, convergence is mathematically guaranteed.</li>

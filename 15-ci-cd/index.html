@@ -1601,34 +1601,42 @@
 <a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">          </span><span class="no">idr version</span>
 </code></pre></div>
 <h3 id="lockfile-enforcement">Lockfile Enforcement</h3>
-<p>CI dependency installation uses pinned lockfiles:
-- <code>requirements/ci.lock</code> for test, lint, and DDL validation jobs
-- <code>requirements/release.lock</code> for package/release artifact jobs
-- <code>requirements/docs.lock</code> for docs workflow</p>
+<p>CI dependency installation uses pinned lockfiles:</p>
+<ul>
+<li><code>requirements/ci.lock</code> for test, lint, and DDL validation jobs</li>
+<li><code>requirements/release.lock</code> for package/release artifact jobs</li>
+<li><code>requirements/docs.lock</code> for docs workflow</li>
+</ul>
 <p>UI dependencies are verified with <code>npm ci</code> to enforce <code>idr_ui/package-lock.json</code>.</p>
 <h3 id="sbom-verification">SBOM Verification</h3>
-<p><code>test.yml</code> includes an <code>sbom-verify</code> job that:
-1. Builds Python artifacts (<code>dist/*</code>)
-2. Builds API and UI Docker images
-3. Generates SPDX JSON SBOMs for each artifact/image
-4. Verifies SBOM structure in CI using <code>jq</code> checks
-5. Uploads SBOMs as workflow artifacts</p>
+<p><code>test.yml</code> includes an <code>sbom-verify</code> job that:</p>
+<ol>
+<li>Builds Python artifacts (<code>dist/*</code>)</li>
+<li>Builds API and UI Docker images</li>
+<li>Generates SPDX JSON SBOMs for each artifact/image</li>
+<li>Verifies SBOM structure in CI using <code>jq</code> checks</li>
+<li>Uploads SBOMs as workflow artifacts</li>
+</ol>
 <h3 id="enterprise-e2e-gate">Enterprise E2E Gate</h3>
-<p><code>test.yml</code> includes <code>enterprise-e2e</code> that validates the enterprise stack end-to-end:
-1. Boots <code>docker-compose.enterprise.yml</code>
-2. Verifies Keycloak realm bootstrap
-3. Verifies API health and Prometheus health
-4. Confirms <code>/metrics</code> payload
-5. Confirms auth enforcement on protected endpoints
-6. Retrieves OIDC token and validates authenticated API access
-7. Verifies Prometheus target health for <code>idr-api</code></p>
+<p><code>test.yml</code> includes <code>enterprise-e2e</code> that validates the enterprise stack end-to-end:</p>
+<ol>
+<li>Boots <code>docker-compose.enterprise.yml</code></li>
+<li>Verifies Keycloak realm bootstrap</li>
+<li>Verifies API health and Prometheus health</li>
+<li>Confirms <code>/metrics</code> payload</li>
+<li>Confirms auth enforcement on protected endpoints</li>
+<li>Retrieves OIDC token and validates authenticated API access</li>
+<li>Verifies Prometheus target health for <code>idr-api</code></li>
+</ol>
 <h3 id="release-workflow">Release Workflow</h3>
-<p><code>release.yml</code> is tag-driven (<code>v*</code>) and produces reproducible artifacts:
-- Python wheel + sdist
-- Wheel install smoke check
-- GHCR images for <code>idr-api</code> and <code>idr-ui</code>
-- Trivy vulnerability gating on dist artifacts and container images (fails on HIGH/CRITICAL)
-- Signed build provenance attestations for dist artifacts and pushed images</p>
+<p><code>release.yml</code> is tag-driven (<code>v*</code>) and produces reproducible artifacts:</p>
+<ul>
+<li>Python wheel + sdist</li>
+<li>Wheel install smoke check</li>
+<li>GHCR images for <code>idr-api</code> and <code>idr-ui</code></li>
+<li>Trivy vulnerability gating on dist artifacts and container images (fails on HIGH/CRITICAL)</li>
+<li>Signed build provenance attestations for dist artifacts and pushed images</li>
+</ul>
 <p>Manual runs are available through <code>workflow_dispatch</code> to optionally push images or publish package.
 Release summary includes an attestation link:
 <code>https://github.com/&lt;owner&gt;/&lt;repo&gt;/attestations</code></p>

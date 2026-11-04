@@ -1828,11 +1828,15 @@
 </code></pre></div>
 <h3 id="best-practices-sizing">Best Practices &amp; Sizing</h3>
 <ul>
-<li>Set memory limits for massive local datasets:
+<li>
+<p>Set memory limits for massive local datasets:
   <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">SET</span><span class="w"> </span><span class="n">memory_limit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'16GB'</span><span class="p">;</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">SET</span><span class="w"> </span><span class="n">threads</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span>
-</code></pre></div></li>
-<li>Use DuckDB <code>:memory:</code> mode in automated unit/integration tests to eliminate disk I/O and avoid file lock contention.</li>
+</code></pre></div></p>
+</li>
+<li>
+<p>Use DuckDB <code>:memory:</code> mode in automated unit/integration tests to eliminate disk I/O and avoid file lock contention.</p>
+</li>
 </ul>
 <hr />
 <h2 id="snowflake">❄️ Snowflake</h2>
@@ -1862,11 +1866,15 @@
 </code></pre></div>
 <h3 id="warehouse-optimization">Warehouse Optimization</h3>
 <ul>
-<li><strong>Cluster Keys</strong>: For tables with &gt;10M rows, cluster identity tables for fast lookups:
+<li>
+<p><strong>Cluster Keys</strong>: For tables with &gt;10M rows, cluster identity tables for fast lookups:
   <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">identity_edges_current</span><span class="w"> </span><span class="k">CLUSTER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="p">(</span><span class="n">identifier_type</span><span class="p">);</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">identity_identifiers_current</span><span class="w"> </span><span class="k">CLUSTER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="p">(</span><span class="n">identifier_type</span><span class="p">);</span>
-</code></pre></div></li>
-<li><strong>Warehouse Sizing</strong>: Use a Medium or Large warehouse for initial full loads (&gt;10M rows); an X-Small or Small warehouse is sufficient for daily incremental (<code>INCR</code>) runs.</li>
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Warehouse Sizing</strong>: Use a Medium or Large warehouse for initial full loads (&gt;10M rows); an X-Small or Small warehouse is sufficient for daily incremental (<code>INCR</code>) runs.</p>
+</li>
 </ul>
 <hr />
 <h2 id="google-cloud-bigquery">☁️ Google Cloud BigQuery</h2>
@@ -1879,9 +1887,11 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">GOOGLE_APPLICATION_CREDENTIALS</span><span class="o">=</span><span class="s2">"/path/to/sa-key.json"</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">IDR_PROJECT</span><span class="o">=</span><span class="s2">"my-gcp-project-id"</span>
 </code></pre></div>
-<p>Required IAM Roles for the service account:
-- <code>roles/bigquery.dataEditor</code> (or <code>roles/bigquery.dataOwner</code> if resetting datasets)
-- <code>roles/bigquery.jobUser</code></p>
+<p>Required IAM Roles for the service account:</p>
+<ul>
+<li><code>roles/bigquery.dataEditor</code> (or <code>roles/bigquery.dataOwner</code> if resetting datasets)</li>
+<li><code>roles/bigquery.jobUser</code></li>
+</ul>
 <h3 id="cli-execution_2">CLI Execution</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Initialize datasets (idr_meta, idr_work, idr_out)</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>idr<span class="w"> </span>init<span class="w"> </span>--platform<span class="w"> </span>bigquery<span class="w"> </span>--project<span class="w"> </span><span class="nv">$IDR_PROJECT</span>

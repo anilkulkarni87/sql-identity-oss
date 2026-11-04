@@ -1795,10 +1795,12 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">UPDATE</span><span class="w"> </span><span class="n">idr_meta</span><span class="p">.</span><span class="k">rule</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">max_group_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5000</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">identifier_type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'PHONE'</span><span class="p">;</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">UPDATE</span><span class="w"> </span><span class="n">idr_meta</span><span class="p">.</span><span class="k">rule</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">max_group_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">identifier_type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'SSN'</span><span class="p">;</span>
 </code></pre></div>
-<p><strong>What happens when exceeded:</strong>
-1. Identifier group is skipped
-2. Entities become singletons (resolved_id = entity_key)
-3. Logged to <code>idr_out.skipped_identifier_groups</code></p>
+<p><strong>What happens when exceeded:</strong></p>
+<ol>
+<li>Identifier group is skipped</li>
+<li>Entities become singletons (resolved_id = entity_key)</li>
+<li>Logged to <code>idr_out.skipped_identifier_groups</code></li>
+</ol>
 <h3 id="identifier-exclusions">Identifier Exclusions</h3>
 <p>Block known bad identifiers:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">-- Exact matches</span>

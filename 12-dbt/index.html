@@ -1347,21 +1347,25 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">subdirectory</span><span class="p">:</span><span class="w"> </span><span class="s">"dbt_idr"</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
 </code></pre></div></p>
-<p>Seed configuration:
-- <code>idr_sources.csv</code>
-- <code>idr_rules.csv</code>
-- <code>idr_identifier_mappings.csv</code>
-- <code>idr_attribute_mappings.csv</code>
-- <code>idr_survivorship_rules.csv</code>
-- <code>idr_exclusions.csv</code></p>
+<p>Seed configuration:</p>
+<ul>
+<li><code>idr_sources.csv</code></li>
+<li><code>idr_rules.csv</code></li>
+<li><code>idr_identifier_mappings.csv</code></li>
+<li><code>idr_attribute_mappings.csv</code></li>
+<li><code>idr_survivorship_rules.csv</code></li>
+<li><code>idr_exclusions.csv</code></li>
+</ul>
 <p>Run:
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dbt<span class="w"> </span>deps
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>dbt<span class="w"> </span>seed<span class="w"> </span>--select<span class="w"> </span>dbt_idr
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>dbt<span class="w"> </span>run<span class="w"> </span>--select<span class="w"> </span>dbt_idr
 </code></pre></div></p>
-<p>Notes:
-- Fuzzy matching is not supported in dbt.
-- Golden profiles support RECENCY and PRIORITY.</p>
+<p>Notes:</p>
+<ul>
+<li>Fuzzy matching is not supported in dbt.</li>
+<li>Golden profiles support RECENCY and PRIORITY.</li>
+</ul>
 
 
 

@@ -1462,9 +1462,11 @@
 
 
 <h1 id="metrics-reference">Metrics Reference</h1>
-<p>Metrics are available in two forms:
-- Warehouse-level run metrics in <code>idr_out.*</code> tables.
-- API operational metrics exposed in Prometheus format at <code>/metrics</code>.</p>
+<p>Metrics are available in two forms:</p>
+<ul>
+<li>Warehouse-level run metrics in <code>idr_out.*</code> tables.</li>
+<li>API operational metrics exposed in Prometheus format at <code>/metrics</code>.</li>
+</ul>
 <h2 id="key-metrics">Key Metrics</h2>
 <table>
 <thead>
@@ -1509,12 +1511,16 @@
 </table>
 <h2 id="monitoring">Monitoring</h2>
 <h3 id="prometheus-endpoint">Prometheus Endpoint</h3>
-<p>The API exposes:
-- <code>GET /metrics</code> (Prometheus/OpenMetrics text payload)</p>
-<p>Core API metrics:
-- <code>idr_http_requests_total{method,path,status}</code>
-- <code>idr_http_request_duration_seconds{method,path}</code>
-- <code>idr_api_db_connected</code></p>
+<p>The API exposes:</p>
+<ul>
+<li><code>GET /metrics</code> (Prometheus/OpenMetrics text payload)</li>
+</ul>
+<p>Core API metrics:</p>
+<ul>
+<li><code>idr_http_requests_total{method,path,status}</code></li>
+<li><code>idr_http_request_duration_seconds{method,path}</code></li>
+<li><code>idr_api_db_connected</code></li>
+</ul>
 <h3 id="alerts">Alerts</h3>
 <ul>
 <li><strong>High Skipped Groups</strong>: indicates <code>max_group_size</code> is too low or data quality issues (e.g., widespread default values).</li>

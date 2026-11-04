@@ -1626,15 +1626,21 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build
 </code></pre></div>
 <h2 id="ci-lockfiles">CI Lockfiles</h2>
-<p>Pinned lockfiles used in automation:
-- <code>requirements/ci.lock</code>
-- <code>requirements/release.lock</code>
-- <code>requirements/docs.lock</code></p>
-<p>UI dependency lockfile:
-- <code>idr_ui/package-lock.json</code> (validated in CI via <code>npm ci</code>)</p>
-<p>Enterprise session-store extension:
-- <code>IDR_SESSION_STORE_CLASS=idr_enterprise.session_store.EnterpriseInMemoryConnectionSessionStore</code>
-- Redis-backed option: <code>IDR_SESSION_STORE_CLASS=idr_enterprise.session_store.RedisConnectionSessionStore</code></p>
+<p>Pinned lockfiles used in automation:</p>
+<ul>
+<li><code>requirements/ci.lock</code></li>
+<li><code>requirements/release.lock</code></li>
+<li><code>requirements/docs.lock</code></li>
+</ul>
+<p>UI dependency lockfile:</p>
+<ul>
+<li><code>idr_ui/package-lock.json</code> (validated in CI via <code>npm ci</code>)</li>
+</ul>
+<p>Enterprise session-store extension:</p>
+<ul>
+<li><code>IDR_SESSION_STORE_CLASS=idr_enterprise.session_store.EnterpriseInMemoryConnectionSessionStore</code></li>
+<li>Redis-backed option: <code>IDR_SESSION_STORE_CLASS=idr_enterprise.session_store.RedisConnectionSessionStore</code></li>
+</ul>
 
 
 

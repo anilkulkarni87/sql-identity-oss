@@ -1640,10 +1640,12 @@
 <hr />
 <h2 id="1-tackling-graph-bottlenecks">⚡ 1. Tackling Graph Bottlenecks</h2>
 <h3 id="problem-a-the-supernode-phenomenon">Problem A: The Supernode Phenomenon</h3>
-<p>A "supernode" occurs when an identifier is shared across a massive number of records. Common real-world examples:
-* Placeholder emails: <code>test@test.com</code>, <code>noemail@store.com</code>, <code>guest@checkout.com</code>
-* Default phone numbers: <code>000-000-0000</code>, <code>123-456-7890</code>, company switchboards
-* Null or empty strings that bypassed ingestion validation</p>
+<p>A "supernode" occurs when an identifier is shared across a massive number of records. Common real-world examples:</p>
+<ul>
+<li>Placeholder emails: <code>test@test.com</code>, <code>noemail@store.com</code>, <code>guest@checkout.com</code></li>
+<li>Default phone numbers: <code>000-000-0000</code>, <code>123-456-7890</code>, company switchboards</li>
+<li>Null or empty strings that bypassed ingestion validation</li>
+</ul>
 <p>If an identifier is shared by 100,000 records, building an unconstrained clique creates:
 $$\frac{100,000 \times 99,999}{2} \approx 5 \text{ Billion Edges}$$</p>
 <p>This will exhaust warehouse memory, cause query spills, and merge unrelated customers into a single gargantuan cluster.</p>

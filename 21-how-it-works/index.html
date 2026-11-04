@@ -1530,10 +1530,12 @@
 <hr />
 <h2 id="step-1-pii-cleansing-normalization">Step 1: PII Cleansing &amp; Normalization</h2>
 <p>Raw data is notoriously inconsistent—casing differs, phones have dashes or parentheses, and whitespace creeps in.</p>
-<p>The engine normalizes all extracted identifiers into uniform tokens:
-* <code>john.smith@gmail.com</code> -&gt; <code>john.smith@gmail.com</code> (lowercased)
-* <code>(555) 019-2834</code> -&gt; <code>5550192834</code> (digits only)
-* <code>555-019-2834</code> -&gt; <code>5550192834</code> (digits only)</p>
+<p>The engine normalizes all extracted identifiers into uniform tokens:</p>
+<ul>
+<li><code>john.smith@gmail.com</code> -&gt; <code>john.smith@gmail.com</code> (lowercased)</li>
+<li><code>(555) 019-2834</code> -&gt; <code>5550192834</code> (digits only)</li>
+<li><code>555-019-2834</code> -&gt; <code>5550192834</code> (digits only)</li>
+</ul>
 <hr />
 <h2 id="step-2-direct-match-linking-card-a-card-b">Step 2: Direct Match Linking (Card A ↔ Card B)</h2>
 <p>Card A and Card B both possess <code>john.smith@gmail.com</code>.

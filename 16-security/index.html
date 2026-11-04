@@ -1564,10 +1564,12 @@
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="k">GRANT</span><span class="w"> </span><span class="k">ALL</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="n">idr_out</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="k">ROLE</span><span class="w"> </span><span class="n">IDR_EXECUTOR</span><span class="p">;</span>
 </code></pre></div>
 <h3 id="bigquery">BigQuery</h3>
-<p>Use a dedicated Service Account with granular IAM roles.
-*   <code>roles/bigquery.jobUser</code> (Project level)
-*   <code>roles/bigquery.dataViewer</code> (Source datasets)
-*   <code>roles/bigquery.dataEditor</code> (IDR datasets)</p>
+<p>Use a dedicated Service Account with granular IAM roles.</p>
+<ul>
+<li><code>roles/bigquery.jobUser</code> (Project level)</li>
+<li><code>roles/bigquery.dataViewer</code> (Source datasets)</li>
+<li><code>roles/bigquery.dataEditor</code> (IDR datasets)</li>
+</ul>
 <h2 id="data-protection">Data Protection</h2>
 <h3 id="pii-handling">PII Handling</h3>
 <ul>
@@ -1588,11 +1590,13 @@
 <li><strong>Databricks</strong>: Deploy in a private subnet with PrivateLink.</li>
 </ul>
 <h2 id="api-token-validation">API Token Validation</h2>
-<p>The API validates bearer tokens against OIDC JWKS with:
-- <code>kid</code>-based signing key selection
-- Audience and issuer enforcement
-- JWKS cache with configurable TTL (<code>IDR_AUTH_JWKS_TTL_SECONDS</code>)
-- Configurable JWKS fetch timeout (<code>IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS</code>)</p>
+<p>The API validates bearer tokens against OIDC JWKS with:</p>
+<ul>
+<li><code>kid</code>-based signing key selection</li>
+<li>Audience and issuer enforcement</li>
+<li>JWKS cache with configurable TTL (<code>IDR_AUTH_JWKS_TTL_SECONDS</code>)</li>
+<li>Configurable JWKS fetch timeout (<code>IDR_AUTH_JWKS_HTTP_TIMEOUT_SECONDS</code>)</li>
+</ul>
 
 
 

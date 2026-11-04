@@ -1614,9 +1614,11 @@
 </code></pre></div>
 <hr />
 <h2 id="pii-masking-privacy-controls">🔒 PII Masking &amp; Privacy Controls</h2>
-<p>By default (<code>IDR_PII_ACCESS=masked</code> or unset), the MCP server automatically redacts sensitive attributes (emails, phone numbers, names):
-- <code>john.doe@example.com</code> becomes <code>jo***om</code>
-- <code>555-0199</code> becomes <code>55***99</code></p>
+<p>By default (<code>IDR_PII_ACCESS=masked</code> or unset), the MCP server automatically redacts sensitive attributes (emails, phone numbers, names):</p>
+<ul>
+<li><code>john.doe@example.com</code> becomes <code>jo***om</code></li>
+<li><code>555-0199</code> becomes <code>55***99</code></li>
+</ul>
 <p>To grant agents full unmasked access for internal audited workflows:
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">IDR_PII_ACCESS</span><span class="o">=</span>full
 </code></pre></div></p>

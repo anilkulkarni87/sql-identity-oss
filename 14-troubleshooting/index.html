@@ -1669,21 +1669,29 @@
 <li><strong>Symptom</strong>: A single cluster contains thousands or millions of entities (e.g. <code>cluster_size &gt; 10000</code>).</li>
 <li><strong>Cause</strong>: Common sentinel values like <code>null</code>, <code>n/a</code>, <code>unknown@domain.com</code>, or shared store tablet emails.</li>
 <li><strong>Resolution</strong>:</li>
-<li>Add the problematic value to <code>idr_meta.identifier_exclusion</code> (or via the UI Setup Wizard Step 4):
+<li>
+<p>Add the problematic value to <code>idr_meta.identifier_exclusion</code> (or via the UI Setup Wizard Step 4):
      <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">idr_meta</span><span class="p">.</span><span class="n">identifier_exclusion</span><span class="w"> </span><span class="p">(</span><span class="n">identifier_type</span><span class="p">,</span><span class="w"> </span><span class="n">identifier_value_pattern</span><span class="p">,</span><span class="w"> </span><span class="n">match_type</span><span class="p">,</span><span class="w"> </span><span class="n">reason</span><span class="p">)</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="s1">'email'</span><span class="p">,</span><span class="w"> </span><span class="s1">'shared_kiosk@store.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'EXACT'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Shared store device'</span><span class="p">);</span>
-</code></pre></div></li>
-<li>Set <code>max_group_size</code> on the matching rule (e.g. <code>100</code> or <code>5000</code>). Oversized groups will be automatically skipped and logged to <code>idr_out.skipped_identifier_groups</code>.</li>
+</code></pre></div></p>
+</li>
+<li>
+<p>Set <code>max_group_size</code> on the matching rule (e.g. <code>100</code> or <code>5000</code>). Oversized groups will be automatically skipped and logged to <code>idr_out.skipped_identifier_groups</code>.</p>
+</li>
 </ul>
 <h3 id="label-propagation-not-converging">Label Propagation Not Converging</h3>
 <ul>
 <li><strong>Symptom</strong>: Pipeline run completes with warning: <code>Label propagation did not fully converge after 30 iterations</code>.</li>
 <li><strong>Cause</strong>: Highly complex cyclical graph chains.</li>
 <li><strong>Resolution</strong>:</li>
-<li>Increase <code>max_iters</code>:
+<li>
+<p>Increase <code>max_iters</code>:
     <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span><span class="o">[</span>platform<span class="o">]</span><span class="w"> </span>--mode<span class="w"> </span>FULL<span class="w"> </span>--max-iters<span class="w"> </span><span class="m">50</span>
-</code></pre></div></li>
-<li>Inspect <code>idr_out.skipped_identifier_groups</code> to check for unintentional hubs connecting disparate networks.</li>
+</code></pre></div></p>
+</li>
+<li>
+<p>Inspect <code>idr_out.skipped_identifier_groups</code> to check for unintentional hubs connecting disparate networks.</p>
+</li>
 </ul>
 <hr />
 <h2 id="3-operational-recovery-diagnostics">3. Operational &amp; Recovery Diagnostics</h2>

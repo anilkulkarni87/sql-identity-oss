@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#installation" class="md-skip">
+        <a href="#installation-setup-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -511,6 +511,17 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -520,6 +531,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      🗺️ Deployment Paths
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pip-installation-by-warehouse" class="md-nav__link">
+    <span class="md-ellipsis">
+      📦 Pip Installation by Warehouse
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-compose-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      🐳 Docker Compose Environments
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-server-for-ai-assistants" class="md-nav__link">
+    <span class="md-ellipsis">
+      🤖 MCP Server for AI Assistants
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      🔍 Verification
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1323,6 +1398,59 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      🗺️ Deployment Paths
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pip-installation-by-warehouse" class="md-nav__link">
+    <span class="md-ellipsis">
+      📦 Pip Installation by Warehouse
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-compose-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      🐳 Docker Compose Environments
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-server-for-ai-assistants" class="md-nav__link">
+    <span class="md-ellipsis">
+      🤖 MCP Server for AI Assistants
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      🔍 Verification
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1339,37 +1467,123 @@
   
 
 
-<h1 id="installation">Installation</h1>
-<p>Use pip extras to install the components you need.</p>
-<p>Quick path selection:
-- <code>pip</code> install: best for CLI and library usage.
-- <code>docker compose up --build</code>: best for local UI + API development.
-- <code>docker compose -f docker-compose.prod.yml --env-file .env up -d</code>: best for reproducible deployments from pinned images.
-- <code>docker compose -f docker-compose.enterprise.yml up -d --build</code>: best for SSO/observability validation.</p>
-<p>Base + DuckDB (local/dev):
+<h1 id="installation-setup-guide">Installation &amp; Setup Guide</h1>
+<p>Install <strong>SQL Identity Resolution (<code>sql-identity-resolution</code>)</strong> using <code>pip</code> extras tailored to your target data warehouse and operational environment.</p>
+<hr />
+<h2 id="deployment-paths">🗺️ Deployment Paths</h2>
+<div class="grid cards">
+<ul>
+<li>
+<p><strong>🐍 Python Package &amp; CLI</strong>
+    ---
+    Install via <code>pip</code> with warehouse-specific adapters for pipelines, jobs, and local exploration.</p>
+<p><a href="#-pip-installation-by-warehouse">:octicons-arrow-right-24: Pip Installation</a></p>
+</li>
+<li>
+<p><strong>🐳 Local Docker Compose</strong>
+    ---
+    Spin up the React Web UI, FastAPI backend, and embedded DuckDB with a single command.</p>
+<p><a href="#-docker-compose-environments">:octicons-arrow-right-24: Docker Setup</a></p>
+</li>
+<li>
+<p><strong>🤖 AI Agent MCP Server</strong>
+    ---
+    Connect Claude Desktop, Cursor, or custom LLM agents directly to your identity graph.</p>
+<p><a href="#-mcp-server-for-ai-assistants">:octicons-arrow-right-24: MCP Setup</a></p>
+</li>
+<li>
+<p><strong>🏭 Production &amp; Enterprise</strong>
+    ---
+    Deploy pinned Docker images with Prometheus observability, Redis caching, or SSO/OIDC.</p>
+<p><a href="#-docker-compose-environments">:octicons-arrow-right-24: Production Config</a></p>
+</li>
+</ul>
+</div>
+<hr />
+<h2 id="pip-installation-by-warehouse">📦 Pip Installation by Warehouse</h2>
+<p>Select your target warehouse platform below to install the minimal required dependencies:</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:5"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><input id="__tabbed_1_5" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">DuckDB (Local / Dev / CI)</label><label for="__tabbed_1_2">Snowflake</label><label for="__tabbed_1_3">Google Cloud BigQuery</label><label for="__tabbed_1_4">Databricks</label><label for="__tabbed_1_5">All Warehouses</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[duckdb]"</span>
+</code></pre></div>
+<ul>
+<li>Zero cloud dependencies. Ideal for unit tests, local development, and embedded workloads.</li>
+</ul>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[snowflake]"</span>
+</code></pre></div>
+<ul>
+<li>Includes <code>snowflake-connector-python</code> with native query execution.</li>
+</ul>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[bigquery]"</span>
+</code></pre></div>
+<ul>
+<li>Includes <code>google-cloud-bigquery</code> for serverless slot execution and dataset management.</li>
+</ul>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[databricks]"</span>
+</code></pre></div>
+<ul>
+<li>Includes <code>databricks-sql-connector</code> for Serverless SQL Warehouses and Delta Lake on Unity Catalog.</li>
+</ul>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[all]"</span>
+</code></pre></div>
+<ul>
+<li>Installs all cloud connectors, the FastAPI backend, and the FastMCP agent server.</li>
+</ul>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="docker-compose-environments">🐳 Docker Compose Environments</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="2:3"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio" /><input id="__tabbed_2_2" name="__tabbed_2" type="radio" /><input id="__tabbed_2_3" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="__tabbed_2_1">Local Development (UI + API)</label><label for="__tabbed_2_2">Pinned Production Images</label><label for="__tabbed_2_3">Enterprise (SSO + Observability)</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>Launches the React Web UI on port <code>5173</code> and the FastAPI service on port <code>8000</code>:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build
 </code></pre></div></p>
-<p>API server:
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[api]"</span>
+<ul>
+<li><strong>Web UI</strong>: <code>http://localhost:5173</code></li>
+<li><strong>Swagger API Docs</strong>: <code>http://localhost:8000/docs</code></li>
+</ul>
+</div>
+<div class="tabbed-block">
+<p>Deploys deterministic, reproducible images pinned to immutable digest hashes:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>cp<span class="w"> </span>.env.example<span class="w"> </span>.env
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--env-file<span class="w"> </span>.env<span class="w"> </span>up<span class="w"> </span>-d
 </code></pre></div></p>
-<p>Standalone UI + API (Docker):
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build
+</div>
+<div class="tabbed-block">
+<p>Includes OIDC authentication, Redis session persistence, and Prometheus metrics:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.enterprise.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
 </code></pre></div></p>
-<p>Pinned production images (reproducible):
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cp<span class="w"> </span>.env.example<span class="w"> </span>.env
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--env-file<span class="w"> </span>.env<span class="w"> </span>up<span class="w"> </span>-d
+</div>
+</div>
+</div>
+<hr />
+<h2 id="mcp-server-for-ai-assistants">🤖 MCP Server for AI Assistants</h2>
+<p>To enable AI agents (Claude Desktop, Cursor) to interact with identity resolution:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[mcp]"</span>
+</code></pre></div>
+<p>Start the MCP server in stdio mode:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>idr<span class="w"> </span>mcp
 </code></pre></div></p>
-<p>MCP server:
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[mcp]"</span>
+<hr />
+<h2 id="verification">🔍 Verification</h2>
+<p>Verify that the CLI is installed and check the engine version:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>idr<span class="w"> </span>version
+</code></pre></div>
+<p>Expected output:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>sql-identity-resolution v0.6.0 (engine: deterministic-v2, dialect: duckdb)
 </code></pre></div></p>
-<p>All platforms:
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"sql-identity-resolution[all]"</span>
-</code></pre></div></p>
-<p>Verify:
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>idr<span class="w"> </span>version
-</code></pre></div></p>
-<p>See <code>27-distribution.md</code> for compatibility matrix and deployment decision tree.</p>
-<p>CI and release automation use pinned lockfiles under <code>requirements/*.lock</code>.</p>
+<p>For platform sizing, compatibility matrices, and hardware recommendations, see <a href="../06-platforms/">Platforms Overview</a> and <a href="../27-distribution/">Distribution &amp; Deployment</a>.</p>
 
 
 
