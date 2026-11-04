@@ -74,6 +74,7 @@ nav:
     - Pipeline Stages: 07-pipeline.md
   - Supported Warehouses:
     - Platforms Overview: 06-platforms.md
+    - Databricks Testing Guide: DATABRICKS_TESTING_GUIDE.md
     - Sizing & Hardware: 24-sizing.md
     - Scaling Strategies: 25-scaling.md
   - Configuration & Operations:
