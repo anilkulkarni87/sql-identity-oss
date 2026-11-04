@@ -68,7 +68,7 @@ class SnowflakeAdapter(IDRAdapter):
             # Snowpark supports params in sql() (usually ? placeholders)
             # Do NOT replace ? with %s here.
             df = self.conn_obj.sql(sql, params).to_pandas()
-            df.columns = df.columns.str.lower()
+            df.columns = [str(c).lower() for c in df.columns]
             return df.to_dict("records")
         else:
             # DBAPI Mode (Standard Snowflake Connector) uses paramstyle='pyformat' (%s) by default

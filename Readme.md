@@ -1,9 +1,9 @@
 # 🔗 SQL Identity Resolution
 
-[![Tests](https://github.com/anilkulkarni87/sql-identity-resolution/actions/workflows/test.yml/badge.svg)](https://github.com/anilkulkarni87/sql-identity-resolution/actions/workflows/test.yml)
-[![Docs](https://github.com/anilkulkarni87/sql-identity-resolution/actions/workflows/docs.yml/badge.svg)](https://anilkulkarni87.github.io/sql-identity-resolution/)
+[![Tests](https://github.com/anilkulkarni87/sql-identity-oss/actions/workflows/test.yml/badge.svg)](https://github.com/anilkulkarni87/sql-identity-oss/actions/workflows/test.yml)
+[![Docs](https://github.com/anilkulkarni87/sql-identity-oss/actions/workflows/docs.yml/badge.svg)](https://anilkulkarni87.github.io/sql-identity-oss/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![GitHub stars](https://img.shields.io/github/stars/anilkulkarni87/sql-identity-resolution?style=social)](https://github.com/anilkulkarni87/sql-identity-resolution/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/anilkulkarni87/sql-identity-oss?style=social)](https://github.com/anilkulkarni87/sql-identity-oss/stargazers)
 
 [![Snowflake](https://img.shields.io/badge/Snowflake-✓-29B5E8?logo=snowflake&logoColor=white)](https://www.snowflake.com/)
 [![BigQuery](https://img.shields.io/badge/BigQuery-✓-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/bigquery)

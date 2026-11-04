@@ -10,7 +10,6 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pandas as pd
 import pytest
 
 from idr_core.adapters.base import get_dialect_config
@@ -22,6 +21,34 @@ from idr_core.stages.base import StageContext
 from idr_core.stages.extraction import ExtractionStage
 from idr_core.stages.graph import GraphStage
 from idr_core.stages.output import OutputStage
+
+
+class MockColumns(list):
+    @property
+    def str(self):
+        class _StrAccessor:
+            def __init__(self, cols):
+                self._cols = cols
+
+            def lower(self):
+                return [str(c).lower() for c in self._cols]
+
+        return _StrAccessor(self)
+
+
+class MockDataFrame:
+    """Lightweight mock providing .columns and .to_dict('records') without requiring pandas."""
+
+    def __init__(self, records):
+        self._records = records
+        self.columns = MockColumns(records[0].keys()) if records else MockColumns()
+
+    def to_dict(self, orient="records"):
+        if orient == "records" and self._records:
+            col_map = dict(zip(list(self._records[0].keys()), self.columns))
+            return [{col_map.get(k, k): v for k, v in r.items()} for r in self._records]
+        return self._records
+
 
 # ============================================================
 # 1. BigQueryAdapter Unit Tests
@@ -48,7 +75,7 @@ class TestBigQueryAdapterUnit:
     def test_execute_and_query_normalizes_lowercase_columns(self):
         client = MagicMock()
         job = MagicMock()
-        job.to_dataframe.return_value = pd.DataFrame([{"RESOLVED_ID": "c1", "CLUSTER_SIZE": 3}])
+        job.to_dataframe.return_value = MockDataFrame([{"RESOLVED_ID": "c1", "CLUSTER_SIZE": 3}])
         job.result.return_value = [("c1",)]
         client.query.return_value = job
 
@@ -104,7 +131,7 @@ class TestSnowflakeAdapterUnit:
         session = MagicMock()
         session.create_dataframe = MagicMock()
         sql_df = MagicMock()
-        sql_df.to_pandas.return_value = pd.DataFrame([{"RULE_ID": "r1", "PRIORITY": 1}])
+        sql_df.to_pandas.return_value = MockDataFrame([{"RULE_ID": "r1", "PRIORITY": 1}])
         sql_df.collect.return_value = [("r1", "VARCHAR")]
         session.sql.return_value = sql_df
 
@@ -161,7 +188,7 @@ class TestDatabricksAdapterUnit:
     def test_spark_session_mode_and_param_binding(self):
         spark = MagicMock(spec=["sql"])
         spark_df = MagicMock()
-        spark_df.toPandas.return_value = pd.DataFrame([{"ENTITY_KEY": "crm:1", "RESOLVED_ID": "crm:1"}])
+        spark_df.toPandas.return_value = MockDataFrame([{"ENTITY_KEY": "crm:1", "RESOLVED_ID": "crm:1"}])
         spark_df.collect.return_value = [
             ("entity_key", "string", None),
             ("# Partition Information", "", ""),
