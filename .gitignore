@@ -53,6 +53,8 @@ test_data/
 
 # Generated Artifacts
 generated/
+output/
+**/output/
 deploy_*.sql
 build.log
 .chat_history/
