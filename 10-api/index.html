@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#api-reference-summary" class="md-skip">
+        <a href="#rest-api-reference" class="md-skip">
           Skip to content
         </a>
       
@@ -1044,63 +1044,60 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#health" class="md-nav__link">
+  <a href="#1-setup-configuration-apisetup" class="md-nav__link">
     <span class="md-ellipsis">
-      Health
+      1. Setup &amp; Configuration (/api/setup)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Setup & Configuration (/api/setup)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-running-a-pipeline-via-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example: Running a Pipeline via API
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-metrics-dashboard-apimetrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Metrics &amp; Dashboard (/api/metrics)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#connection" class="md-nav__link">
+  <a href="#3-identity-explorer-apientities-apiclusters" class="md-nav__link">
     <span class="md-ellipsis">
-      Connection
+      3. Identity Explorer (/api/entities &amp; /api/clusters)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#setup-wizard" class="md-nav__link">
+  <a href="#4-pipeline-runs-telemetry-apiruns" class="md-nav__link">
     <span class="md-ellipsis">
-      Setup Wizard
+      4. Pipeline Runs &amp; Telemetry (/api/runs)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#metrics" class="md-nav__link">
+  <a href="#5-enterprise-observability-metrics-apiauth" class="md-nav__link">
     <span class="md-ellipsis">
-      Metrics
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#explorer" class="md-nav__link">
-    <span class="md-ellipsis">
-      Explorer
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#runs" class="md-nav__link">
-    <span class="md-ellipsis">
-      Runs
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      Schema
+      5. Enterprise Observability (/metrics &amp; /api/auth)
     </span>
   </a>
   
@@ -1254,63 +1251,60 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#health" class="md-nav__link">
+  <a href="#1-setup-configuration-apisetup" class="md-nav__link">
     <span class="md-ellipsis">
-      Health
+      1. Setup &amp; Configuration (/api/setup)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Setup & Configuration (/api/setup)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-running-a-pipeline-via-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example: Running a Pipeline via API
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-metrics-dashboard-apimetrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Metrics &amp; Dashboard (/api/metrics)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#connection" class="md-nav__link">
+  <a href="#3-identity-explorer-apientities-apiclusters" class="md-nav__link">
     <span class="md-ellipsis">
-      Connection
+      3. Identity Explorer (/api/entities &amp; /api/clusters)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#setup-wizard" class="md-nav__link">
+  <a href="#4-pipeline-runs-telemetry-apiruns" class="md-nav__link">
     <span class="md-ellipsis">
-      Setup Wizard
+      4. Pipeline Runs &amp; Telemetry (/api/runs)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#metrics" class="md-nav__link">
+  <a href="#5-enterprise-observability-metrics-apiauth" class="md-nav__link">
     <span class="md-ellipsis">
-      Metrics
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#explorer" class="md-nav__link">
-    <span class="md-ellipsis">
-      Explorer
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#runs" class="md-nav__link">
-    <span class="md-ellipsis">
-      Runs
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      Schema
+      5. Enterprise Observability (/metrics &amp; /api/auth)
     </span>
   </a>
   
@@ -1334,51 +1328,183 @@
   
 
 
-<h1 id="api-reference-summary">API Reference (Summary)</h1>
-<p>The API is a FastAPI service used by the UI. It also supports direct use.</p>
-<p>Base URL: http://localhost:8000</p>
-<h2 id="health">Health</h2>
+<h1 id="rest-api-reference">REST API Reference</h1>
+<p>The IDR backend provides a comprehensive FastAPI REST API powering the Web UI, automated CI/CD pipelines, and external integrations.</p>
 <ul>
-<li><code>GET /api/health</code></li>
+<li><strong>Base URL</strong>: <code>http://localhost:8000</code></li>
+<li><strong>Interactive Swagger UI</strong>: <code>http://localhost:8000/docs</code></li>
+<li><strong>OpenAPI Schema</strong>: <code>http://localhost:8000/openapi.json</code></li>
 </ul>
-<h2 id="connection">Connection</h2>
-<ul>
-<li><code>POST /api/connect</code> (connect for dashboard/explorer)</li>
-</ul>
-<h2 id="setup-wizard">Setup Wizard</h2>
-<ul>
-<li><code>POST /api/setup/connect</code></li>
-<li><code>GET /api/setup/status</code></li>
-<li><code>GET /api/setup/config</code></li>
-<li><code>GET /api/setup/discover/tables?schema=...</code></li>
-<li><code>GET /api/setup/discover/columns?table=...</code></li>
-<li><code>POST /api/setup/config/save</code></li>
-<li><code>POST /api/setup/run</code></li>
-<li><code>GET /api/setup/fuzzy-templates</code></li>
-</ul>
-<h2 id="metrics">Metrics</h2>
-<ul>
-<li><code>GET /api/metrics/summary</code></li>
-<li><code>GET /api/metrics/distribution</code></li>
-<li><code>GET /api/metrics/rules</code></li>
-<li><code>GET /api/alerts</code></li>
-</ul>
-<h2 id="explorer">Explorer</h2>
-<ul>
-<li><code>GET /api/entities/search?q=...</code></li>
-<li><code>GET /api/clusters/{resolved_id}</code></li>
-</ul>
-<h2 id="runs">Runs</h2>
-<ul>
-<li><code>GET /api/runs</code></li>
-</ul>
-<h2 id="schema">Schema</h2>
-<ul>
-<li><code>GET /api/schema</code></li>
-</ul>
-<p>Notes:
-- The API uses the current adapter from the ConnectionManager.
-- Setup endpoints are intended for the wizard and can initialize metadata tables.</p>
+<hr />
+<h2 id="1-setup-configuration-apisetup">1. Setup &amp; Configuration (<code>/api/setup</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/setup/connect</code></td>
+<td>Connect to a database adapter (<code>duckdb</code>, <code>snowflake</code>, <code>bigquery</code>, <code>databricks</code>). Initializes the session connection.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/setup/status</code></td>
+<td>Check current connection and metadata initialization status.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/setup/config</code></td>
+<td>Retrieve current saved configuration (sources, rules, survivorship, fuzzy rules, exclusions).</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/setup/config/save</code></td>
+<td>Validate and persist configuration to metadata tables (<code>idr_meta</code>). Requires write access in enterprise RBAC.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/setup/discover/tables</code></td>
+<td>Discover tables in a given schema. Query param: <code>?schema=...</code>.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/setup/discover/columns</code></td>
+<td>Retrieve columns and data types for a table. Query param: <code>?table=...</code>.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/setup/fuzzy-templates</code></td>
+<td>Get supported fuzzy matching templates per dialect with parameter slots.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/setup/run</code></td>
+<td>Trigger an identity resolution pipeline run (<code>FULL</code>, <code>INCR</code>, or <code>dry_run=True</code>).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-running-a-pipeline-via-api">Example: Running a Pipeline via API</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8000/api/setup/run<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">    "mode": "FULL",</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s1">    "strict": false,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="s1">    "max_iterations": 30,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="s1">    "dry_run": false</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="s1">  }'</span>
+</code></pre></div>
+<hr />
+<h2 id="2-metrics-dashboard-apimetrics">2. Metrics &amp; Dashboard (<code>/api/metrics</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/metrics/summary</code></td>
+<td>Get high-level graph metrics: total entities, total clusters, total edges, and average confidence score.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/metrics/distribution</code></td>
+<td>Get cluster size distribution bucketed into singletons, pairs, small, and large groups.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/metrics/rules</code></td>
+<td>Get edge counts and active status broken down by matching rule.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/alerts</code></td>
+<td>List operational and data quality alerts (e.g. skipped identifier groups, un-converged runs).</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-identity-explorer-apientities-apiclusters">3. Identity Explorer (<code>/api/entities</code> &amp; <code>/api/clusters</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/entities/search?q={query}</code></td>
+<td>Search entities by identifier (email, phone, loyalty ID, entity key). Supports both cluster members and singletons.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/clusters/{resolved_id}</code></td>
+<td>Retrieve comprehensive cluster details: member entities, connecting edges with rules, fuzzy <code>super_cluster_id</code>, and unified Golden Profile.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-pipeline-runs-telemetry-apiruns">4. Pipeline Runs &amp; Telemetry (<code>/api/runs</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/runs</code></td>
+<td>List execution history with run mode, status, duration, entities processed, and warnings.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/runs/{run_id}</code></td>
+<td>Retrieve deep stage telemetry (<code>stage_metrics</code>) for a specific run, including per-stage durations, row counts, and error details.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-enterprise-observability-metrics-apiauth">5. Enterprise Observability (<code>/metrics</code> &amp; <code>/api/auth</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/metrics</code></td>
+<td>Prometheus metrics scrape endpoint exporting <code>idr_entities_processed_total</code>, <code>idr_edges_created_total</code>, <code>idr_clusters_impacted_total</code>, and <code>idr_last_run_duration_seconds</code>.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/health</code></td>
+<td>Health check endpoint returning <code>{ "status": "healthy" }</code>.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/auth/me</code></td>
+<td>Current authenticated user identity and RBAC roles (when OIDC is enabled).</td>
+</tr>
+</tbody>
+</table>
 
 
 

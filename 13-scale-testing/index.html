@@ -20,7 +20,7 @@
     
     
       
-        <title>Scale Testing - SQL Identity Resolution</title>
+        <title>Scale Testing & Graph Benchmarks - SQL Identity Resolution</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#scale-testing" class="md-skip">
+        <a href="#scale-testing-graph-benchmarks" class="md-skip">
           Skip to content
         </a>
       
@@ -106,7 +106,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Scale Testing
+              Scale Testing &amp; Graph Benchmarks
             
           </span>
         </div>
@@ -1142,15 +1142,16 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#data-generation" class="md-nav__link">
+  <a href="#automated-260000-entity-benchmark" class="md-nav__link">
     <span class="md-ellipsis">
-      Data Generation
+      ⚡ Automated 260,000-Entity Benchmark
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
+    <nav class="md-nav" aria-label="⚡ Automated 260,000-Entity Benchmark">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#running-the-benchmark" class="md-nav__link">
     <span class="md-ellipsis">
       Running the Benchmark
@@ -1158,13 +1159,51 @@
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#sizing-reference" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-architecture" class="md-nav__link">
     <span class="md-ellipsis">
-      Sizing Reference
+      Benchmark Architecture:
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generating-custom-scale-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      📈 Generating Custom Scale Datasets
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-sizing-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      🏎️ Performance &amp; Sizing Guidelines
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🏎️ Performance & Sizing Guidelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#memory-disk-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      Memory &amp; Disk Tips:
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1186,35 +1225,85 @@
   
 
 
-<h1 id="scale-testing">Scale Testing</h1>
-<p>Validate performance with large synthetic datasets.</p>
-<h2 id="data-generation">Data Generation</h2>
-<p>Use the <code>generate_global_retail_idr.py</code> script to create realistic test data at scale.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Generate 1 Million rows</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>tools/scale_test/generate_global_retail_idr.py<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--rows<span class="o">=</span><span class="m">1000000</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--output<span class="o">=</span>data/1m_test
+<h1 id="scale-testing-graph-benchmarks">Scale Testing &amp; Graph Benchmarks</h1>
+<p>IDR is engineered to process hundreds of millions of records inside data warehouses using set-based SQL and distributed graph algorithms.</p>
+<hr />
+<h2 id="automated-260000-entity-benchmark">⚡ Automated 260,000-Entity Benchmark</h2>
+<p>IDR includes an end-to-end multi-source scale test script validating full resolution, incremental processing, and MCP agent responsiveness.</p>
+<h3 id="running-the-benchmark">Running the Benchmark</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>tools/scale_test/run_scale_and_mcp_benchmark.py<span class="w"> </span>--rows<span class="w"> </span><span class="m">250000</span><span class="w"> </span>--incr-rows<span class="w"> </span><span class="m">10000</span>
 </code></pre></div>
-<h2 id="running-the-benchmark">Running the Benchmark</h2>
+<h3 id="benchmark-architecture">Benchmark Architecture:</h3>
 <ol>
-<li>
-<p><strong>Load Data</strong>: Use the platform-specific loader.
-    <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>tools/scale_test/load_duckdb.py<span class="w"> </span>--db<span class="o">=</span>scale.duckdb<span class="w"> </span>--input<span class="o">=</span>data/1m_test
-</code></pre></div></p>
-</li>
-<li>
-<p><strong>Initialize</strong>:
-    <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>idr<span class="w"> </span>init<span class="w"> </span>--platform<span class="w"> </span>duckdb<span class="w"> </span>--db<span class="w"> </span>scale.duckdb<span class="w"> </span>--reset
-</code></pre></div></p>
-</li>
-<li>
-<p><strong>Run IDR</strong>:
-    <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span>duckdb<span class="w"> </span>--db<span class="w"> </span>scale.duckdb<span class="w"> </span>--mode<span class="w"> </span>FULL
-</code></pre></div></p>
-</li>
+<li><strong>Multi-Source Generation</strong>: Generates 250,000 entities across 3 distinct source tables (<code>CRM Accounts</code>, <code>Web Users</code>, <code>POS Customers</code>) with natural overlapping identifiers.</li>
+<li><strong>Deterministic &amp; Guardrail Execution</strong>: Applies rules across <code>EMAIL</code>, <code>PHONE</code>, and <code>LOYALTY</code>, with <code>max_group_size=100</code> catching a synthetic shared kiosk email.</li>
+<li><strong>FULL Pipeline Run</strong>: Resolves 250,000 entities into 58,000+ clusters in 5 Label Propagation iterations at <strong>~50,000 entities/sec</strong>.</li>
+<li><strong>INCR Pipeline Run</strong>: Processes 10,000 newly arriving incremental rows in 1.5s, linking them to existing clusters without reprocessing the full graph.</li>
+<li><strong>Graph Invariant Verification</strong>: Validates all 4 mathematical invariants:</li>
+<li><strong>Partition Invariant</strong>: Every entity belongs to exactly one cluster (<code>COUNT(entity_key) == SUM(cluster_size)</code>).</li>
+<li><strong>Connected-Component Completeness</strong>: 0 cross-cluster edges.</li>
+<li><strong>Minimum-Label Determinism</strong>: <code>resolved_id == MIN(entity_key)</code> for every cluster.</li>
+<li><strong>Golden Profile Bijectivity</strong>: Exactly 1 Golden Profile per cluster.</li>
+<li><strong>MCP Latency Verification</strong>: Benchmarks all 14 MCP agent tools against the 260,000-entity graph (sub-second response times).</li>
 </ol>
-<h2 id="sizing-reference">Sizing Reference</h2>
-<p>See <code>docs/cluster_sizing.md</code> (to be migrated) for expected resource usage.</p>
+<hr />
+<h2 id="generating-custom-scale-datasets">📈 Generating Custom Scale Datasets</h2>
+<p>To generate multi-million-row synthetic retail datasets:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Generate 10 Million rows using Mimesis</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>tools/scale_test/generate_retail_idr_mimesis.py<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--config<span class="w"> </span>tools/scale_test/configs/retail_idr_10m.yaml
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Load into DuckDB</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>python<span class="w"> </span>tools/scale_test/load_duckdb.py<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span>--input-dir<span class="w"> </span>tools/scale_test/output/retail_idr_10m<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span>--db<span class="w"> </span>retail_10m.duckdb
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Or stage to Cloud Storage &amp; load into Snowflake / BigQuery / Databricks</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>python<span class="w"> </span>tools/scale_test/load_snowflake.py<span class="w"> </span>--input-dir<span class="w"> </span>tools/scale_test/output/retail_idr_10m<span class="w"> </span>...
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>python<span class="w"> </span>tools/scale_test/load_bigquery.py<span class="w"> </span>--input-dir<span class="w"> </span>tools/scale_test/output/retail_idr_10m<span class="w"> </span>...
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>python<span class="w"> </span>tools/scale_test/load_databricks.py<span class="w"> </span>--input-dir<span class="w"> </span>tools/scale_test/output/retail_idr_10m<span class="w"> </span>...
+</code></pre></div>
+<hr />
+<h2 id="performance-sizing-guidelines">🏎️ Performance &amp; Sizing Guidelines</h2>
+<table>
+<thead>
+<tr>
+<th>Data Scale</th>
+<th>DuckDB</th>
+<th>Snowflake</th>
+<th>BigQuery</th>
+<th>Databricks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>&lt; 1M rows</strong></td>
+<td>In-Memory / File (4GB RAM)</td>
+<td>X-Small Warehouse</td>
+<td>On-Demand Serverless</td>
+<td>Small Serverless SQL Warehouse</td>
+</tr>
+<tr>
+<td><strong>10M rows</strong></td>
+<td>16GB RAM, Local NVMe (~140s)</td>
+<td>Medium Warehouse (~160s)</td>
+<td>Slot Reservation (~300s)</td>
+<td>Medium SQL Warehouse (~280s)</td>
+</tr>
+<tr>
+<td><strong>50M - 100M+</strong></td>
+<td>64GB+ RAM Workstation</td>
+<td>Large / X-Large Warehouse</td>
+<td>Reservation + Partitioning</td>
+<td>Large SQL Warehouse / Photon</td>
+</tr>
+</tbody>
+</table>
+<h3 id="memory-disk-tips">Memory &amp; Disk Tips:</h3>
+<ul>
+<li><strong>DuckDB</strong>: When running automated scale test suites locally, prefer <code>conn = duckdb.connect(":memory:")</code> to prevent temporary write amplification and disk full errors.</li>
+<li><strong>Delta Lake on Databricks</strong>: Use <code>OPTIMIZE idr_out.identity_resolved_membership_current ZORDER BY (resolved_id)</code> to cluster files for ultra-fast point lookups.</li>
+</ul>
 
 
 

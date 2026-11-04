@@ -226,31 +226,31 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#layers">
+<a class="md-nav__link" href="#schema-layers">
 <span class="md-ellipsis">
-      Layers
+      Schema Layers
     </span>
 </a>
-<nav aria-label="Layers" class="md-nav">
+<nav aria-label="Schema Layers" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#1-metadata-idr_meta">
+<a class="md-nav__link" href="#1-metadata-layer-idr_meta">
 <span class="md-ellipsis">
-      1. Metadata (idr_meta)
+      1. Metadata Layer (idr_meta)
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#2-processing-idr_work">
+<a class="md-nav__link" href="#2-processing-staging-layer-idr_work">
 <span class="md-ellipsis">
-      2. Processing (idr_work)
+      2. Processing &amp; Staging Layer (idr_work)
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#3-output-idr_out">
+<a class="md-nav__link" href="#3-output-layer-idr_out">
 <span class="md-ellipsis">
-      3. Output (idr_out)
+      3. Output Layer (idr_out)
     </span>
 </a>
 </li>
@@ -258,9 +258,9 @@
 </nav>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#cross-platform-execution">
+<a class="md-nav__link" href="#cross-platform-execution-architecture">
 <span class="md-ellipsis">
-      Cross-Platform Execution
+      Cross-Platform Execution Architecture
     </span>
 </a>
 </li>
@@ -521,31 +521,31 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#layers">
+<a class="md-nav__link" href="#schema-layers">
 <span class="md-ellipsis">
-      Layers
+      Schema Layers
     </span>
 </a>
-<nav aria-label="Layers" class="md-nav">
+<nav aria-label="Schema Layers" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#1-metadata-idr_meta">
+<a class="md-nav__link" href="#1-metadata-layer-idr_meta">
 <span class="md-ellipsis">
-      1. Metadata (idr_meta)
+      1. Metadata Layer (idr_meta)
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#2-processing-idr_work">
+<a class="md-nav__link" href="#2-processing-staging-layer-idr_work">
 <span class="md-ellipsis">
-      2. Processing (idr_work)
+      2. Processing &amp; Staging Layer (idr_work)
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#3-output-idr_out">
+<a class="md-nav__link" href="#3-output-layer-idr_out">
 <span class="md-ellipsis">
-      3. Output (idr_out)
+      3. Output Layer (idr_out)
     </span>
 </a>
 </li>
@@ -553,9 +553,9 @@
 </nav>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#cross-platform-execution">
+<a class="md-nav__link" href="#cross-platform-execution-architecture">
 <span class="md-ellipsis">
-      Cross-Platform Execution
+      Cross-Platform Execution Architecture
     </span>
 </a>
 </li>
@@ -567,38 +567,65 @@
 <div class="md-content" data-md-component="content">
 <article class="md-content__inner md-typeset">
 <h1 id="architecture">Architecture</h1>
-<p>System architecture and data flow.</p>
+<p>System architecture, design patterns, and cross-platform data flow.</p>
+<hr/>
 <h2 id="high-level-design">High-Level Design</h2>
 <pre class="mermaid"><code>graph TB
-    Sources[Source Systems] --&gt; Extract[Extract &amp; Normalize]
-    Extract --&gt; Edges[Edge Building]
-    Edges --&gt; LP[Label Propagation]
-    LP --&gt; Clusters[Cluster Assignment]
-    Clusters --&gt; Golden[Golden Profile]</code></pre>
-<h2 id="layers">Layers</h2>
-<h3 id="1-metadata-idr_meta">1. Metadata (<code>idr_meta</code>)</h3>
+    subgraph Ingestion["1. Ingestion &amp; Extraction"]
+        Sources[Source Tables: CRM, POS, Web] --&gt; Extract[Extract &amp; Normalize Identifiers / Attributes]
+        Exclusions[Identifier Exclusions Blocklist] -.-&gt; Extract
+    end
+
+    subgraph GraphBuilding["2. Identity Graph Formation"]
+        Extract --&gt; Edges[Anchor-Based Edge Building]
+        Guardrails[max_group_size Safeguards] -.-&gt; Edges
+        Edges --&gt; Skipped[idr_out.skipped_identifier_groups]
+    end
+
+    subgraph Resolution["3. Distributed Graph Resolution"]
+        Edges --&gt; LP[Set-Based SQL Label Propagation]
+        LP --&gt; Clusters[Connected-Component Cluster Assignment]
+        Fuzzy[Optional Probabilistic Super-Clustering] -.-&gt; Clusters
+    end
+
+    subgraph Output["4. Unified Customer 360 Output"]
+        Clusters --&gt; Members[idr_out.identity_resolved_membership_current]
+        Clusters --&gt; Master[idr_out.identity_clusters_current]
+        Clusters --&gt; Scoring[Confidence Scoring Engine]
+        Clusters --&gt; Golden[idr_out.golden_profiles Survivorship]
+    end</code></pre>
+<hr/>
+<h2 id="schema-layers">Schema Layers</h2>
+<h3 id="1-metadata-layer-idr_meta">1. Metadata Layer (<code>idr_meta</code>)</h3>
 <ul>
-<li><strong>Source Registry</strong>: Definitions of input tables.</li>
-<li><strong>Rules</strong>: Exact and fuzzy matching logic.</li>
-<li><strong>Mappings</strong>: Transformations for identifiers and attributes.</li>
+<li><strong>Source Registry (<code>source_table</code>)</strong>: Registered source tables with primary keys, watermark columns, and lookback windows.</li>
+<li><strong>Rule Definitions (<code>rule</code>, <code>fuzzy_rule</code>)</strong>: Exact matching rules and probabilistic fuzzy similarity rules.</li>
+<li><strong>Mappings (<code>identifier_mapping</code>, <code>entity_attribute_mapping</code>)</strong>: Column-to-identifier and column-to-profile mappings.</li>
+<li><strong>Survivorship Policies (<code>survivorship_rule</code>)</strong>: Declarative resolution strategies (<code>RECENCY</code>, <code>PRIORITY</code>, <code>FREQUENCY</code>).</li>
+<li><strong>Safety Lists (<code>identifier_exclusion</code>)</strong>: Exact and wildcard blocklists for false-linkage prevention.</li>
+<li><strong>Watermark State (<code>run_state</code>)</strong>: Tracks high-watermark timestamps for incremental delta processing.</li>
 </ul>
-<h3 id="2-processing-idr_work">2. Processing (<code>idr_work</code>)</h3>
+<h3 id="2-processing-staging-layer-idr_work">2. Processing &amp; Staging Layer (<code>idr_work</code>)</h3>
 <ul>
-<li><strong>Transient State</strong>: <code>identifiers</code>, <code>edges_new</code>, <code>lp_labels</code>.</li>
-<li><strong>Incremental Delta</strong>: Only processes changed records.</li>
+<li><strong>Transient State</strong>: Staging tables created and dropped per run (<code>entities_delta</code>, <code>identifiers_all</code>, <code>edges_new</code>, <code>lp_labels</code>, <code>cluster_attributes</code>).</li>
+<li><strong>Incremental Efficiency</strong>: In <code>INCR</code> mode, only updated source records and their direct neighborhood in the identity graph are extracted into <code>idr_work</code>.</li>
 </ul>
-<h3 id="3-output-idr_out">3. Output (<code>idr_out</code>)</h3>
+<h3 id="3-output-layer-idr_out">3. Output Layer (<code>idr_out</code>)</h3>
 <ul>
-<li><strong>Identity Graph</strong>: <code>identity_resolved_membership_current</code>.</li>
-<li><strong>Profiles</strong>: <code>golden_profile_current</code>.</li>
-<li><strong>Audit</strong>: <code>run_history</code>.</li>
+<li><strong>Resolved Membership (<code>identity_resolved_membership_current</code>)</strong>: Maps each source entity to its canonical <code>resolved_id</code>.</li>
+<li><strong>Cluster Registry (<code>identity_clusters_current</code>)</strong>: Master list of clusters with size, confidence score, and primary reason.</li>
+<li><strong>Golden Records (<code>golden_profiles</code>)</strong>: Unified customer 360 profile table with resolved survivorship attributes.</li>
+<li><strong>Active Edges (<code>identity_edges_current</code>)</strong>: Direct pairwise edges with evidence rules and observation timestamps.</li>
+<li><strong>Identifier Registry (<code>identity_identifiers_current</code>)</strong>: Active registry enabling fast single-hop candidate expansion in incremental mode.</li>
+<li><strong>Audit Trails (<code>run_history</code>, <code>stage_metrics</code>, <code>config_snapshot</code>)</strong>: Full telemetry capturing run status, per-stage durations, and configuration hashes.</li>
 </ul>
-<h2 id="cross-platform-execution">Cross-Platform Execution</h2>
-<p>The core logic is SQL-based, allowing execution on:
-*   <strong>DuckDB</strong>: Local/Single-node.
-*   <strong>Snowflake</strong>: Cloud Data Warehouse.
-*   <strong>BigQuery</strong>: Serverless SQL.
-*   <strong>Databricks</strong>: Spark SQL (Photon).</p>
+<hr/>
+<h2 id="cross-platform-execution-architecture">Cross-Platform Execution Architecture</h2>
+<p>The core IDR engine is written in pure, dialect-aware SQL generated by <a href="file:///Users/harihiom/Anil/git/sql-identity-oss/idr_core"><code>idr_core</code></a>:
+- <strong>DuckDB</strong>: Executes in-process using vectorized execution, ideal for local development, CI/CD, and embedded edge workloads.
+- <strong>Snowflake</strong>: Runs in-warehouse via standard SQL or Snowpark sessions, leveraging micro-partition pruning and virtual warehouse scaling.
+- <strong>BigQuery</strong>: Serverless parallel processing leveraging DDL/DML, partition pruning, and string similarity functions.
+- <strong>Databricks</strong>: Runs natively on Spark SQL / Delta Lake across Serverless SQL Warehouses and Unity Catalog, leveraging Photon acceleration.</p>
 </article>
 </div>
 <script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>

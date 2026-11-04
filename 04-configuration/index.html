@@ -715,55 +715,64 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#structure" class="md-nav__link">
+  <a href="#complete-example-manifest" class="md-nav__link">
     <span class="md-ellipsis">
-      Structure
+      📄 Complete Example Manifest
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#sections" class="md-nav__link">
+  <a href="#section-breakdown" class="md-nav__link">
     <span class="md-ellipsis">
-      Sections
+      🛠️ Section Breakdown
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Sections">
+    <nav class="md-nav" aria-label="🛠️ Section Breakdown">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#sources-required" class="md-nav__link">
+  <a href="#1-sources" class="md-nav__link">
     <span class="md-ellipsis">
-      sources (Required)
+      1. sources
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#rules" class="md-nav__link">
+  <a href="#2-rules-deterministic-matching" class="md-nav__link">
     <span class="md-ellipsis">
-      rules
+      2. rules (Deterministic Matching)
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#survivorship" class="md-nav__link">
+  <a href="#3-fuzzy_rules-probabilistic-super-clustering" class="md-nav__link">
     <span class="md-ellipsis">
-      survivorship
+      3. fuzzy_rules (Probabilistic Super-Clustering)
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#fuzzy_rules" class="md-nav__link">
+  <a href="#4-survivorship-golden-record-resolution" class="md-nav__link">
     <span class="md-ellipsis">
-      fuzzy_rules
+      4. survivorship (Golden Record Resolution)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-exclusions-identifier-blocklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. exclusions (Identifier Blocklist)
     </span>
   </a>
   
@@ -771,6 +780,15 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-configuration-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      ⚡ CLI Configuration Workflow
+    </span>
+  </a>
   
 </li>
       
@@ -1251,55 +1269,64 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#structure" class="md-nav__link">
+  <a href="#complete-example-manifest" class="md-nav__link">
     <span class="md-ellipsis">
-      Structure
+      📄 Complete Example Manifest
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#sections" class="md-nav__link">
+  <a href="#section-breakdown" class="md-nav__link">
     <span class="md-ellipsis">
-      Sections
+      🛠️ Section Breakdown
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Sections">
+    <nav class="md-nav" aria-label="🛠️ Section Breakdown">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#sources-required" class="md-nav__link">
+  <a href="#1-sources" class="md-nav__link">
     <span class="md-ellipsis">
-      sources (Required)
+      1. sources
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#rules" class="md-nav__link">
+  <a href="#2-rules-deterministic-matching" class="md-nav__link">
     <span class="md-ellipsis">
-      rules
+      2. rules (Deterministic Matching)
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#survivorship" class="md-nav__link">
+  <a href="#3-fuzzy_rules-probabilistic-super-clustering" class="md-nav__link">
     <span class="md-ellipsis">
-      survivorship
+      3. fuzzy_rules (Probabilistic Super-Clustering)
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#fuzzy_rules" class="md-nav__link">
+  <a href="#4-survivorship-golden-record-resolution" class="md-nav__link">
     <span class="md-ellipsis">
-      fuzzy_rules
+      4. survivorship (Golden Record Resolution)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-exclusions-identifier-blocklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. exclusions (Identifier Blocklist)
     </span>
   </a>
   
@@ -1307,6 +1334,15 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-configuration-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      ⚡ CLI Configuration Workflow
+    </span>
+  </a>
   
 </li>
       
@@ -1329,64 +1365,345 @@
 
 
 <h1 id="configuration-guide">Configuration Guide</h1>
-<p>Configuration is managed via YAML files and the <code>idr config</code> command.
-<strong>Source of Truth</strong>: <code>idr_core/config.py</code> definitions.</p>
-<h2 id="structure">Structure</h2>
+<p>IDR configurations are managed through declarative YAML manifests or through the interactive Web Setup Wizard.</p>
+<hr />
+<h2 id="complete-example-manifest">📄 Complete Example Manifest</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">sources</span><span class="p">:</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;users&quot;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">table</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;raw.users&quot;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">entity_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;user_id&quot;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">entity_type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;PERSON&quot;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nt">watermark_column</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;updated_at&quot;</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">identifiers</span><span class="p">:</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;email&quot;</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;LOWER(email)&quot;</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">attributes</span><span class="p">:</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;first_name&quot;</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;first_name&quot;</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="nt">rules</span><span class="p">:</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;email_exact&quot;</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;EXACT&quot;</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">    </span><span class="nt">match_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;email&quot;</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="nt">fuzzy_rules</span><span class="p">:</span>
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;name_fuzzy&quot;</span>
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="nt">blocking_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;metaphone(last_name)&quot;</span>
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="nt">score_expr</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;jaro_winkler(a.name,</span><span class="nv"> </span><span class="s">b.name)&quot;</span>
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="nt">threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.9</span>
-<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="nt">survivorship</span><span class="p">:</span>
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">attribute</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;first_name&quot;</span>
-<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">    </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;RECENCY&quot;</span>
-<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="w">    </span><span class="nt">recency_field</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;updated_at&quot;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">"crm"</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">table</span><span class="p">:</span><span class="w"> </span><span class="s">"raw.crm_customers"</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">entity_key</span><span class="p">:</span><span class="w"> </span><span class="s">"customer_id"</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">entity_type</span><span class="p">:</span><span class="w"> </span><span class="s">"PERSON"</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nt">watermark_column</span><span class="p">:</span><span class="w"> </span><span class="s">"updated_at"</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">watermark_lookback_minutes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">identifiers</span><span class="p">:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"phone"</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"phone"</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"loyalty"</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"loyalty_id"</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">    </span><span class="nt">attributes</span><span class="p">:</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"first_name"</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"first_name"</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"last_name"</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"last_name"</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"phone"</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"phone"</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">"web"</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="w">    </span><span class="nt">table</span><span class="p">:</span><span class="w"> </span><span class="s">"raw.web_users"</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">    </span><span class="nt">entity_key</span><span class="p">:</span><span class="w"> </span><span class="s">"user_id"</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">    </span><span class="nt">entity_type</span><span class="p">:</span><span class="w"> </span><span class="s">"PERSON"</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="w">    </span><span class="nt">watermark_column</span><span class="p">:</span><span class="w"> </span><span class="s">"last_login_ts"</span>
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="w">    </span><span class="nt">identifiers</span><span class="p">:</span>
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"user_email"</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"phone"</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"mobile_phone"</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">    </span><span class="nt">attributes</span><span class="p">:</span>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"first_name"</span>
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"first_name"</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"last_name"</span>
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"last_name"</span>
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="s">"user_email"</span>
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a><span class="nt">rules</span><span class="p">:</span>
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">"r_email"</span>
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"EXACT"</span>
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a><span class="w">    </span><span class="nt">match_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"email"</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a><span class="w">    </span><span class="nt">canonicalize</span><span class="p">:</span><span class="w"> </span><span class="s">"LOWERCASE"</span>
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a><span class="w">    </span><span class="nt">max_group_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">"r_phone"</span>
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"EXACT"</span>
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a><span class="w">    </span><span class="nt">match_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"phone"</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a><span class="w">    </span><span class="nt">canonicalize</span><span class="p">:</span><span class="w"> </span><span class="s">"EXACT"</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a><span class="w">    </span><span class="nt">max_group_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5000</span>
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">"r_loyalty"</span>
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"EXACT"</span>
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a><span class="w">    </span><span class="nt">match_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"loyalty"</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a><span class="w">    </span><span class="nt">canonicalize</span><span class="p">:</span><span class="w"> </span><span class="s">"EXACT"</span>
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a><span class="w">    </span><span class="nt">max_group_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a><span class="nt">fuzzy_rules</span><span class="p">:</span>
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="s">"fuzzy_last_name"</span>
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"Fuzzy</span><span class="nv"> </span><span class="s">Last</span><span class="nv"> </span><span class="s">Name</span><span class="nv"> </span><span class="s">within</span><span class="nv"> </span><span class="s">Soundex</span><span class="nv"> </span><span class="s">Block"</span>
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a><span class="w">    </span><span class="nt">blocking_key</span><span class="p">:</span><span class="w"> </span><span class="s">"SUBSTRING(last_name,</span><span class="nv"> </span><span class="s">1,</span><span class="nv"> </span><span class="s">3)"</span>
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a><span class="w">    </span><span class="nt">score_expr</span><span class="p">:</span>
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a><span class="w">      </span><span class="nt">duckdb</span><span class="p">:</span><span class="w"> </span><span class="s">"jaro_winkler_similarity(a.last_name,</span><span class="nv"> </span><span class="s">b.last_name)"</span>
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a><span class="w">      </span><span class="nt">snowflake</span><span class="p">:</span><span class="w"> </span><span class="s">"JAROWINKLER_SIMILARITY(a.last_name,</span><span class="nv"> </span><span class="s">b.last_name)</span><span class="nv"> </span><span class="s">/</span><span class="nv"> </span><span class="s">100.0"</span>
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a><span class="w">      </span><span class="nt">bigquery</span><span class="p">:</span><span class="w"> </span><span class="s">"1.0</span><span class="nv"> </span><span class="s">-</span><span class="nv"> </span><span class="s">(EDIT_DISTANCE(a.last_name,</span><span class="nv"> </span><span class="s">b.last_name)</span><span class="nv"> </span><span class="s">/</span><span class="nv"> </span><span class="s">GREATEST(LENGTH(a.last_name),</span><span class="nv"> </span><span class="s">LENGTH(b.last_name),</span><span class="nv"> </span><span class="s">1))"</span>
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a><span class="w">      </span><span class="nt">databricks</span><span class="p">:</span><span class="w"> </span><span class="s">"jaro_winkler(a.last_name,</span><span class="nv"> </span><span class="s">b.last_name)"</span>
+<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a><span class="w">    </span><span class="nt">threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.85</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>
+<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a><span class="nt">survivorship</span><span class="p">:</span>
+<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">attribute</span><span class="p">:</span><span class="w"> </span><span class="s">"first_name"</span>
+<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a><span class="w">    </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="s">"PRIORITY"</span>
+<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a><span class="w">    </span><span class="nt">source_priority</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"crm"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"web"</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>
+<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">attribute</span><span class="p">:</span><span class="w"> </span><span class="s">"last_name"</span>
+<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a><span class="w">    </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="s">"RECENCY"</span>
+<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a><span class="w">    </span><span class="nt">recency_field</span><span class="p">:</span><span class="w"> </span><span class="s">"updated_at"</span>
+<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>
+<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">attribute</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a><span class="w">    </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="s">"RECENCY"</span>
+<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a><span class="w">    </span><span class="nt">recency_field</span><span class="p">:</span><span class="w"> </span><span class="s">"updated_at"</span>
+<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>
+<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">attribute</span><span class="p">:</span><span class="w"> </span><span class="s">"phone"</span>
+<a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a><span class="w">    </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="s">"FREQUENCY"</span>
+<a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a>
+<a id="__codelineno-0-93" name="__codelineno-0-93" href="#__codelineno-0-93"></a><span class="nt">exclusions</span><span class="p">:</span>
+<a id="__codelineno-0-94" name="__codelineno-0-94" href="#__codelineno-0-94"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">identifier_type</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-95" name="__codelineno-0-95" href="#__codelineno-0-95"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"support@company.com"</span>
+<a id="__codelineno-0-96" name="__codelineno-0-96" href="#__codelineno-0-96"></a><span class="w">    </span><span class="nt">match_type</span><span class="p">:</span><span class="w"> </span><span class="s">"EXACT"</span>
+<a id="__codelineno-0-97" name="__codelineno-0-97" href="#__codelineno-0-97"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">"Internal</span><span class="nv"> </span><span class="s">support</span><span class="nv"> </span><span class="s">ticketing</span><span class="nv"> </span><span class="s">inbox"</span>
+<a id="__codelineno-0-98" name="__codelineno-0-98" href="#__codelineno-0-98"></a>
+<a id="__codelineno-0-99" name="__codelineno-0-99" href="#__codelineno-0-99"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">identifier_type</span><span class="p">:</span><span class="w"> </span><span class="s">"email"</span>
+<a id="__codelineno-0-100" name="__codelineno-0-100" href="#__codelineno-0-100"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"%@noreply.example.com"</span>
+<a id="__codelineno-0-101" name="__codelineno-0-101" href="#__codelineno-0-101"></a><span class="w">    </span><span class="nt">match_type</span><span class="p">:</span><span class="w"> </span><span class="s">"LIKE"</span>
+<a id="__codelineno-0-102" name="__codelineno-0-102" href="#__codelineno-0-102"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s">"Automated</span><span class="nv"> </span><span class="s">notification</span><span class="nv"> </span><span class="s">domain"</span>
 </code></pre></div>
-<h2 id="sections">Sections</h2>
-<h3 id="sources-required"><code>sources</code> (Required)</h3>
-<p>Defines input tables.
-*   <code>id</code>: Unique identifier for the source (used in lineage).
-*   <code>table</code>: Fully qualified table name (<code>schema.table</code>).
-*   <code>entity_key</code>: Unique primary key of the source entity.
-*   <code>identifiers</code>: List of identity columns to extract.
-*   <code>attributes</code>: List of profile attributes to extract.</p>
-<h3 id="rules"><code>rules</code></h3>
-<p>Deterministic matching rules.
-*   <code>type</code>: Currently only <code>EXACT</code> is supported.
-*   <code>match_keys</code>: List of identifier types to match on (e.g., <code>["email"]</code>).
-*   <code>priority</code>: Lower number = higher priority edge.</p>
-<h3 id="survivorship"><code>survivorship</code></h3>
-<p>Golden profile resolution logic.
-*   <code>strategy</code>:
-    *   <code>RECENCY</code>: Latest value wins.
-    *   <code>PRIORITY</code>: Source with highest trust rank wins.
-    *   <code>FREQUENCY</code>: Most common value wins.
-    *   <code>AGG_MAX</code>, <code>AGG_SUM</code>: Aggregation functions.</p>
-<h3 id="fuzzy_rules"><code>fuzzy_rules</code></h3>
-<p>Probabilistic matching (requires fuzzy mode).
-*   <code>blocking_key</code>: SQL expression to limit comparison scope.
-*   <code>score_expr</code>: SQL expression returning float 0.0-1.0.
-*   <code>threshold</code>: Cutoff score for a match.</p>
+<hr />
+<h2 id="section-breakdown">🛠️ Section Breakdown</h2>
+<h3 id="1-sources">1. <code>sources</code></h3>
+<p>Defines source tables to ingest into the identity graph.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Unique source identifier (used in lineage and priority survivorship).</td>
+</tr>
+<tr>
+<td><code>table</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Fully-qualified table name (<code>schema.table</code> or <code>catalog.schema.table</code>).</td>
+</tr>
+<tr>
+<td><code>entity_key</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Unique primary key column / expression in the source table.</td>
+</tr>
+<tr>
+<td><code>entity_type</code></td>
+<td>string</td>
+<td>No</td>
+<td>Entity categorization (default: <code>"PERSON"</code>).</td>
+</tr>
+<tr>
+<td><code>watermark_column</code></td>
+<td>string</td>
+<td>No</td>
+<td>Timestamp column used for incremental processing (<code>INCR</code> mode).</td>
+</tr>
+<tr>
+<td><code>watermark_lookback_minutes</code></td>
+<td>integer</td>
+<td>No</td>
+<td>Buffer window (minutes) for late-arriving records (default: <code>0</code>).</td>
+</tr>
+<tr>
+<td><code>identifiers</code></td>
+<td>list</td>
+<td>Yes</td>
+<td>List of identifier mapping specs (<code>type</code>, <code>expr</code>, <code>is_hashed</code>).</td>
+</tr>
+<tr>
+<td><code>attributes</code></td>
+<td>list</td>
+<td>No</td>
+<td>List of profile attributes for Golden Profile generation (<code>name</code>, <code>expr</code>).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="2-rules-deterministic-matching">2. <code>rules</code> (Deterministic Matching)</h3>
+<p>Exact matching rules that form graph edges.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Required</td>
+<td>Unique rule ID.</td>
+</tr>
+<tr>
+<td><code>type</code></td>
+<td>string</td>
+<td><code>"EXACT"</code></td>
+<td>Match type.</td>
+</tr>
+<tr>
+<td><code>match_keys</code></td>
+<td>list</td>
+<td>Required</td>
+<td>Identifier types that must match (e.g. <code>["email"]</code>).</td>
+</tr>
+<tr>
+<td><code>canonicalize</code></td>
+<td>string</td>
+<td><code>"LOWERCASE"</code></td>
+<td>Value normalization: <code>"LOWERCASE"</code>, <code>"UPPERCASE"</code>, or <code>"EXACT"</code>.</td>
+</tr>
+<tr>
+<td><code>priority</code></td>
+<td>integer</td>
+<td><code>100</code></td>
+<td>Rule priority (lower number = higher edge priority in evidence).</td>
+</tr>
+<tr>
+<td><code>max_group_size</code></td>
+<td>integer</td>
+<td><code>10000</code></td>
+<td>High-cardinality guardrail. Groups larger than this are skipped and logged to <code>idr_out.skipped_identifier_groups</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-fuzzy_rules-probabilistic-super-clustering">3. <code>fuzzy_rules</code> (Probabilistic Super-Clustering)</h3>
+<p>Optional refinement rules executed when <code>--strict</code> is not enabled.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Unique fuzzy rule ID.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Human-readable rule description.</td>
+</tr>
+<tr>
+<td><code>blocking_key</code></td>
+<td>string</td>
+<td>SQL expression partitioning candidates before cross-comparison (e.g., soundex or first 3 characters).</td>
+</tr>
+<tr>
+<td><code>score_expr</code></td>
+<td>string or dict</td>
+<td>Similarity score expression yielding 0.0 to 1.0. Can be a string or a dialect-keyed dictionary (<code>duckdb</code>, <code>snowflake</code>, <code>bigquery</code>, <code>databricks</code>).</td>
+</tr>
+<tr>
+<td><code>threshold</code></td>
+<td>float</td>
+<td>Minimum score (0.0 to 1.0) required to merge clusters into a Super-Cluster.</td>
+</tr>
+<tr>
+<td><code>priority</code></td>
+<td>integer</td>
+<td>Execution priority.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[!TIP]
+In the Web UI Setup Wizard, choosing a fuzzy template (Jaro-Winkler, Levenshtein, Soundex) automatically substitutes <code>{col}</code> with your selected attribute and selects the target warehouse's native function.</p>
+</blockquote>
+<h3 id="4-survivorship-golden-record-resolution">4. <code>survivorship</code> (Golden Record Resolution)</h3>
+<p>Controls how attributes from multiple source records within a cluster are consolidated into <code>idr_out.golden_profiles</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>Description</th>
+<th>Required Parameters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>RECENCY</code></strong></td>
+<td>Selects the non-null value from the record with the most recent timestamp.</td>
+<td><code>recency_field</code> (or defaults to source watermark column)</td>
+</tr>
+<tr>
+<td><strong><code>PRIORITY</code></strong></td>
+<td>Selects the value from the highest-ranked source system. Automatically skips NULL values.</td>
+<td><code>source_priority</code> (list of source table <code>id</code>s or table names)</td>
+</tr>
+<tr>
+<td><strong><code>FREQUENCY</code></strong></td>
+<td>Selects the most frequently occurring value across all cluster members.</td>
+<td>None</td>
+</tr>
+</tbody>
+</table>
+<h3 id="5-exclusions-identifier-blocklist">5. <code>exclusions</code> (Identifier Blocklist)</h3>
+<p>Blocks specific values from linking records to prevent hub-and-spoke false clustering.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>identifier_type</code></td>
+<td>string</td>
+<td>Identifier type to filter (e.g. <code>email</code>, <code>phone</code>).</td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td>string</td>
+<td>Value or pattern to block.</td>
+</tr>
+<tr>
+<td><code>match_type</code></td>
+<td>string</td>
+<td><code>"EXACT"</code> (exact string match) or <code>"LIKE"</code> (SQL wildcard matching with <code>%</code>).</td>
+</tr>
+<tr>
+<td><code>reason</code></td>
+<td>string</td>
+<td>Optional description for auditing.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cli-configuration-workflow">⚡ CLI Configuration Workflow</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># 1. Validate your YAML configuration syntax</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>idr<span class="w"> </span>config<span class="w"> </span>validate<span class="w"> </span>--file<span class="w"> </span>config.yaml
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># 2. Preview the SQL DDL statements generated for your target database</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>idr<span class="w"> </span>config<span class="w"> </span>generate<span class="w"> </span>--file<span class="w"> </span>config.yaml<span class="w"> </span>--dialect<span class="w"> </span><span class="o">[</span>duckdb<span class="p">|</span>snowflake<span class="p">|</span>bigquery<span class="p">|</span>databricks<span class="o">]</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># 3. Apply configuration to your target warehouse</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>idr<span class="w"> </span>config<span class="w"> </span>apply<span class="w"> </span>--file<span class="w"> </span>config.yaml<span class="w"> </span>--platform<span class="w"> </span>snowflake
+</code></pre></div>
 
 
 

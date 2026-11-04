@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#troubleshooting" class="md-skip">
+        <a href="#troubleshooting-common-issues" class="md-skip">
           Skip to content
         </a>
       
@@ -953,37 +953,55 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
+  <a href="#1-warehouse-platform-specific-issues" class="md-nav__link">
     <span class="md-ellipsis">
-      Common Issues
+      1. Warehouse &amp; Platform Specific Issues
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Common Issues">
+    <nav class="md-nav" aria-label="1. Warehouse & Platform Specific Issues">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-table-not-found-errors" class="md-nav__link">
+  <a href="#databricks-wrong_column_defaults_for_delta_feature_not_enabled" class="md-nav__link">
     <span class="md-ellipsis">
-      1. "Table not found" errors
+      Databricks: WRONG_COLUMN_DEFAULTS_FOR_DELTA_FEATURE_NOT_ENABLED
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-giant-cluster-warnings" class="md-nav__link">
+  <a href="#databricks-schema-catalog-resolution" class="md-nav__link">
     <span class="md-ellipsis">
-      2. "Giant Cluster" warnings
+      Databricks: Schema &amp; Catalog Resolution
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-pipeline-failing-at-label-propagation" class="md-nav__link">
+  <a href="#bigquery-bigquerydatasetsdelete-permission-denied" class="md-nav__link">
     <span class="md-ellipsis">
-      3. Pipeline failing at "Label Propagation"
+      BigQuery: bigquery.datasets.delete permission denied
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snowflake-query-timeout-on-multi-million-row-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snowflake: Query Timeout on Multi-Million Row Datasets
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duckdb-failed-to-create-checkpoint-no-space-left-on-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      DuckDB: Failed to create checkpoint ... No space left on device
     </span>
   </a>
   
@@ -995,37 +1013,61 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#debugging" class="md-nav__link">
+  <a href="#2-graph-data-quality-issues" class="md-nav__link">
     <span class="md-ellipsis">
-      Debugging
+      2. Graph &amp; Data Quality Issues
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Debugging">
+    <nav class="md-nav" aria-label="2. Graph & Data Quality Issues">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#enable-verbose-logging" class="md-nav__link">
+  <a href="#giant-clusters-graph-explosion" class="md-nav__link">
     <span class="md-ellipsis">
-      Enable Verbose Logging
+      Giant Clusters &amp; Graph Explosion
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#check-run-history" class="md-nav__link">
+  <a href="#label-propagation-not-converging" class="md-nav__link">
     <span class="md-ellipsis">
-      Check Run History
+      Label Propagation Not Converging
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-operational-recovery-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Operational &amp; Recovery Diagnostics
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Operational & Recovery Diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#concurrent-run-lock-stale-run-detected" class="md-nav__link">
+    <span class="md-ellipsis">
+      Concurrent Run Lock / Stale Run Detected
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#dry-run" class="md-nav__link">
+  <a href="#inspecting-execution-stage-telemetry" class="md-nav__link">
     <span class="md-ellipsis">
-      Dry Run
+      Inspecting Execution Stage Telemetry
     </span>
   </a>
   
@@ -1275,37 +1317,55 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
+  <a href="#1-warehouse-platform-specific-issues" class="md-nav__link">
     <span class="md-ellipsis">
-      Common Issues
+      1. Warehouse &amp; Platform Specific Issues
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Common Issues">
+    <nav class="md-nav" aria-label="1. Warehouse & Platform Specific Issues">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-table-not-found-errors" class="md-nav__link">
+  <a href="#databricks-wrong_column_defaults_for_delta_feature_not_enabled" class="md-nav__link">
     <span class="md-ellipsis">
-      1. "Table not found" errors
+      Databricks: WRONG_COLUMN_DEFAULTS_FOR_DELTA_FEATURE_NOT_ENABLED
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-giant-cluster-warnings" class="md-nav__link">
+  <a href="#databricks-schema-catalog-resolution" class="md-nav__link">
     <span class="md-ellipsis">
-      2. "Giant Cluster" warnings
+      Databricks: Schema &amp; Catalog Resolution
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-pipeline-failing-at-label-propagation" class="md-nav__link">
+  <a href="#bigquery-bigquerydatasetsdelete-permission-denied" class="md-nav__link">
     <span class="md-ellipsis">
-      3. Pipeline failing at "Label Propagation"
+      BigQuery: bigquery.datasets.delete permission denied
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snowflake-query-timeout-on-multi-million-row-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snowflake: Query Timeout on Multi-Million Row Datasets
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duckdb-failed-to-create-checkpoint-no-space-left-on-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      DuckDB: Failed to create checkpoint ... No space left on device
     </span>
   </a>
   
@@ -1317,37 +1377,61 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#debugging" class="md-nav__link">
+  <a href="#2-graph-data-quality-issues" class="md-nav__link">
     <span class="md-ellipsis">
-      Debugging
+      2. Graph &amp; Data Quality Issues
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Debugging">
+    <nav class="md-nav" aria-label="2. Graph & Data Quality Issues">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#enable-verbose-logging" class="md-nav__link">
+  <a href="#giant-clusters-graph-explosion" class="md-nav__link">
     <span class="md-ellipsis">
-      Enable Verbose Logging
+      Giant Clusters &amp; Graph Explosion
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#check-run-history" class="md-nav__link">
+  <a href="#label-propagation-not-converging" class="md-nav__link">
     <span class="md-ellipsis">
-      Check Run History
+      Label Propagation Not Converging
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-operational-recovery-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Operational &amp; Recovery Diagnostics
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Operational & Recovery Diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#concurrent-run-lock-stale-run-detected" class="md-nav__link">
+    <span class="md-ellipsis">
+      Concurrent Run Lock / Stale Run Detected
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#dry-run" class="md-nav__link">
+  <a href="#inspecting-execution-stage-telemetry" class="md-nav__link">
     <span class="md-ellipsis">
-      Dry Run
+      Inspecting Execution Stage Telemetry
     </span>
   </a>
   
@@ -1376,32 +1460,84 @@
   
 
 
-<h1 id="troubleshooting">Troubleshooting</h1>
-<h2 id="common-issues">Common Issues</h2>
-<h3 id="1-table-not-found-errors">1. "Table not found" errors</h3>
-<p><strong>Cause</strong>: Metadata tables not initialized.
-<strong>Fix</strong>: Run <code>idr init</code> for your platform.</p>
-<h3 id="2-giant-cluster-warnings">2. "Giant Cluster" warnings</h3>
-<p><strong>Cause</strong>: A common value (e.g., "null", "n/a") is linking thousands of entities.
-<strong>Fix</strong>: Add the value to <code>idr_meta.identifier_exclusion</code>.
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">idr_meta</span><span class="p">.</span><span class="n">identifier_exclusion</span><span class="w"> </span><span class="p">(</span><span class="n">identifier_type</span><span class="p">,</span><span class="w"> </span><span class="n">identifier_value_pattern</span><span class="p">,</span><span class="w"> </span><span class="n">match_type</span><span class="p">,</span><span class="w"> </span><span class="n">reason</span><span class="p">)</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;email&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;no-reply@%&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;LIKE&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;Generic email&#39;</span><span class="p">);</span>
-</code></pre></div></p>
-<h3 id="3-pipeline-failing-at-label-propagation">3. Pipeline failing at "Label Propagation"</h3>
-<p><strong>Cause</strong>: Graph explosion due to high connectivity.
-<strong>Fix</strong>:
-*   Check <code>skipped_identifier_groups</code> table for clues.
-*   Lower <code>max_group_size</code> in <code>idr_meta.rule</code>.
-*   Increase <code>max_lp_iterations</code> if it's just slow to converge.</p>
-<h2 id="debugging">Debugging</h2>
-<h3 id="enable-verbose-logging">Enable Verbose Logging</h3>
-<p>Set <code>LOG_LEVEL=DEBUG</code> in your environment.</p>
-<h3 id="check-run-history">Check Run History</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">run_history</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">started_at</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
-</code></pre></div>
-<h3 id="dry-run">Dry Run</h3>
-<p>Use <code>--dry-run</code> to see what changes <em>would</em> happen without committing them.
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span>bigquery<span class="w"> </span>--mode<span class="w"> </span>INCR<span class="w"> </span>--dry-run
+<h1 id="troubleshooting-common-issues">Troubleshooting &amp; Common Issues</h1>
+<p>Solutions and diagnostic steps for common identity resolution and warehouse issues.</p>
+<hr />
+<h2 id="1-warehouse-platform-specific-issues">1. Warehouse &amp; Platform Specific Issues</h2>
+<h3 id="databricks-wrong_column_defaults_for_delta_feature_not_enabled">Databricks: <code>WRONG_COLUMN_DEFAULTS_FOR_DELTA_FEATURE_NOT_ENABLED</code></h3>
+<ul>
+<li><strong>Cause</strong>: Delta Lake tables by default require the table feature <code>allowColumnDefaults</code> to be enabled to accept column <code>DEFAULT</code> clauses.</li>
+<li><strong>Resolution</strong>: IDR's schema manager automatically suppresses <code>DEFAULT</code> clauses when creating Delta tables. If running custom DDL scripts, ensure column defaults are omitted from Delta <code>CREATE TABLE</code> statements or execute:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">tableName</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">TBLPROPERTIES</span><span class="p">(</span><span class="s1">'delta.feature.allowColumnDefaults'</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'supported'</span><span class="p">);</span>
+</code></pre></div></li>
+</ul>
+<h3 id="databricks-schema-catalog-resolution">Databricks: Schema &amp; Catalog Resolution</h3>
+<ul>
+<li><strong>Cause</strong>: Unity Catalog workspaces require queries to know the target catalog.</li>
+<li><strong>Resolution</strong>: Set <code>export DATABRICKS_CATALOG="your_catalog"</code> or configure default catalog in your warehouse settings.</li>
+</ul>
+<h3 id="bigquery-bigquerydatasetsdelete-permission-denied">BigQuery: <code>bigquery.datasets.delete permission denied</code></h3>
+<ul>
+<li><strong>Cause</strong>: When calling <code>idr init --reset</code> with BigQuery, dropping datasets requires <code>roles/bigquery.dataOwner</code> or <code>bigquery.datasets.delete</code>.</li>
+<li><strong>Resolution</strong>: Grant the service account <code>roles/bigquery.dataOwner</code> on the target project, or run <code>idr init</code> without <code>--reset</code> to alter/create tables in place without dropping the datasets.</li>
+</ul>
+<h3 id="snowflake-query-timeout-on-multi-million-row-datasets">Snowflake: Query Timeout on Multi-Million Row Datasets</h3>
+<ul>
+<li><strong>Cause</strong>: An undersized warehouse (X-Small) running heavy initial full label propagation.</li>
+<li><strong>Resolution</strong>: Temporarily scale warehouse to Medium or Large for initial historical load:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">ALTER</span><span class="w"> </span><span class="n">WAREHOUSE</span><span class="w"> </span><span class="n">COMPUTE_WH</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">WAREHOUSE_SIZE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'LARGE'</span><span class="p">;</span>
+</code></pre></div></li>
+</ul>
+<h3 id="duckdb-failed-to-create-checkpoint-no-space-left-on-device">DuckDB: <code>Failed to create checkpoint ... No space left on device</code></h3>
+<ul>
+<li><strong>Cause</strong>: Generating very large synthetic datasets (e.g. 100k+ rows) in temporary file directories on full local partitions.</li>
+<li><strong>Resolution</strong>: Use <code>duckdb.connect(":memory:")</code> for test suites, or point <code>--db</code> to an external drive with adequate disk space.</li>
+</ul>
+<hr />
+<h2 id="2-graph-data-quality-issues">2. Graph &amp; Data Quality Issues</h2>
+<h3 id="giant-clusters-graph-explosion">Giant Clusters &amp; Graph Explosion</h3>
+<ul>
+<li><strong>Symptom</strong>: A single cluster contains thousands or millions of entities (e.g. <code>cluster_size &gt; 10000</code>).</li>
+<li><strong>Cause</strong>: Common sentinel values like <code>null</code>, <code>n/a</code>, <code>unknown@domain.com</code>, or shared store tablet emails.</li>
+<li><strong>Resolution</strong>:</li>
+<li>Add the problematic value to <code>idr_meta.identifier_exclusion</code> (or via the UI Setup Wizard Step 4):
+     <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">idr_meta</span><span class="p">.</span><span class="n">identifier_exclusion</span><span class="w"> </span><span class="p">(</span><span class="n">identifier_type</span><span class="p">,</span><span class="w"> </span><span class="n">identifier_value_pattern</span><span class="p">,</span><span class="w"> </span><span class="n">match_type</span><span class="p">,</span><span class="w"> </span><span class="n">reason</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="s1">'email'</span><span class="p">,</span><span class="w"> </span><span class="s1">'shared_kiosk@store.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'EXACT'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Shared store device'</span><span class="p">);</span>
+</code></pre></div></li>
+<li>Set <code>max_group_size</code> on the matching rule (e.g. <code>100</code> or <code>5000</code>). Oversized groups will be automatically skipped and logged to <code>idr_out.skipped_identifier_groups</code>.</li>
+</ul>
+<h3 id="label-propagation-not-converging">Label Propagation Not Converging</h3>
+<ul>
+<li><strong>Symptom</strong>: Pipeline run completes with warning: <code>Label propagation did not fully converge after 30 iterations</code>.</li>
+<li><strong>Cause</strong>: Highly complex cyclical graph chains.</li>
+<li><strong>Resolution</strong>:</li>
+<li>Increase <code>max_iters</code>:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span><span class="o">[</span>platform<span class="o">]</span><span class="w"> </span>--mode<span class="w"> </span>FULL<span class="w"> </span>--max-iters<span class="w"> </span><span class="m">50</span>
+</code></pre></div></li>
+<li>Inspect <code>idr_out.skipped_identifier_groups</code> to check for unintentional hubs connecting disparate networks.</li>
+</ul>
+<hr />
+<h2 id="3-operational-recovery-diagnostics">3. Operational &amp; Recovery Diagnostics</h2>
+<h3 id="concurrent-run-lock-stale-run-detected">Concurrent Run Lock / Stale Run Detected</h3>
+<ul>
+<li><strong>Symptom</strong>: <code>PreflightStage</code> fails with <code>Concurrent run detected: run_...</code>.</li>
+<li><strong>Cause</strong>: A previous worker process crashed or was terminated while in <code>RUNNING</code> status.</li>
+<li><strong>Resolution</strong>: IDR automatically marks stale runs older than 4 hours as <code>INTERRUPTED</code>. To manually clear an active lock:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">UPDATE</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">run_history</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">SET</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'INTERRUPTED'</span><span class="p">,</span><span class="w"> </span><span class="n">error_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'Manually cleared'</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'RUNNING'</span><span class="p">;</span>
+</code></pre></div></li>
+</ul>
+<h3 id="inspecting-execution-stage-telemetry">Inspecting Execution Stage Telemetry</h3>
+<p>To diagnose where execution time was spent during a run:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">SELECT</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span><span class="n">stage_name</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="n">stage_order</span><span class="p">,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="n">duration_seconds</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="n">rows_out</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="k">FROM</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">stage_metrics</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">run_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'your_run_id'</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">stage_order</span><span class="p">;</span>
 </code></pre></div></p>
 
 
