@@ -70,8 +70,22 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
                         <h3 className="font-semibold text-gray-300 border-b border-gray-700 pb-2">Proposed Changes</h3>
 
                         <div className="flex justify-between items-center px-2">
-                            <span className="text-gray-400">Entities Impacted</span>
+                            <span className="text-gray-400">Entities Impacted (New + Moved)</span>
                             <span className="text-xl font-bold text-white">{runResult.dry_run_summary.proposed_changes || 0}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3 px-2 pt-2 border-t border-gray-700/60 text-xs">
+                            <div className="bg-gray-900/60 p-2.5 rounded border border-gray-700">
+                                <span className="text-gray-400 block">New Entities</span>
+                                <span className="text-base font-semibold text-green-400">{runResult.dry_run_summary.new_entities ?? 0}</span>
+                            </div>
+                            <div className="bg-gray-900/60 p-2.5 rounded border border-gray-700">
+                                <span className="text-gray-400 block">Moved Clusters</span>
+                                <span className="text-base font-semibold text-amber-400">{runResult.dry_run_summary.moved_entities ?? 0}</span>
+                            </div>
+                            <div className="bg-gray-900/60 p-2.5 rounded border border-gray-700">
+                                <span className="text-gray-400 block">Unchanged</span>
+                                <span className="text-base font-semibold text-gray-300">{runResult.dry_run_summary.unchanged_entities ?? 0}</span>
+                            </div>
                         </div>
                         {runResult.dry_run_summary.error && (
                             <div className="bg-red-900/20 text-red-200 p-2 rounded text-sm">

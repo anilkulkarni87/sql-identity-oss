@@ -35,7 +35,13 @@ export default function SetupWizard() {
                 // Fetch existing config
                 const config = await api.getSetupConfig();
                 if (config && config.sources && config.sources.length > 0) {
-                    setMappingConfig(config as unknown as IDRConfig);
+                    const typedConfig = config as unknown as IDRConfig;
+                    setMappingConfig(typedConfig);
+                    setSelectedTables(
+                        typedConfig.sources
+                            .map(s => s.table)
+                            .filter((t): t is string => Boolean(t))
+                    );
                     setStep(6); // Jump to Run
                     return true;
                 }
@@ -57,8 +63,8 @@ export default function SetupWizard() {
     const renderStepIcon = (s: number, icon: React.ReactNode, label: string) => {
         const isActive = step === s;
         const isCompleted = step > s;
-        // Allow clicking 'Run' (Step 6) if already configured
-        const isClickable = s === 6 && isConfigured;
+        // Allow clicking any step if already configured or already completed
+        const isClickable = isConfigured || isCompleted;
 
         let className = "flex flex-col items-center gap-2 px-6 py-2 border-b-2 transition-colors ";
         if (isActive) className += "border-blue-500 text-blue-400";
@@ -126,6 +132,7 @@ export default function SetupWizard() {
                     {step === 3 && (
                         <StepMap
                             tables={selectedTables}
+                            initialConfig={mappingConfig}
                             onNext={(config: IDRConfig) => {
                                 setMappingConfig(config);
                                 nextStep();

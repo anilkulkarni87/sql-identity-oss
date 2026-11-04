@@ -142,6 +142,21 @@ Pre-built configurations for common use cases:
 | [Financial](examples/templates/financial/) | Account linking | account_id, email, SSN |
 | [B2B SaaS](examples/templates/b2b_saas/) | Lead deduplication | email, domain, company_name |
 
+## 🧪 Testing (Local & Cloud)
+
+```bash
+# 1. Run the full unit & multi-dialect test suite (265+ tests)
+pytest
+
+# 2. Run opt-in live cloud integration tests (when cloud credentials are set)
+pytest tests/test_cloud_dialects_live.py -v
+
+# 3. Run the 260,000-entity scale & MCP benchmark
+python tools/scale_test/run_scale_and_mcp_benchmark.py --rows 250000 --incr-rows 10000
+```
+
+See [Architecture Documentation](docs/18-architecture.md) for detailed pipeline stage and schema design.
+
 ## 🤝 Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

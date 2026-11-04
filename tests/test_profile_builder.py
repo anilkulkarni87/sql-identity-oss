@@ -43,6 +43,11 @@ def bigquery_builder():
     return ProfileBuilder(make_mock_adapter("bigquery"))
 
 
+@pytest.fixture
+def databricks_builder():
+    return ProfileBuilder(make_mock_adapter("databricks"))
+
+
 # ============================================================
 # _build_column_selection() — RECENCY strategy
 # ============================================================
@@ -61,6 +66,12 @@ class TestColumnSelectionRecency:
     def test_snowflake_uses_max_by(self, snowflake_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = snowflake_builder._build_column_selection(rule)
+        assert "MAX_BY" in result
+        assert "email" in result
+
+    def test_databricks_uses_max_by(self, databricks_builder):
+        rule = {"attribute_name": "email", "strategy": "RECENCY"}
+        result = databricks_builder._build_column_selection(rule)
         assert "MAX_BY" in result
         assert "email" in result
 
@@ -99,6 +110,16 @@ class TestColumnSelectionPriority:
             "source_priority_list": '["crm", "web"]',
         }
         result = snowflake_builder._build_column_selection(rule)
+        assert "MIN_BY" in result
+        assert "CASE" in result
+
+    def test_databricks_uses_min_by(self, databricks_builder):
+        rule = {
+            "attribute_name": "first_name",
+            "strategy": "PRIORITY",
+            "source_priority_list": '["crm", "web"]',
+        }
+        result = databricks_builder._build_column_selection(rule)
         assert "MIN_BY" in result
         assert "CASE" in result
 
@@ -152,6 +173,11 @@ class TestColumnSelectionFrequency:
     def test_snowflake_uses_mode(self, snowflake_builder):
         rule = {"attribute_name": "city", "strategy": "FREQUENCY"}
         result = snowflake_builder._build_column_selection(rule)
+        assert "MODE(" in result
+
+    def test_databricks_uses_mode(self, databricks_builder):
+        rule = {"attribute_name": "city", "strategy": "FREQUENCY"}
+        result = databricks_builder._build_column_selection(rule)
         assert "MODE(" in result
 
     def test_bigquery_uses_approx_top_count(self, bigquery_builder):

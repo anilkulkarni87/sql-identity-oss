@@ -8,6 +8,7 @@ to the resolved identity clusters.
 import json
 
 from .adapters.base import IDRAdapter, get_dialect_config
+from .config import validate_fqn, validate_identifier, validate_sql_expr
 
 
 class ProfileBuilder:
@@ -45,17 +46,27 @@ class ProfileBuilder:
         staging_cte = self._build_staging_cte(survivorship_rules, attr_mappings, source_tables)
 
         # 3. Build the Pivoted Selection Logic
+        # Map both table_fqn and table_id -> validated table_id so source_priority_list
+        # can reference either source ID ('crm') or table FQN ('raw.crm').
+        source_id_lookup = {}
+        for src in source_tables:
+            tid = str(src["table_id"])
+            fqn = str(src["table_fqn"])
+            source_id_lookup[tid] = tid
+            source_id_lookup[fqn] = tid
+            source_id_lookup[fqn.replace(".", "_")] = tid
+
         # For each attribute, generate the specific aggregation SQL based on strategy
         selection_columns = []
         for rule in survivorship_rules:
-            col_sql = self._build_column_selection(rule)
+            col_sql = self._build_column_selection(rule, source_id_lookup=source_id_lookup)
             selection_columns.append(col_sql)
 
         # 4. Execute final Create Table As Select (CTAS)
         select_clause = ",\n    ".join(selection_columns)
 
         final_sql = f"""
-            CREATE OR REPLACE TABLE idr_out.unified_profile AS
+            CREATE OR REPLACE TABLE idr_out.golden_profiles AS
             WITH staging AS (
                 {staging_cte}
             )
@@ -68,9 +79,9 @@ class ProfileBuilder:
             GROUP BY resolved_id
         """
 
-        print("Generating Unified Profiles...")
+        print("Generating Golden Profiles...")
         self.adapter.execute(final_sql)
-        print("✅ Unified Profiles generated.")
+        print("✅ Golden Profiles generated.")
 
     def _build_staging_cte(self, rules, mappings, sources) -> str:
         """
@@ -120,82 +131,86 @@ class ProfileBuilder:
         # SELECT m.resolved_id, 'digital' as source_id, s.final_at as recency, s.email, s.phone FROM ...
 
         for src in sources:
-            tid = src["table_id"]
-            fqn = src["table_fqn"]
-            key_expr = src["entity_key_expr"]
+            tid = validate_identifier(str(src["table_id"]), "source_table.table_id")
+            fqn = validate_fqn(str(src["table_fqn"]), "source_table.table_fqn")
+            key_expr = validate_sql_expr(str(src["entity_key_expr"]), "source_table.entity_key_expr")
+            wm_col = src.get("watermark_column")
+            if wm_col:
+                wm_col = validate_identifier(str(wm_col), "source_table.watermark_column")
 
             mapped_cols = []
-            # For every requested golden attribute, see if this source has it
+            # For every requested golden attribute, see if this source maps it
             for attr, rule in rule_map.items():
+                safe_attr = validate_identifier(str(attr), "attribute_name")
                 if tid in table_vars and attr in table_vars[tid]:
-                    mapped_cols.append(f"{table_vars[tid][attr]} AS {attr}")
+                    safe_expr = validate_sql_expr(str(table_vars[tid][attr]), f"attribute_expr[{attr}]")
+                    mapped_cols.append(f"{safe_expr} AS {safe_attr}")
                 else:
-                    mapped_cols.append(f"NULL AS {attr}")
+                    mapped_cols.append(f"NULL AS {safe_attr}")
 
             cols_sql = ",\n                ".join(mapped_cols)
+            recency_expr = f"src.{wm_col}" if wm_col else "NULL"
 
             unions.append(f"""
                 SELECT
                     m.resolved_id,
                     '{tid}' AS source_id,
-                    {f"src.{src['watermark_column']}" if src.get("watermark_column") else "NULL"} AS recency_ts,
+                    {recency_expr} AS recency_ts,
                     {cols_sql}
                 FROM {fqn} src
                 JOIN idr_out.identity_resolved_membership_current m
-                  ON m.entity_key = CONCAT('{tid}:', CAST(src.{key_expr} AS {self.dialect["string_type"]}))
+                  ON m.entity_key = CONCAT('{tid}:', CAST(({key_expr}) AS {self.dialect["string_type"]}))
             """)
 
         return " UNION ALL ".join(unions)
 
-    def _build_column_selection(self, rule) -> str:
+    def _build_column_selection(self, rule, source_id_lookup=None) -> str:
         """
         Generates the aggregation logic for a single attribute (e.g. ARG_MAX).
         """
-        attr = rule["attribute_name"]
+        attr = validate_identifier(str(rule["attribute_name"]), "attribute_name")
         strategy = rule["strategy"]
+        source_id_lookup = source_id_lookup or {}
 
-        # DuckDB / BigQuery / Snowflake syntax differences handled here
+        # DuckDB / BigQuery / Snowflake / Databricks syntax differences handled here
 
         if strategy == "RECENCY":
             # ARG_MAX(attr, recency_ts)
             # DuckDB: arg_max(val, ts)
             # BigQuery: ARRAY_AGG(x ORDER BY ts DESC LIMIT 1)[OFFSET(0)]
-            # Snowflake: MAX_BY(val, ts)
+            # Snowflake / Databricks: MAX_BY(val, ts)
             if self.dialect_name == "duckdb":
                 return f"arg_max({attr}, recency_ts) AS {attr}"
-            elif self.dialect_name == "snowflake":
-                return f"MAX_BY({attr}, recency_ts) AS {attr}"
+            elif self.dialect_name in ("snowflake", "databricks"):
+                return f"MAX_BY({attr}, CASE WHEN {attr} IS NOT NULL THEN recency_ts ELSE NULL END) AS {attr}"
             elif self.dialect_name == "bigquery":
                 return f"ARRAY_AGG({attr} IGNORE NULLS ORDER BY recency_ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
 
         elif strategy == "PRIORITY":
             # Priority list logic
-            # LIST_SORT based on source_priority?
-            # Or conditional Logic?
-            # CASE logic is complex in aggregation.
-            # Easier: Assign specific integer priority to source_id and use ARG_MIN(priority)
-
-            # Parse list
+            # Assign specific integer priority to source_id and use ARG_MIN / MIN_BY
             try:
-                p_list = json.loads(rule["source_priority_list"].replace("'", '"'))
+                raw_list = rule.get("source_priority_list") or "[]"
+                if isinstance(raw_list, list):
+                    p_list = raw_list
+                else:
+                    p_list = json.loads(str(raw_list).replace("'", '"'))
             except Exception:
                 p_list = []
 
-            # Generate Case-based priority map
-            # 1 = High, 999 = Low
-            when_clauses = [
-                f"WHEN source_id = '{src}' THEN {idx}" for idx, src in enumerate(p_list)
-            ]
+            # Generate Case-based priority map (penalize NULL attribute values so non-null wins)
+            when_clauses = [f"WHEN {attr} IS NULL THEN 999999"]
+            for idx, src in enumerate(p_list):
+                resolved_src = source_id_lookup.get(str(src), str(src).replace(".", "_"))
+                safe_src = validate_identifier(resolved_src, "source_priority_item")
+                when_clauses.append(f"WHEN source_id = '{safe_src}' THEN {idx}")
             else_val = 999
 
-            if not when_clauses:
-                priority_expr = str(else_val)
-            else:
-                priority_expr = f"CASE {' '.join(when_clauses)} ELSE {else_val} END"
+            priority_expr = f"CASE {' '.join(when_clauses)} ELSE {else_val} END"
 
             if self.dialect_name == "duckdb":
                 return f"arg_min({attr}, {priority_expr}) AS {attr}"
-            elif self.dialect_name == "snowflake":
+            elif self.dialect_name in ("snowflake", "databricks"):
                 return f"MIN_BY({attr}, {priority_expr}) AS {attr}"
             elif self.dialect_name == "bigquery":
                 return f"ARRAY_AGG({attr} IGNORE NULLS ORDER BY {priority_expr} ASC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
@@ -204,11 +219,9 @@ class ProfileBuilder:
             # MODE calculation
             if self.dialect_name == "duckdb":
                 return f"mode({attr}) AS {attr}"
-            elif self.dialect_name == "snowflake":
+            elif self.dialect_name in ("snowflake", "databricks"):
                 return f"MODE({attr}) AS {attr}"
             elif self.dialect_name == "bigquery":
-                # BigQuery has no simple MODE function for strings?
-                # Approx_top_sum or standard logic
                 return f"APPROX_TOP_COUNT({attr}, 1)[SAFE_OFFSET(0)].value AS {attr}"
 
         # Default fallback

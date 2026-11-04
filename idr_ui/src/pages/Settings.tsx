@@ -40,26 +40,28 @@ export default function Settings() {
 
     const connectMutation = useMutation({
         mutationFn: async () => {
-            const body: Record<string, string> = { platform }
+            const params: Record<string, string> = {}
 
             if (platform === 'duckdb') {
-                body.database = database
+                params.path = database
+                params.database = database
             } else if (platform === 'bigquery') {
-                body.project_id = projectId
+                params.project = projectId
+                params.project_id = projectId
             } else if (platform === 'snowflake') {
-                body.account = sfAccount
-                body.user = sfUser
-                body.password = sfPassword
-                body.warehouse = sfWarehouse
-                body.sf_database = sfDatabase
+                params.account = sfAccount
+                params.user = sfUser
+                params.password = sfPassword
+                params.warehouse = sfWarehouse
+                params.database = sfDatabase
             } else if (platform === 'databricks') {
-                body.server_hostname = dbHostname
-                body.http_path = dbHttpPath
-                body.access_token = dbToken
-                body.catalog = dbCatalog
+                params.server_hostname = dbHostname
+                params.http_path = dbHttpPath
+                params.access_token = dbToken
+                params.catalog = dbCatalog
             }
 
-            return api.connect(body)
+            return api.setupConnect(platform, params)
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['setupStatus'] })

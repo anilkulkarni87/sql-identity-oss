@@ -5,6 +5,10 @@ Tests for user-scoped connection state in idr_api.dependencies.IDRManager.
 import os
 import sys
 
+import pytest
+
+pytest.importorskip("fastapi")
+
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

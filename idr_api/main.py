@@ -45,6 +45,22 @@ REQUEST_LATENCY = Histogram(
     ["method", "path"],
 )
 DB_CONNECTED_GAUGE = Gauge("idr_api_db_connected", "Database connectivity status (1=connected)")
+ENTITIES_PROCESSED_TOTAL = Counter(
+    "idr_entities_processed_total",
+    "Total entities processed by IDR pipeline runs",
+)
+EDGES_CREATED_TOTAL = Counter(
+    "idr_edges_created_total",
+    "Total identity edges created by IDR pipeline runs",
+)
+CLUSTERS_IMPACTED_TOTAL = Counter(
+    "idr_clusters_impacted_total",
+    "Total identity clusters impacted by IDR pipeline runs",
+)
+LAST_RUN_DURATION_GAUGE = Gauge(
+    "idr_last_run_duration_seconds",
+    "Duration in seconds of the most recent IDR pipeline run",
+)
 
 
 def _parse_cors_origins(value: str) -> list[str]:

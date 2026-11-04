@@ -23,14 +23,26 @@ export default function StepSurvivorship({ config, onNext, onBack }: StepSurvivo
         const attrList = Array.from(allAttrs).sort();
         setAttributes(attrList);
 
-        // 2. Initialize default rules
+        // 2. Initialize rules (preserve existing survivorship rules when present)
+        const existingByAttr = new Map<string, SurvivorshipRule>();
+        for (const r of config.survivorship || []) {
+            if (r.attribute) {
+                existingByAttr.set(r.attribute, r);
+            }
+        }
+
         const initialRules: Record<string, SurvivorshipRule> = {};
         attrList.forEach(attr => {
-            initialRules[attr] = {
+            const existing = existingByAttr.get(attr);
+            initialRules[attr] = existing ? {
+                ...existing,
+                source_priority: existing.source_priority && existing.source_priority.length > 0
+                    ? existing.source_priority
+                    : config.sources.map(s => s.id || s.table),
+            } : {
                 attribute: attr,
                 strategy: 'RECENCY', // Default
-                source_priority: config.sources.map(s => s.table), // Default order
-                // recency_field: 'updated_at' -- REMOVED: Uses source watermark by default
+                source_priority: config.sources.map(s => s.id || s.table), // Default order
             };
         });
         setRules(initialRules);

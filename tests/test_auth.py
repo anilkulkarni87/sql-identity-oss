@@ -7,13 +7,15 @@ import os
 import sys
 
 import pytest
+
+pytest.importorskip("fastapi")
 from fastapi import HTTPException
-from jose import JWTError
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import idr_api.dependencies as deps
+from idr_api.dependencies import JWTError
 
 
 def test_get_jwk_for_token_retries_on_kid_miss(monkeypatch):

@@ -10,12 +10,15 @@ import sys
 
 import pytest
 
+pytest.importorskip("fastapi")
+pytest.importorskip("httpx")
+
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import idr_api.dependencies as deps
 from fastapi.testclient import TestClient
 
+import idr_api.dependencies as deps
 from idr_api.dependencies import get_manager
 from idr_api.main import _parse_cors_origins, app
 
@@ -262,3 +265,247 @@ class TestApiConfigHelpers:
     def test_parse_cors_origins(self):
         origins = _parse_cors_origins("http://a.com, http://b.com")
         assert origins == ["http://a.com", "http://b.com"]
+
+
+class TestSetupWizardAndExplorerE2E:
+    """End-to-end API tests for Setup Wizard round-trip, PRIORITY survivorship, Golden Profile, RBAC, and Metrics."""
+
+    def test_setup_config_roundtrip_and_golden_profile_e2e(self, client, tmp_path):
+        import duckdb
+
+        db_path = str(tmp_path / "wizard_e2e.duckdb")
+        conn = duckdb.connect(db_path)
+        conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+        conn.execute("""
+            CREATE TABLE raw.crm (
+                id VARCHAR, email VARCHAR, first_name VARCHAR, updated_at TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            INSERT INTO raw.crm VALUES
+                ('c1', 'alice@example.com', 'Alice_CRM', '2026-01-01 00:00:00'),
+                ('c2', 'singleton@example.com', 'Solo_CRM', '2026-01-01 00:00:00')
+        """)
+        conn.execute("""
+            CREATE TABLE raw.orders (
+                id VARCHAR, email VARCHAR, first_name VARCHAR, updated_at TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            INSERT INTO raw.orders VALUES
+                ('o1', 'alice@example.com', 'Alice_Orders', '2026-02-01 00:00:00')
+        """)
+        conn.close()
+
+        # 1. Connect via Setup Wizard
+        resp = client.post(
+            "/api/setup/connect",
+            json={"platform": "duckdb", "params": {"path": db_path}},
+        )
+        assert resp.status_code == 200
+
+        # 2. Save configuration with Exact + Fuzzy rules + PRIORITY survivorship (using table FQN)
+        wizard_config = {
+            "sources": [
+                {
+                    "id": "raw_crm",
+                    "table": "raw.crm",
+                    "entity_key": "id",
+                    "watermark_column": "updated_at",
+                    "identifiers": [{"type": "email", "column": "email", "expr": "email"}],
+                    "attributes": [
+                        {"name": "first_name", "column": "first_name", "expr": "first_name"}
+                    ],
+                },
+                {
+                    "id": "raw_orders",
+                    "table": "raw.orders",
+                    "entity_key": "id",
+                    "watermark_column": "updated_at",
+                    "identifiers": [{"type": "email", "column": "email", "expr": "email"}],
+                    "attributes": [
+                        {"name": "first_name", "column": "first_name", "expr": "first_name"}
+                    ],
+                },
+            ],
+            "rules": [
+                {
+                    "id": "rule_email",
+                    "type": "EXACT",
+                    "match_keys": ["email"],
+                    "priority": 1,
+                    "canonicalize": "LOWERCASE",
+                }
+            ],
+            "fuzzy_rules": [
+                {
+                    "id": "fuzzy_name",
+                    "type": "FUZZY",
+                    "blocking_key": "email",
+                    "score_expr": "jaro_winkler_similarity(<a>.first_name, <b>.first_name)",
+                    "threshold": 0.85,
+                    "priority": 2,
+                }
+            ],
+            "survivorship": [
+                {
+                    "attribute": "first_name",
+                    "strategy": "PRIORITY",
+                    "source_priority": ["raw.crm", "raw.orders"],
+                }
+            ],
+        }
+
+        save_resp = client.post("/api/setup/config/save", json={"config": wizard_config})
+        assert save_resp.status_code == 200, save_resp.text
+
+        # 3. Round-trip fetch config and verify all sections & fields are preserved
+        get_resp = client.get("/api/setup/config")
+        assert get_resp.status_code == 200
+        loaded = get_resp.json()
+        assert len(loaded["sources"]) == 2
+        assert loaded["sources"][0]["identifiers"][0]["column"] == "email"
+        assert loaded["sources"][0]["attributes"][0]["column"] == "first_name"
+        assert len(loaded["rules"]) == 1
+        assert len(loaded["fuzzy_rules"]) == 1
+        assert loaded["fuzzy_rules"][0]["type"] == "FUZZY"
+        assert "jaro_winkler_similarity" in loaded["fuzzy_rules"][0]["score_expr"]
+        assert len(loaded["survivorship"]) == 1
+        assert loaded["survivorship"][0]["strategy"] == "PRIORITY"
+
+        # 4. Run pipeline WITH fuzzy rule active (blocking_key='email' is an identifier, score_expr uses attribute 'first_name')
+        run_resp = client.post(
+            "/api/setup/run",
+            json={"mode": "FULL", "strict": False, "max_iterations": 10, "dry_run": False},
+        )
+        assert run_resp.status_code == 200, run_resp.text
+        run_data = run_resp.json()
+        assert run_data["status"] == "SUCCESS"
+        run_id = run_data["run_id"]
+
+        # 5. Verify GET /api/runs/{run_id} returns stage-by-stage telemetry
+        run_detail_resp = client.get(f"/api/runs/{run_id}")
+        assert run_detail_resp.status_code == 200
+        run_detail = run_detail_resp.json()
+        assert run_detail["run_id"] == run_id
+        assert isinstance(run_detail["stages"], list)
+        assert len(run_detail["stages"]) > 0
+        assert isinstance(run_detail["warnings"], list)
+
+        # 6. Search singleton entity (c2) and multi-entity cluster (c1/o1) in Explorer
+        solo_search = client.get("/api/entities/search", params={"q": "singleton@example.com"})
+        assert solo_search.status_code == 200
+        assert len(solo_search.json()) == 1
+
+        alice_search = client.get("/api/entities/search", params={"q": "alice@example.com"})
+        assert alice_search.status_code == 200
+        alice_clusters = alice_search.json()
+        assert len(alice_clusters) == 1
+        resolved_id = alice_clusters[0]["resolved_id"]
+
+        # 7. Verify ClusterDetail includes Golden Profile with PRIORITY winner ('Alice_CRM') and super_cluster_id
+        detail_resp = client.get(f"/api/clusters/{resolved_id}")
+        assert detail_resp.status_code == 200
+        detail = detail_resp.json()
+        assert detail["cluster_size"] == 2
+        assert detail["super_cluster_id"] == resolved_id
+        assert detail["golden_profile"] is not None
+        assert detail["golden_profile"].get("first_name") == "Alice_CRM"
+
+        # 8. Verify Prometheus /metrics includes business metrics
+        metrics_text = client.get("/metrics").text
+        assert "idr_entities_processed_total" in metrics_text
+        assert "idr_edges_created_total" in metrics_text
+        assert "idr_clusters_impacted_total" in metrics_text
+        assert "idr_last_run_duration_seconds" in metrics_text
+
+        # 9. Verify GET /api/runs/{run_id} returns 404 for unknown run_id
+        missing_run = client.get("/api/runs/nonexistent_run_123")
+        assert missing_run.status_code == 404
+
+    def test_fuzzy_super_cluster_merges_distinct_exact_clusters(self, client, tmp_path):
+        import duckdb
+
+        db_path = str(tmp_path / "fuzzy_merge.duckdb")
+        conn = duckdb.connect(db_path)
+        conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+        conn.execute("""
+            CREATE TABLE raw.users (
+                id VARCHAR, email VARCHAR, last_name VARCHAR, first_name VARCHAR, updated_at TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            INSERT INTO raw.users VALUES
+                ('u1', 'jon.smith@a.com', 'smith', 'Jonathan', '2026-01-01 00:00:00'),
+                ('u2', 'jonathan.s@b.com', 'smith', 'Jonathon', '2026-01-02 00:00:00')
+        """)
+        conn.close()
+
+        client.post("/api/setup/connect", json={"platform": "duckdb", "params": {"path": db_path}})
+
+        cfg = {
+            "sources": [
+                {
+                    "id": "raw_users",
+                    "table": "raw.users",
+                    "entity_key": "id",
+                    "watermark_column": "updated_at",
+                    "identifiers": [{"type": "email", "column": "email", "expr": "email"}],
+                    "attributes": [
+                        {"name": "last_name", "column": "last_name", "expr": "last_name"},
+                        {"name": "first_name", "column": "first_name", "expr": "first_name"},
+                    ],
+                }
+            ],
+            "rules": [
+                {
+                    "id": "rule_email",
+                    "type": "EXACT",
+                    "match_keys": ["email"],
+                    "priority": 1,
+                    "canonicalize": "LOWERCASE",
+                }
+            ],
+            "fuzzy_rules": [
+                {
+                    "id": "fuzzy_first_name",
+                    "type": "FUZZY",
+                    "blocking_key": "last_name",
+                    "score_expr": "jaro_winkler_similarity(<a>.first_name, <b>.first_name)",
+                    "threshold": 0.85,
+                    "priority": 2,
+                }
+            ],
+            "survivorship": [],
+        }
+
+        assert client.post("/api/setup/config/save", json={"config": cfg}).status_code == 200
+        run_resp = client.post(
+            "/api/setup/run",
+            json={"mode": "FULL", "strict": False, "max_iterations": 10, "dry_run": False},
+        )
+        assert run_resp.status_code == 200
+        assert run_resp.json()["status"] == "SUCCESS"
+
+        c1 = client.get("/api/clusters/raw_users:u1").json()
+        c2 = client.get("/api/clusters/raw_users:u2").json()
+        assert c1["resolved_id"] != c2["resolved_id"]
+        assert c1["super_cluster_id"] is not None
+        assert c1["super_cluster_id"] == c2["super_cluster_id"]
+
+    def test_rbac_blocks_viewer_on_write_endpoints(self, monkeypatch):
+        async def _viewer_user():
+            return {"sub": "viewer-1", "email": "v@local", "roles": ["viewer"]}
+
+        app.dependency_overrides[deps.get_current_user] = _viewer_user
+        try:
+            tc = TestClient(app, raise_server_exceptions=False)
+            r1 = tc.post("/api/setup/config/save", json={"config": {"sources": []}})
+            assert r1.status_code == 403
+            r2 = tc.post(
+                "/api/setup/run",
+                json={"mode": "FULL", "strict": False, "max_iterations": 5, "dry_run": True},
+            )
+            assert r2.status_code == 403
+        finally:
+            app.dependency_overrides.pop(deps.get_current_user, None)

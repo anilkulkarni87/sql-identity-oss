@@ -75,9 +75,9 @@ CREATE TABLE IF NOT EXISTS idr_meta.fuzzy_rule (
     rule_name STRING NOT NULL,
     blocking_key_expr STRING NOT NULL,
     score_expr STRING NOT NULL,
-    threshold DOUBLE DEFAULT 0.85,
-    priority INTEGER DEFAULT 100,
-    is_active BOOLEAN DEFAULT TRUE
+    threshold DOUBLE,
+    priority INTEGER,
+    is_active BOOLEAN
 );
 
 -- Fuzzy Logic Polyfill for Standard SQL Consistency (Returns 0.0-1.0)
@@ -88,9 +88,9 @@ RETURN jaro_winkler(s1, s2);
 CREATE TABLE IF NOT EXISTS idr_meta.identifier_exclusion (
   identifier_type STRING,
   identifier_value_pattern STRING,
-  match_type STRING DEFAULT 'EXACT',
+  match_type STRING,
   reason STRING,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+  created_at TIMESTAMP,
   created_by STRING
 );
 
@@ -239,6 +239,24 @@ CREATE TABLE IF NOT EXISTS idr_out.metrics_export (
   dimensions STRING,
   recorded_at TIMESTAMP,
   exported_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS idr_out.identity_identifiers_current (
+  entity_key STRING,
+  identifier_type STRING,
+  identifier_value_norm STRING,
+  is_hashed BOOLEAN,
+  updated_at TIMESTAMP,
+  PRIMARY KEY (entity_key, identifier_type, identifier_value_norm) NOT ENFORCED
+);
+
+CREATE TABLE IF NOT EXISTS idr_out.config_snapshot (
+  config_hash STRING,
+  sources_json STRING,
+  rules_json STRING,
+  mappings_json STRING,
+  created_at TIMESTAMP,
+  PRIMARY KEY (config_hash) NOT ENFORCED
 );
 
 -- ==========================================

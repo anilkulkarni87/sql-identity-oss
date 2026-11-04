@@ -16,6 +16,10 @@ class PreflightStage(BaseStage):
         # Clean up stale RUNNING runs (older than 4 hours) from previous failures
         if self.adapter.dialect == "bigquery":
             time_filter = "started_at < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 4 HOUR)"
+        elif self.adapter.dialect == "snowflake":
+            time_filter = "started_at < DATEADD('hour', -4, CURRENT_TIMESTAMP())"
+        elif self.adapter.dialect == "databricks":
+            time_filter = "started_at < TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP())"
         else:
             time_filter = "started_at < CURRENT_TIMESTAMP - INTERVAL '4 hours'"
 

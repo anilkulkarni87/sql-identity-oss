@@ -1,22 +1,83 @@
 # Overview
 
-SQL Identity Resolution (IDR) is a warehouse-native identity graph engine. It links records across sources using deterministic rules, and optionally refines clusters using fuzzy matching.
+**SQL Identity Resolution (`sql-identity-oss`)** is a warehouse-native, deterministic identity resolution and customer 360 engine designed for modern data platforms. It unifies customer profiles across CRM, point-of-sale, e-commerce, mobile, and customer service systems directly inside your data warehouse—**without black-box ML, external SaaS data exports, or vendor lock-in**.
 
-Core ideas:
-- Deterministic matching builds an identity graph using exact identifiers (email, phone, loyalty_id, etc.).
-- Label propagation resolves connected components into clusters.
-- Optional fuzzy rules merge clusters using blocking + scoring.
-- Output tables provide resolved membership, cluster metrics, and golden profiles.
+---
 
-Primary interfaces:
-- CLI: `idr` (recommended for production)
-- UI: browser-based setup wizard and explorer
-- API: FastAPI backend used by the UI
-- MCP server: agent access to results
-- dbt package: deterministic-only SQL implementation
+## Core Capabilities
 
-Typical flow:
-1. Initialize schemas and tables.
-2. Apply a YAML configuration (sources, rules, survivorship).
-3. Run the pipeline (FULL or INCR).
-4. Explore results via SQL, UI, API, or MCP.
+```mermaid
+flowchart LR
+    subgraph Sources["1. Source Systems"]
+        CRM["CRM Accounts"]
+        Web["Web & E-comm"]
+        POS["In-Store POS"]
+        App["Mobile App"]
+    end
+
+    subgraph CoreEngine["2. IDR Engine (idr_core)"]
+        Extract["Entity & Identifier Extraction"]
+        Edges["Anchor-Based Edge Building"]
+        LP["Distributed Label Propagation"]
+        Fuzzy["Probabilistic Refinement (Optional)"]
+        Profile["Golden Profile Survivorship"]
+    end
+
+    subgraph DataWarehouse["3. Supported Data Warehouses"]
+        DuckDB["DuckDB (Local / In-Memory)"]
+        Snowflake["Snowflake (Snowpark / DB-API)"]
+        BigQuery["Google Cloud BigQuery"]
+        Databricks["Databricks (Spark / Unity Catalog)"]
+    end
+
+    subgraph Interfaces["4. Interfaces & Consumption"]
+        CLI["CLI Tool (idr)"]
+        UI["Web UI (React SPA)"]
+        API["FastAPI REST Backend"]
+        MCP["MCP Server (14 AI Agent Tools)"]
+        DBT["dbt Package (dbt_idr)"]
+    end
+
+    Sources --> CoreEngine
+    CoreEngine --> DataWarehouse
+    DataWarehouse --> Interfaces
+```
+
+### 1. Deterministic-First Graph Construction
+- Matches entities using high-confidence identifiers (`email`, `phone`, `loyalty_id`, `device_id`, `account_id`).
+- Normalizes values on extraction (e.g., lowercasing, stripping whitespace, or custom SQL expressions).
+- Employs an **anchor-based N-1 edge building strategy** to link groups of entities in $O(N)$ edges rather than $O(N^2)$ cross-products.
+
+### 2. High-Cardinality Safeguards
+- Configurable `max_group_size` per rule prevents graph explosion from shared or placeholder identifiers (e.g. `support@company.com`, `000-000-0000`).
+- Oversized groups are gracefully bypassed and logged to `idr_out.skipped_identifier_groups` for auditing.
+- Exact and wildcard blocklists (`idr_meta.identifier_exclusion`) filter out system accounts and junk values before edge formation.
+
+### 3. Distributed Connected-Component Resolution
+- Graph clusters are resolved in pure SQL via iterative **Label Propagation**.
+- Satisfies formal mathematical graph invariants:
+  - **Partition Completeness**: Every entity belongs to exactly one cluster.
+  - **Connected-Component Completeness**: 0 edges cross distinct clusters.
+  - **Minimum-Label Determinism**: `resolved_id` is deterministically the minimum `entity_key` in the component.
+
+### 4. Optional Probabilistic Refinement
+- When `--strict` mode is disabled, optional fuzzy matching rules (e.g., Jaro-Winkler, Levenshtein, Metaphone) group resolved clusters into higher-level **Super-Clusters** (`super_cluster_id`).
+- Pre-filtering blocking keys ensure fuzzy string comparisons remain performant at scale.
+
+### 5. Automated Golden Record Survivorship
+- Constructs unified 360° customer profiles (`idr_out.golden_profiles`) according to declarative attribute survivorship strategies:
+  - **`RECENCY`**: Most recent non-null value based on timestamp/watermark.
+  - **`PRIORITY`**: Highest-ranked source system wins (e.g., CRM > POS > Web), with null-penalization.
+  - **`FREQUENCY`**: Most common value across all cluster entities.
+
+---
+
+## Getting Started Paths
+
+| Path | Audience | Primary Tool | Documentation |
+|---|---|---|---|
+| **Zero-Config Local Demo** | Evaluators & Developers | `idr quickstart` | [Quickstart Guide](03-quickstart.md) |
+| **Interactive Visual Setup** | Data Engineers & Analysts | Web UI (`idr serve` / Docker) | [Web UI Guide](09-ui.md) |
+| **Warehouse Pipelines** | Production CI/CD & Orchestration | `idr` CLI / Python SDK | [CLI Reference](05-cli.md) & [Platforms](06-platforms.md) |
+| **AI Assistants & Agents** | Claude Desktop, Cursor, MCP Clients | `idr mcp` (FastMCP) | [MCP Server Guide](11-mcp.md) |
+| **dbt-First Teams** | Analytics Engineers using dbt | `dbt_idr` package | [dbt Integration](12-dbt.md) |

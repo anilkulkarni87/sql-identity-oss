@@ -311,3 +311,21 @@ CREATE TABLE IF NOT EXISTS idr_out.metrics_export (
   recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
   exported_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS idr_out.identity_identifiers_current (
+  entity_key STRING,
+  identifier_type STRING,
+  identifier_value_norm STRING,
+  is_hashed BOOL,
+  updated_at TIMESTAMP,
+  PRIMARY KEY (entity_key, identifier_type, identifier_value_norm) NOT ENFORCED
+);
+
+CREATE TABLE IF NOT EXISTS idr_out.config_snapshot (
+  config_hash STRING,
+  sources_json STRING,
+  rules_json STRING,
+  mappings_json STRING,
+  created_at TIMESTAMP,
+  PRIMARY KEY (config_hash) NOT ENFORCED
+);

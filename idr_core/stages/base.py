@@ -37,7 +37,7 @@ class StageContext:
 class BaseStage:
     """Base class for pipeline stages with shared validation helpers."""
 
-    _CANONICALIZE_ENUM = frozenset({"LOWERCASE", "UPPERCASE", "NONE", ""})
+    _CANONICALIZE_ENUM = frozenset({"LOWERCASE", "UPPERCASE", "NONE", "EXACT", ""})
 
     def __init__(self, ctx: StageContext):
         self.ctx = ctx

@@ -18,8 +18,13 @@ def get_dashboard_metrics(adapter=Depends(get_adapter)):
 
     # Last run
     try:
-        rows = adapter.query("""
-            SELECT run_id, duration_seconds, CAST(started_at AS STRING) as started_at
+        from idr_core.adapters.base import get_dialect_config
+
+        str_type = get_dialect_config(getattr(adapter, "dialect", "duckdb")).get(
+            "string_type", "VARCHAR"
+        )
+        rows = adapter.query(f"""
+            SELECT run_id, duration_seconds, CAST(started_at AS {str_type}) as started_at
             FROM idr_out.run_history
             ORDER BY started_at DESC
             LIMIT 1
@@ -114,16 +119,29 @@ def get_cluster_distribution(adapter=Depends(get_adapter)):
 async def get_rule_stats(adapter=Depends(get_adapter)):
     """Get edges created per rule."""
 
+    rows = []
     try:
-        rows = adapter.query("""
-            SELECT
-                rule_id,
-                identifier_type,
-                COUNT(*) as edges_created
-            FROM idr_out.edge_evidence
-            GROUP BY rule_id, identifier_type
-            ORDER BY edges_created DESC
-        """)
+        if adapter.table_exists("idr_out.edge_evidence"):
+            rows = adapter.query("""
+                SELECT
+                    rule_id,
+                    identifier_type,
+                    COUNT(*) as edges_created
+                FROM idr_out.edge_evidence
+                GROUP BY rule_id, identifier_type
+                ORDER BY edges_created DESC
+            """)
+        if not rows:
+            rows = adapter.query("""
+                SELECT
+                    COALESCE(MIN(r.rule_id), e.identifier_type) as rule_id,
+                    e.identifier_type,
+                    COUNT(*) as edges_created
+                FROM idr_out.identity_edges_current e
+                LEFT JOIN idr_meta.rule r ON e.identifier_type = r.identifier_type
+                GROUP BY e.identifier_type
+                ORDER BY edges_created DESC
+            """)
 
         total = sum((row.get("edges_created") or 0) for row in rows)
     except Exception as e:

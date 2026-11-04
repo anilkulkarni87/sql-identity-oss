@@ -207,6 +207,29 @@ def configure_metadata(conn):
         ('demo', 'LOYALTY', 'loyalty_id', FALSE)
     """)
 
+    # Map entity attributes and survivorship rules for Golden Profile generation
+    conn.execute("DELETE FROM idr_meta.entity_attribute_mapping WHERE table_id = 'demo'")
+    conn.execute("""
+        INSERT INTO idr_meta.entity_attribute_mapping
+        (table_id, attribute_name, attribute_expr)
+        VALUES
+        ('demo', 'first_name', 'first_name'),
+        ('demo', 'last_name', 'last_name'),
+        ('demo', 'email', 'email'),
+        ('demo', 'phone', 'phone')
+    """)
+
+    conn.execute("DELETE FROM idr_meta.survivorship_rule")
+    conn.execute("""
+        INSERT INTO idr_meta.survivorship_rule
+        (attribute_name, strategy, source_priority_list, recency_field, is_active)
+        VALUES
+        ('first_name', 'RECENCY', '[]', 'created_at', TRUE),
+        ('last_name', 'RECENCY', '[]', 'created_at', TRUE),
+        ('email', 'RECENCY', '[]', 'created_at', TRUE),
+        ('phone', 'FREQUENCY', '[]', NULL, TRUE)
+    """)
+
 
 def print_results(conn, result, duration):
     """Print a beautiful summary of quickstart results."""

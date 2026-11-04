@@ -6,13 +6,17 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that p
 
 - **Cross-Platform**: Supports DuckDB, Snowflake, BigQuery, and Databricks.
 - **PII-Safe**: All PII is masked by default — explicit opt-in for full access.
-- **Tools Included**:
-  - `search_identifier` — Find clusters by name, email, phone, etc.
+- **Tools Included (14 Agentic Tools)**:
+  - `search_identifier` — Find clusters (including singletons) by email, phone, loyalty ID, etc.
   - `get_cluster` — Retrieve full cluster details (entities + edges).
   - `get_golden_profile` — Get the best/surviving attributes for an identity.
+  - `explain_cluster` — Complete explanation of a cluster (metadata, confidence reason, super_cluster_id, members, edges, and golden profile).
   - `explain_edge` — View evidence for why two records matched.
+  - `list_skipped_groups` — Inspect oversized identifier groups skipped by `max_group_size`.
+  - `get_metrics_summary` — High-level identity graph KPIs (clusters, entities, edges, avg confidence).
+  - `dry_run_pipeline` — Execute a non-destructive dry-run preview and return proposed entity diffs.
   - `config_snapshot` — Retrieve saved configuration snapshots.
-  - `run_history` / `latest_run` — Check recent job status.
+  - `run_history` / `latest_run` — Check recent job status and stage telemetry.
   - `list_rules` / `list_sources` — View active configuration.
 
 ## Quick Start

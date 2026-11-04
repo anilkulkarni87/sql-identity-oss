@@ -19,13 +19,34 @@ function HelpCard({ title, children }: { title: string, children: React.ReactNod
 
 interface StepMapProps {
     tables: string[];
+    initialConfig?: IDRConfig;
     onNext: (config: IDRConfig) => void;
     onBack: () => void;
 }
 
-export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
+export default function StepMap({ tables, initialConfig, onNext, onBack }: StepMapProps) {
     const [columns, setColumns] = useState<Record<string, TableColumn[]>>({});
-    const [config, setConfig] = useState<Record<string, SourceConfig>>({});
+    const [config, setConfig] = useState<Record<string, SourceConfig>>(() => {
+        const init: Record<string, SourceConfig> = {};
+        for (const src of initialConfig?.sources || []) {
+            if (src.table) {
+                init[src.table] = {
+                    ...src,
+                    identifiers: (src.identifiers || []).map(i => ({
+                        ...i,
+                        column: i.column || i.expr || '',
+                        expr: i.expr || i.column || '',
+                    })),
+                    attributes: (src.attributes || []).map(a => ({
+                        ...a,
+                        column: a.column || a.expr || a.name,
+                        expr: a.expr || a.column || a.name,
+                    })),
+                };
+            }
+        }
+        return init;
+    });
     const [loading, setLoading] = useState(false);
     const [openTable, setOpenTable] = useState<string | null>(tables[0] || null);
 
@@ -211,6 +232,7 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
 
         // Transform UI state to standard config format
         const finalConfig: IDRConfig = {
+            ...initialConfig,
             sources: tables.map(t => ({
                 id: config[t].id,
                 table: t,
@@ -224,7 +246,9 @@ export default function StepMap({ tables, onNext, onBack }: StepMapProps) {
                 })),
                 attributes: config[t].attributes || []
             })),
-            rules: dynamicRules
+            rules: initialConfig?.rules && initialConfig.rules.length > 0 ? initialConfig.rules : dynamicRules,
+            fuzzy_rules: initialConfig?.fuzzy_rules,
+            survivorship: initialConfig?.survivorship,
         };
 
         onNext(finalConfig);

@@ -124,6 +124,7 @@ class BigQueryAdapter(IDRAdapter):
 
         job = self.client.query(sql, location=self.location, job_config=job_config)
         df = job.to_dataframe()
+        df.columns = [str(c).lower() for c in df.columns]
         return df.to_dict("records")
 
     def query_one(self, sql: str, params: Optional[List[Any]] = None) -> Any:

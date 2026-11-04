@@ -406,10 +406,14 @@ ON {join_cond}
 
     # Exclusions
     for excl in config.get("exclusions", []):
-        match_type = excl.get("match", "EXACT")
+        match_type = excl.get("match_type") or excl.get("match") or "EXACT"
+        id_type = excl.get("identifier_type") or excl.get("type")
+        val_pattern = excl.get("value") or excl.get("identifier_value_pattern")
+        if not id_type or not val_pattern:
+            continue
         data = {
-            "identifier_type": excl["type"],
-            "identifier_value_pattern": excl["value"],  # Corrected field
+            "identifier_type": id_type,
+            "identifier_value_pattern": val_pattern,
             "match_type": match_type,
             "reason": excl.get("reason", "Config exclusion"),
         }
@@ -523,7 +527,11 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             if tid not in ids_map:
                 ids_map[tid] = []
             ids_map[tid].append(
-                {"type": row["identifier_type"], "expr": row["identifier_value_expr"]}
+                {
+                    "type": row["identifier_type"],
+                    "column": row["identifier_value_expr"],
+                    "expr": row["identifier_value_expr"],
+                }
             )
 
         # Fetch attributes
@@ -536,7 +544,13 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             tid = row["table_id"]
             if tid not in attrs_map:
                 attrs_map[tid] = []
-            attrs_map[tid].append({"name": row["attribute_name"], "expr": row["attribute_expr"]})
+            attrs_map[tid].append(
+                {
+                    "name": row["attribute_name"],
+                    "column": row["attribute_expr"],
+                    "expr": row["attribute_expr"],
+                }
+            )
 
         # Assemble sources
         for src_row in sources_rows:
@@ -676,6 +690,27 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 "priority": row["priority"],
             }
             config["fuzzy_rules"].append(rule)
+
+        # 5. Identifier Exclusions
+        def _query_exclusions(adapter):
+            try:
+                return adapter.query("""
+                    SELECT identifier_type, identifier_value_pattern, match_type, reason
+                    FROM idr_meta.identifier_exclusion
+                """)
+            except Exception:
+                return []
+
+        excl_rows = _query_exclusions(adapter)
+        config["exclusions"] = [
+            {
+                "type": row["identifier_type"],
+                "value": row["identifier_value_pattern"],
+                "match": row.get("match_type") or "EXACT",
+                "reason": row.get("reason") or "Config exclusion",
+            }
+            for row in excl_rows
+        ]
 
         return config
 
