@@ -53,10 +53,13 @@ test_data/
 
 # Generated Artifacts
 generated/
+output/
+**/output/
 deploy_*.sql
 build.log
 .chat_history/
 site/
+CONTEXT_GRAPH.md
 
 # React / Node.js
 node_modules/

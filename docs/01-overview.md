@@ -7,40 +7,45 @@
 ## Core Capabilities
 
 ```mermaid
-flowchart LR
-    subgraph Sources["1. Source Systems"]
+flowchart TD
+    subgraph Sources["1. Raw Source Systems"]
+        direction LR
         CRM["CRM Accounts"]
-        Web["Web & E-comm"]
+        Web["Web & E-Commerce"]
         POS["In-Store POS"]
-        App["Mobile App"]
+        App["Mobile App Events"]
     end
 
-    subgraph CoreEngine["2. IDR Engine (idr_core)"]
-        Extract["Entity & Identifier Extraction"]
-        Edges["Anchor-Based Edge Building"]
-        LP["Distributed Label Propagation"]
-        Fuzzy["Probabilistic Refinement (Optional)"]
-        Profile["Golden Profile Survivorship"]
+    subgraph CoreEngine["2. Core Resolution Engine (idr_core)"]
+        direction TB
+        Extract["Entity & Identifier Extraction (Normalize & Hash PII)"]
+        Edges["Anchor-Based Graph Construction (O(N) Star Edges)"]
+        LP["Distributed Label Propagation (Iterative SQL Transitive Closure)"]
+        Fuzzy["Probabilistic Refinement (Optional Similarity Scoring)"]
+        Profile["Golden Profile Survivorship (Attribute Resolution)"]
+        Extract --> Edges --> LP --> Fuzzy --> Profile
     end
 
-    subgraph DataWarehouse["3. Supported Data Warehouses"]
-        DuckDB["DuckDB (Local / In-Memory)"]
-        Snowflake["Snowflake (Snowpark / DB-API)"]
-        BigQuery["Google Cloud BigQuery"]
-        Databricks["Databricks (Spark / Unity Catalog)"]
+    subgraph DataWarehouse["3. Supported Data Warehouses (Native Execution)"]
+        direction LR
+        DuckDB["DuckDB<br/>(Local / In-Memory)"]
+        Snowflake["Snowflake<br/>(Snowpark / DB-API)"]
+        BigQuery["Google Cloud BigQuery<br/>(Serverless Slots)"]
+        Databricks["Databricks<br/>(Spark / Unity Catalog)"]
     end
 
     subgraph Interfaces["4. Interfaces & Consumption"]
+        direction LR
         CLI["CLI Tool (idr)"]
-        UI["Web UI (React SPA)"]
+        UI["Web UI (React Dashboard)"]
         API["FastAPI REST Backend"]
         MCP["MCP Server (14 AI Agent Tools)"]
         DBT["dbt Package (dbt_idr)"]
     end
 
-    Sources --> CoreEngine
-    CoreEngine --> DataWarehouse
-    DataWarehouse --> Interfaces
+    Sources ==> CoreEngine
+    CoreEngine ==> DataWarehouse
+    DataWarehouse ==> Interfaces
 ```
 
 ### 1. Deterministic-First Graph Construction

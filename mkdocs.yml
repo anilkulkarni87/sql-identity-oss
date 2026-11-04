@@ -1,8 +1,8 @@
 site_name: SQL Identity Resolution
 site_description: Production-grade deterministic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks
-site_url: https://anilkulkarni87.github.io/sql-identity-resolution/
-repo_url: https://github.com/anilkulkarni87/sql-identity-resolution
-repo_name: sql-identity-resolution
+site_url: https://anilkulkarni87.github.io/sql-identity-oss/
+repo_url: https://github.com/anilkulkarni87/sql-identity-oss
+repo_name: sql-identity-oss
 
 theme:
   name: material
@@ -31,9 +31,17 @@ theme:
   icon:
     repo: fontawesome/brands/github
 
+extra_css:
+  - stylesheets/extra.css
+
 plugins:
   - search
-  - mermaid2
+  - mermaid2:
+      arguments:
+        theme: 'default'
+        flowchart:
+          useMaxWidth: true
+          htmlLabels: true
   - tags
 
 markdown_extensions:
@@ -51,33 +59,37 @@ markdown_extensions:
   - attr_list
 
 nav:
-  - 'Act I: The Vision':
+  - Home: index.md
+  - Getting Started:
     - Overview: 01-overview.md
+    - Quickstart: 03-quickstart.md
+    - Installation: 02-installation.md
     - Architecture: 18-architecture.md
     - How It Works: 21-how-it-works.md
-    - Data Model: 20-data-model.md
-  - 'Act II: Start Here':
-    - Installation: 02-installation.md
-    - Distribution Paths: 27-distribution.md
-    - Quickstart: 03-quickstart.md
-    - Walkthrough: 21-how-it-works.md # Reusing simple guide as walkthrough concept
-  - 'Act III: Configuration':
-    - Configuration: 04-configuration.md
-    - Schema Reference: 08-schema.md
+    - Distribution & Deployment: 27-distribution.md
+  - Core Concepts:
     - Matching Algorithm: 19-matching-algorithm.md
-  - 'Act IV: Operations':
-    - CLI Reference: 05-cli.md
-    - Platforms: 06-platforms.md
-    - Pipeline Details: 07-pipeline.md
-    - Scaling & Sizing: 25-scaling.md
-    - Security: 16-security.md
-    - CI/CD: 15-ci-cd.md
-    - Troubleshooting: 14-troubleshooting.md
+    - Data Model: 20-data-model.md
+    - Schema & DDL Reference: 08-schema.md
+    - Pipeline Stages: 07-pipeline.md
+  - Supported Warehouses:
+    - Platforms Overview: 06-platforms.md
+    - Sizing & Hardware: 24-sizing.md
+    - Scaling Strategies: 25-scaling.md
+  - Configuration & Operations:
+    - Configuration: 04-configuration.md
     - Production Hardening: 26-production-hardening.md
-  - 'Act V: Advanced':
-    - API: 10-api.md
-    - MCP Server: 11-mcp.md
-    - DBT Integration: 12-dbt.md
+    - Security & Governance: 16-security.md
+    - CI/CD Automation: 15-ci-cd.md
+    - Troubleshooting: 14-troubleshooting.md
+  - Interfaces & Tooling:
+    - CLI Reference: 05-cli.md
     - Web UI: 09-ui.md
-    - Metrics: 22-metrics.md
+    - REST API & Metrics: 10-api.md
+    - MCP Server (AI Agents): 11-mcp.md
+    - dbt Integration: 12-dbt.md
+  - Testing & Benchmarks:
+    - Scale Testing: 13-scale-testing.md
+    - End-to-End Testing: 17-e2e-testing.md
+    - Metrics Reference: 22-metrics.md
     - Benchmarks: 23-benchmarks.md
