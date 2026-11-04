@@ -31,9 +31,17 @@ theme:
   icon:
     repo: fontawesome/brands/github
 
+extra_css:
+  - stylesheets/extra.css
+
 plugins:
   - search
-  - mermaid2
+  - mermaid2:
+      arguments:
+        theme: 'default'
+        flowchart:
+          useMaxWidth: true
+          htmlLabels: true
   - tags
 
 markdown_extensions:

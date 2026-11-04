@@ -63,31 +63,34 @@ This single command:
 ## 🧩 Architectural Pipeline
 
 ```mermaid
-flowchart LR
-    subgraph Sources["Raw Sources"]
+flowchart TD
+    subgraph Sources["1. Raw Source Systems"]
+        direction LR
         CRM["CRM Accounts"]
-        Web["E-Commerce"]
-        POS["Retail POS"]
+        Web["E-Commerce Orders"]
+        POS["Retail POS Records"]
     end
 
-    subgraph Stages["6 Pluggable Pipeline Stages"]
-        S1["1. Extraction<br/>(Normalize PII)"]
-        S2["2. Graph Building<br/>(Anchor-based Edges)"]
-        S3["3. Clustering<br/>(Label Propagation)"]
-        S4["4. Metrics<br/>(Graph & Quality)"]
-        S5["5. Output<br/>(Golden Profiles)"]
-        S6["6. Reconciliation<br/>(History & Lineage)"]
+    subgraph Stages["2. Pluggable SQL Pipeline Stages"]
+        direction TB
+        S1["1. Extraction & Normalization<br/>(Cleanse & hash PII identifiers)"]
+        S2["2. Graph Construction<br/>(Anchor-based N-1 star topology edges)"]
+        S3["3. Clustering & Connected Components<br/>(Iterative SQL label propagation)"]
+        S4["4. Graph & Quality Metrics<br/>(Confidence scoring & cluster size telemetry)"]
+        S5["5. Golden Profile Output<br/>(Survivorship rules: recency, priority, frequency)"]
+        S6["6. Reconciliation & Lineage<br/>(Audit trail & delta watermarks)"]
+        S1 --> S2 --> S3 --> S4 --> S5 --> S6
     end
 
-    subgraph Targets["Target Schema (idr_out)"]
+    subgraph Targets["3. Serving Schema (idr_out)"]
+        direction LR
         Clusters["identity_clusters_current"]
         Membership["identity_resolved_membership_current"]
         Profiles["golden_customer_profiles"]
     end
 
-    Sources --> S1
-    S1 --> S2 --> S3 --> S4 --> S5 --> S6
-    S6 --> Targets
+    Sources ==> S1
+    S6 ==> Targets
 ```
 
 ---
