@@ -181,3 +181,74 @@ def test_mcp_all_14_tools_and_edge_explanation(mcp_duckdb, monkeypatch, tmp_path
     assert ConnectionManager.instance().get_adapter() is not None
 
 
+def test_mcp_discover_and_suggest_rules(mcp_duckdb):
+    """Test Direction 1: Autonomous profiling and rule suggestion from schema."""
+    res = mcp_server.discover_and_suggest_rules()
+    assert res.get("status") == "SUCCESS", res
+    assert res["tables_profiled"] >= 1
+    assert "email" in res["detected_identifiers"]
+    assert "first_name" in res["detected_attributes"]
+
+    cfg = res["suggested_config"]
+    assert "sources" in cfg
+    assert "rules" in cfg
+    assert "survivorship" in cfg
+    assert "exclusions" in cfg
+    assert any(r["match_keys"] == ["email"] for r in cfg["rules"])
+    assert any(s["attribute"] == "first_name" for s in cfg["survivorship"])
+
+
+def test_mcp_simulate_rule_impact(mcp_duckdb):
+    """Test Direction 1: Safe dry-run rule impact and supernode risk simulation."""
+    # Test valid rule simulation
+    rule = {
+        "id": "sim_email",
+        "type": "EXACT",
+        "match_keys": ["email"],
+        "max_group_size": 10,
+    }
+    sim = mcp_server.simulate_rule_impact(rule)
+    assert sim.get("status") == "SIMULATION_COMPLETE", sim
+    assert sim["eligible_entities"] >= 2
+    assert sim["simulated_anchor_edges"] >= 1
+    assert sim["risk_level"] in ("LOW", "MEDIUM", "HIGH")
+    assert isinstance(sim["risk_reasons"], list)
+
+    # Test invalid rule spec (missing match_keys)
+    bad_rule = {"id": "bad"}
+    bad_res = mcp_server.simulate_rule_impact(bad_rule)
+    assert "error" in bad_res
+
+
+def test_mcp_resolve_customer_360(mcp_duckdb, monkeypatch):
+    """Test Direction 2: Single-call Customer 360 context grounding for AI agents."""
+    # 1. Successful lookup with masked PII
+    monkeypatch.delenv("IDR_PII_ACCESS", raising=False)
+    res_masked = mcp_server.resolve_customer_360("alice@example.com")
+    assert res_masked["found"] is True
+    assert res_masked["cluster_size"] == 2
+    assert len(res_masked["linked_accounts"]) == 2
+    assert res_masked["pii_access_level"] == "masked"
+    assert "***" in res_masked["known_identifiers"][0]["value"]
+
+    # 2. Successful lookup with full PII access
+    monkeypatch.setenv("IDR_PII_ACCESS", "full")
+    res_full = mcp_server.resolve_customer_360("alice@example.com")
+    assert res_full["found"] is True
+    assert res_full["pii_access_level"] == "full"
+    assert res_full["known_identifiers"][0]["value"] == "alice@example.com"
+    assert any(a["source_id"] == "u1" for a in res_full["linked_accounts"])
+
+    # 3. Singleton entity lookup
+    solo = mcp_server.resolve_customer_360("solo@example.com")
+    assert solo["found"] is True
+    assert solo["cluster_size"] == 1
+    assert len(solo["linked_accounts"]) == 1
+
+    # 4. Unknown identifier lookup returns found: False gracefully
+    unknown = mcp_server.resolve_customer_360("does_not_exist@example.com")
+    assert unknown["found"] is False
+    assert "query" in unknown
+
+
+

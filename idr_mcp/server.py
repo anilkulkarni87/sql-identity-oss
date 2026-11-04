@@ -474,6 +474,346 @@ def dry_run_pipeline(run_mode: str = "FULL", max_iters: int = 30) -> Dict[str, A
         return {"error": str(e)}
 
 
+# --- Agentic Identity Tools (Direction 1 & Direction 2) ---
+
+
+@mcp.tool()
+def discover_and_suggest_rules(table_fqn: str = None, sample_size: int = 500) -> Dict[str, Any]:
+    """
+    Profile warehouse tables, detect PII and identity attributes using semantic analysis,
+    and generate an automated, production-ready declarative IDR configuration (Direction 1).
+    """
+    adapter = get_adapter()
+    sample_size = min(max(sample_size, 50), 2000)
+
+    try:
+        candidate_tables = []
+        if table_fqn:
+            candidate_tables = [table_fqn]
+        else:
+            all_tables = adapter.list_tables()
+            # Filter out system and framework schemas
+            candidate_tables = [
+                t for t in all_tables
+                if not (t.startswith("idr_meta.") or t.startswith("idr_work.") or t.startswith("idr_out."))
+            ][:8]
+
+        if not candidate_tables:
+            return {
+                "error": "No user data tables found to profile. Please provide a table_fqn or ensure source tables exist."
+            }
+
+        sources = []
+        rules = []
+        detected_id_types = set()
+        detected_attrs = set()
+
+        for fqn in candidate_tables:
+            if hasattr(adapter, "get_table_columns"):
+                cols = adapter.get_table_columns(fqn)
+            elif hasattr(adapter, "get_columns"):
+                cols = adapter.get_columns(fqn)
+            else:
+                continue
+
+            if not cols:
+                continue
+
+            table_id = fqn.replace(".", "_")
+            col_names = [c["name"] for c in cols]
+
+            # 1. Identify primary entity key
+            pk_candidates = [
+                c for c in col_names
+                if c.lower() in ("id", "customer_id", "user_id", "client_id", "entity_id", "account_id")
+            ]
+            entity_key_col = pk_candidates[0] if pk_candidates else col_names[0]
+
+            # 2. Identify watermark column
+            wm_candidates = [
+                c for c in col_names
+                if any(w in c.lower() for w in ("updated", "modified", "timestamp", "created", "event_time"))
+            ]
+            watermark_col = wm_candidates[0] if wm_candidates else None
+
+            # 3. Classify identifiers and attributes
+            table_identifiers = []
+            table_attributes = []
+
+            for col in col_names:
+                c_lower = col.lower()
+                if col == entity_key_col or col == watermark_col:
+                    continue
+
+                if any(k in c_lower for k in ("email", "mail")):
+                    table_identifiers.append({"type": "email", "expr": col})
+                    detected_id_types.add("email")
+                elif any(k in c_lower for k in ("phone", "mobile", "cell", "tel")):
+                    table_identifiers.append({"type": "phone", "expr": col})
+                    detected_id_types.add("phone")
+                elif any(k in c_lower for k in ("loyalty", "member_id", "card_no", "rewards")):
+                    table_identifiers.append({"type": "loyalty", "expr": col})
+                    detected_id_types.add("loyalty")
+                elif any(k in c_lower for k in ("device", "idfa", "gaid", "cookie")):
+                    table_identifiers.append({"type": "device_id", "expr": col})
+                    detected_id_types.add("device_id")
+                elif any(k in c_lower for k in ("first_name", "fname")):
+                    table_attributes.append({"name": "first_name", "expr": col})
+                    detected_attrs.add("first_name")
+                elif any(k in c_lower for k in ("last_name", "lname", "surname")):
+                    table_attributes.append({"name": "last_name", "expr": col})
+                    detected_attrs.add("last_name")
+                elif any(k in c_lower for k in ("name", "full_name")):
+                    table_attributes.append({"name": "full_name", "expr": col})
+                    detected_attrs.add("full_name")
+                elif any(k in c_lower for k in ("address", "city", "state", "zip", "postal")):
+                    table_attributes.append({"name": col, "expr": col})
+                    detected_attrs.add(col)
+
+            source_def = {
+                "id": table_id,
+                "table": fqn,
+                "entity_key": entity_key_col,
+                "identifiers": table_identifiers,
+                "attributes": table_attributes,
+            }
+            if watermark_col:
+                source_def["watermark_column"] = watermark_col
+            sources.append(source_def)
+
+        # 4. Generate matching rules based on detected identifiers
+        priority = 1
+        for id_type in sorted(detected_id_types):
+            max_group = 50 if id_type == "email" else (25 if id_type == "phone" else 10)
+            rules.append({
+                "id": f"exact_{id_type}",
+                "type": "EXACT",
+                "match_keys": [id_type],
+                "priority": priority,
+                "max_group_size": max_group,
+            })
+            priority += 1
+
+        # 5. Generate survivorship strategies
+        survivorship = []
+        for attr in sorted(detected_attrs):
+            strategy = "PRIORITY" if "name" in attr else "RECENCY"
+            rule_entry = {"attribute": attr, "strategy": strategy}
+            if strategy == "PRIORITY" and sources:
+                rule_entry["source_priority"] = [s["table"] for s in sources]
+            survivorship.append(rule_entry)
+
+        # 6. Default placeholder exclusions
+        exclusions = [
+            {"type": "email", "pattern": "test@test.com", "match_type": "EXACT", "reason": "Test account"},
+            {"type": "email", "pattern": "%@example.com", "match_type": "LIKE", "reason": "Example domain"},
+            {"type": "phone", "pattern": "0000000000", "match_type": "EXACT", "reason": "Placeholder phone"},
+            {"type": "phone", "pattern": "1234567890", "match_type": "EXACT", "reason": "Sequential dummy phone"},
+        ]
+
+        suggested_config = {
+            "sources": sources,
+            "rules": rules,
+            "survivorship": survivorship,
+            "exclusions": exclusions,
+        }
+
+        return {
+            "status": "SUCCESS",
+            "tables_profiled": len(sources),
+            "detected_identifiers": list(detected_id_types),
+            "detected_attributes": list(detected_attrs),
+            "suggested_config": suggested_config,
+        }
+
+    except Exception as e:
+        return {"error": f"Failed to profile and suggest rules: {str(e)}"}
+
+
+@mcp.tool()
+def simulate_rule_impact(rule: Dict[str, Any], dialect: str = None) -> Dict[str, Any]:
+    """
+    Simulate the impact of adding or modifying a matching rule against existing warehouse data (Direction 1).
+    Evaluates proposed edge volume, cluster merges, and detects supernode risks before production deployment.
+    """
+    adapter = get_adapter()
+    match_keys = [str(k).lower() for k in rule.get("match_keys", [])]
+    max_group_size = int(rule.get("max_group_size", 50))
+    rule_id = rule.get("id", "simulated_rule")
+
+    if not match_keys:
+        return {"error": "Rule must specify 'match_keys' list (e.g. ['email'] or ['phone'])."}
+
+    try:
+        # Check if idr_out.identity_identifiers_current exists
+        if not adapter.table_exists("idr_out.identity_identifiers_current"):
+            return {
+                "status": "INITIAL_STATE",
+                "message": "identity_identifiers_current table not yet populated. Run an initial IDR run to enable simulation.",
+                "rule_id": rule_id,
+            }
+
+        placeholders = ", ".join(["?"] * len(match_keys))
+        sql_summary = f"""
+            SELECT
+                COUNT(*) as eligible_records,
+                COUNT(DISTINCT identifier_value_norm) as distinct_identifiers,
+                COUNT(DISTINCT entity_key) as eligible_entities
+            FROM idr_out.identity_identifiers_current
+            WHERE LOWER(identifier_type) IN ({placeholders})
+              AND identifier_value_norm IS NOT NULL
+              AND TRIM(identifier_value_norm) != ''
+        """
+        summary_rows = adapter.query(sql_summary, params=match_keys)
+        summary = summary_rows[0] if summary_rows else {}
+
+        # Analyze group size distribution
+        sql_groups = f"""
+            SELECT
+                identifier_value_norm,
+                COUNT(*) as group_size
+            FROM idr_out.identity_identifiers_current
+            WHERE LOWER(identifier_type) IN ({placeholders})
+              AND identifier_value_norm IS NOT NULL
+              AND TRIM(identifier_value_norm) != ''
+            GROUP BY identifier_value_norm
+            ORDER BY group_size DESC
+            LIMIT 100
+        """
+        top_groups = adapter.query(sql_groups, params=match_keys)
+
+        max_detected_group = top_groups[0]["group_size"] if top_groups else 0
+        supernode_groups = [g for g in top_groups if g["group_size"] > max_group_size]
+
+        # Calculate simulated anchor edges (N - 1 for groups where 1 < N <= max_group_size)
+        simulated_edges = sum(
+            g["group_size"] - 1 for g in top_groups
+            if 1 < g["group_size"] <= max_group_size
+        )
+
+        risk_level = "LOW"
+        risk_reasons = []
+        if max_detected_group > 200:
+            risk_level = "HIGH"
+            risk_reasons.append(f"Detected giant group of size {max_detected_group} (likely placeholder/shared value)")
+        elif supernode_groups:
+            risk_level = "MEDIUM"
+            risk_reasons.append(f"{len(supernode_groups)} group(s) exceed max_group_size ({max_group_size}) and will be skipped")
+
+        masked_supernodes = []
+        for g in supernode_groups[:5]:
+            val = g["identifier_value_norm"]
+            masked_supernodes.append({
+                "identifier_value": mask_value(val),
+                "group_size": g["group_size"],
+            })
+
+        return {
+            "status": "SIMULATION_COMPLETE",
+            "rule_id": rule_id,
+            "match_keys": match_keys,
+            "configured_max_group_size": max_group_size,
+            "eligible_entities": summary.get("eligible_entities", 0),
+            "distinct_identifiers": summary.get("distinct_identifiers", 0),
+            "simulated_anchor_edges": simulated_edges,
+            "max_detected_group_size": max_detected_group,
+            "supernodes_flagged": len(supernode_groups),
+            "sample_supernode_groups": masked_supernodes,
+            "risk_level": risk_level,
+            "risk_reasons": risk_reasons,
+            "pii_access_level": "masked" if should_mask_pii() else "full",
+        }
+
+    except Exception as e:
+        return {"error": f"Failed to simulate rule impact: {str(e)}"}
+
+
+@mcp.tool()
+def resolve_customer_360(identifier_value: str, identifier_type: str = None) -> Dict[str, Any]:
+    """
+    Single-call Customer 360 context grounding for AI agents and RAG pipelines (Direction 2).
+    Given any identifier (email, phone, loyalty ID), resolves the person's canonical identity,
+    golden profile attributes, all linked source accounts, and cross-channel identifier graph.
+    """
+    adapter = get_adapter()
+
+    try:
+        # 1. Search for matching cluster
+        search_res = search_identifier(identifier_value, identifier_type=identifier_type, limit=5)
+        matches = search_res.get("matches", [])
+        if not matches:
+            return {
+                "found": False,
+                "query": identifier_value,
+                "message": f"No resolved identity cluster found for '{mask_value(identifier_value)}'.",
+            }
+
+        resolved_id = matches[0]["resolved_id"]
+
+        # 2. Retrieve Cluster Details (with member entities and edges)
+        cluster_data = get_cluster(resolved_id, include_edges=True, include_entities=True)
+
+        # 3. Retrieve Golden Profile
+        profile_data = get_golden_profile(resolved_id)
+        golden_profile = profile_data.get("attributes") or {}
+
+        # 4. Aggregate all known identifiers for this resolved person
+        known_identifiers = []
+        if adapter.table_exists("idr_out.identity_identifiers_current"):
+            sql_ids = """
+                SELECT DISTINCT i.identifier_type, i.identifier_value_norm
+                FROM idr_out.identity_identifiers_current i
+                JOIN idr_out.identity_resolved_membership_current m ON i.entity_key = m.entity_key
+                WHERE m.resolved_id = ?
+            """
+            id_rows = adapter.query(sql_ids, params=[resolved_id])
+            for r in id_rows:
+                val = r["identifier_value_norm"]
+                known_identifiers.append({
+                    "type": r["identifier_type"],
+                    "value": mask_value(val) if should_mask_pii() else val,
+                })
+
+        # 5. Extract linked source accounts
+        entities = cluster_data.get("entities", [])
+        linked_accounts = []
+        for ent in entities:
+            ekey = ent.get("entity_key", "")
+            source_parts = ekey.split(":", 1)
+            source_system = source_parts[0] if len(source_parts) == 2 else "unknown"
+            source_id = source_parts[1] if len(source_parts) == 2 else ekey
+            linked_accounts.append({
+                "source_system": source_system,
+                "source_id": source_id,
+                "entity_key": ekey,
+            })
+
+        # 6. Assess cluster risk flags
+        risk_flags = []
+        cluster_size = cluster_data.get("cluster_size", len(entities))
+        if cluster_size > 30:
+            risk_flags.append("HIGH_CARDINALITY_CLUSTER")
+        confidence_score = cluster_data.get("confidence_score", 1.0)
+        if confidence_score and float(confidence_score) < 0.70:
+            risk_flags.append("LOW_CONFIDENCE_CLUSTER")
+
+        return {
+            "found": True,
+            "resolved_id": resolved_id,
+            "cluster_size": cluster_size,
+            "confidence_score": confidence_score,
+            "super_cluster_id": cluster_data.get("super_cluster_id", resolved_id),
+            "golden_profile": golden_profile,
+            "linked_accounts": linked_accounts,
+            "known_identifiers": known_identifiers,
+            "risk_flags": risk_flags,
+            "pii_access_level": "masked" if should_mask_pii() else "full",
+        }
+
+    except Exception as e:
+        return {"error": f"Failed to resolve Customer 360 context: {str(e)}"}
+
+
 # --- Entry Point ---
 
 
