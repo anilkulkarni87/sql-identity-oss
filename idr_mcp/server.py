@@ -74,7 +74,11 @@ def get_cluster(
     clusters = adapter.query(sql, params=[resolved_id])
 
     if not clusters:
-        return {"error": f"Cluster {resolved_id} not found", "resolved_id": resolved_id}
+        return {
+            "error": f"Cluster {resolved_id} not found",
+            "resolved_id": resolved_id,
+            "pii_access_level": "masked" if should_mask_pii() else "full",
+        }
 
     result = clusters[0]
     result["pii_access_level"] = "masked" if should_mask_pii() else "full"

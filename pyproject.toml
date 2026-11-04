@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-duckdb = ["duckdb>=0.9.0", "pandas>=1.5.0"]
+duckdb = ["duckdb>=0.9.0", "pytz>=2020.1", "pandas>=1.5.0"]
 bigquery = ["google-cloud-bigquery>=3.0.0", "pandas>=1.5.0", "db-dtypes>=1.0.0"]
 snowflake = ["snowflake-snowpark-python>=1.0.0", "snowflake-connector-python>=3.0.0"]
 databricks = ["databricks-sql-connector>=3.0.0"]
@@ -53,6 +53,7 @@ enterprise = ["redis>=5.0.0"]
 mcp = ["mcp[fastmcp]>=0.1.0"]
 all = [
     "duckdb>=0.9.0",
+    "pytz>=2020.1",
     "google-cloud-bigquery>=3.0.0",
     "pandas>=1.5.0",
     "db-dtypes>=1.0.0",
