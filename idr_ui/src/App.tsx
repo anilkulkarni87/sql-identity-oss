@@ -1,5 +1,8 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Network, History, Settings as SettingsIcon, Database } from 'lucide-react'
+import {
+    LayoutDashboard, Network, History, Settings as SettingsIcon,
+    Database, Wand2
+} from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import Explorer from './pages/Explorer'
 import Runs from './pages/Runs'
@@ -38,7 +41,8 @@ export default function App() {
             <nav className="bg-gray-800 border-b border-gray-700">
                 <div className="max-w-7xl mx-auto px-4">
                     <div className="flex items-center justify-between h-16">
-                        <div className="flex items-center gap-4">
+                        {/* Left: Brand & Connection Status */}
+                        <div className="flex items-center gap-3">
                             <Link to="/" className="flex items-center gap-2">
                                 <Network className="w-8 h-8 text-blue-400" />
                                 <span className="text-xl font-bold">IDR</span>
@@ -47,24 +51,22 @@ export default function App() {
 
                             {/* Connection Badge */}
                             {connectionStatus?.connected ? (
-                                <span className="px-3 py-1 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-xs font-mono uppercase">
+                                <span className="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-mono uppercase">
                                     ● {connectionStatus.platform || 'Connected'}
                                 </span>
                             ) : (
-                                <span className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-xs font-mono uppercase">
+                                <Link
+                                    to="/setup"
+                                    className="px-2.5 py-0.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-full text-xs font-mono uppercase transition-colors"
+                                    title="Warehouse not connected. Click to run Setup Wizard."
+                                >
                                     ● Disconnected
-                                </span>
+                                </Link>
                             )}
-
-                            {/* Setup Link */}
-                            <NavLink to="/setup" active={isActive('/setup')}>
-                                <span className="text-xs font-semibold px-2 py-1 bg-blue-500/20 text-blue-300 rounded hover:bg-blue-500/30">
-                                    Setup Wizard
-                                </span>
-                            </NavLink>
                         </div>
 
-                        <div className="flex gap-1">
+                        {/* Right: Primary Navigation Links */}
+                        <div className="flex gap-1 items-center">
                             <NavLink to="/" active={isActive('/')}>
                                 <LayoutDashboard className="w-4 h-4" />
                                 Dashboard
@@ -80,6 +82,10 @@ export default function App() {
                             <NavLink to="/model" active={isActive('/model')}>
                                 <Database className="w-4 h-4" />
                                 Data Model
+                            </NavLink>
+                            <NavLink to="/setup" active={isActive('/setup')}>
+                                <Wand2 className="w-4 h-4" />
+                                Setup Wizard
                             </NavLink>
                             <NavLink to="/settings" active={isActive('/settings')}>
                                 <SettingsIcon className="w-4 h-4" />
@@ -109,10 +115,11 @@ function NavLink({ to, children, active }: { to: string; children: React.ReactNo
     return (
         <Link
             to={to}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${active
-                ? 'bg-blue-600 text-white'
-                : 'text-gray-300 hover:bg-gray-700'
-                }`}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                active
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-gray-300 hover:bg-gray-700/60 hover:text-white'
+            }`}
         >
             {children}
         </Link>

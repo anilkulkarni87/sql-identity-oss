@@ -1,298 +1,304 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Database, Cloud, CheckCircle, XCircle, Loader2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+    Database, Settings as SettingsIcon, CheckCircle, XCircle,
+    RefreshCw, Wand2, Shield, Server, FileCode, ArrowRight,
+    Layers, AlertCircle
+} from 'lucide-react'
 import { api } from '../api/client'
-
-interface HealthStatus {
-    connected: boolean
-    configured: boolean
-    platform: string | null
-}
+import { formatSourceName } from '../utils/colors'
 
 export default function Settings() {
+    const navigate = useNavigate()
     const queryClient = useQueryClient()
-    const [platform, setPlatform] = useState('duckdb')
+    const [testing, setTesting] = useState(false)
+    const [testMessage, setTestMessage] = useState<string | null>(null)
 
-    // DuckDB
-    const [database, setDatabase] = useState('')
-
-    // BigQuery
-    const [projectId, setProjectId] = useState('')
-
-    // Snowflake
-    const [sfAccount, setSfAccount] = useState('')
-    const [sfUser, setSfUser] = useState('')
-    const [sfPassword, setSfPassword] = useState('')
-    const [sfWarehouse, setSfWarehouse] = useState('')
-    const [sfDatabase, setSfDatabase] = useState('')
-
-    // Databricks
-    const [dbHostname, setDbHostname] = useState('')
-    const [dbHttpPath, setDbHttpPath] = useState('')
-    const [dbToken, setDbToken] = useState('')
-    const [dbCatalog, setDbCatalog] = useState('')
-
-    const { data: health } = useQuery<HealthStatus>({
+    // Setup status (connection & configured flags)
+    const { data: status, isLoading: statusLoading } = useQuery({
         queryKey: ['setupStatus'],
-        queryFn: () => api.getSetupStatus(),
-        refetchInterval: 5000
+        queryFn: () => api.getSetupStatus()
     })
 
-    const connectMutation = useMutation({
-        mutationFn: async () => {
-            const params: Record<string, string> = {}
+    // Active pipeline configuration (sources, rules, survivorship)
+    const { data: config, isLoading: configLoading } = useQuery({
+        queryKey: ['setupConfig'],
+        queryFn: () => api.getSetupConfig(),
+        enabled: !!status?.configured
+    })
 
-            if (platform === 'duckdb') {
-                params.path = database
-                params.database = database
-            } else if (platform === 'bigquery') {
-                params.project = projectId
-                params.project_id = projectId
-            } else if (platform === 'snowflake') {
-                params.account = sfAccount
-                params.user = sfUser
-                params.password = sfPassword
-                params.warehouse = sfWarehouse
-                params.database = sfDatabase
-            } else if (platform === 'databricks') {
-                params.server_hostname = dbHostname
-                params.http_path = dbHttpPath
-                params.access_token = dbToken
-                params.catalog = dbCatalog
+    const handleTestConnection = async () => {
+        setTesting(true)
+        setTestMessage(null)
+        try {
+            await queryClient.invalidateQueries({ queryKey: ['setupStatus'] })
+            await queryClient.invalidateQueries({ queryKey: ['health'] })
+            const freshStatus = await api.getSetupStatus()
+            if (freshStatus.connected) {
+                setTestMessage(`Connection active. Successfully communicating with ${freshStatus.platform || 'warehouse'}.`)
+            } else {
+                setTestMessage('Warehouse connection is currently offline or unconfigured.')
             }
-
-            return api.setupConnect(platform, params)
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['setupStatus'] })
-            queryClient.invalidateQueries({ queryKey: ['metrics'] })
+        } catch (err: any) {
+            setTestMessage(`Connection test failed: ${err.message || String(err)}`)
+        } finally {
+            setTesting(false)
         }
-    })
+    }
+
+    const sources = config?.sources || []
+    const rules = config?.rules || []
+    const fuzzyRules = config?.fuzzy_rules || []
+    const survivorship = config?.survivorship || []
 
     return (
-        <div className="space-y-6 max-w-2xl">
-            <h1 className="text-2xl font-bold">Settings</h1>
-
-            {/* Connection Status */}
-            <div className="bg-gray-800 rounded-xl p-6">
-                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <Database className="w-5 h-5" />
-                    Connection Status
-                </h2>
-
-                <div className="flex items-center gap-3">
-                    {health?.connected ? (
-                        <>
-                            <CheckCircle className="w-6 h-6 text-green-400" />
-                            <div>
-                                <p className="font-medium text-green-400">Connected</p>
-                                <p className="text-sm text-gray-400">
-                                    Platform: {health.platform}
-                                </p>
-                            </div>
-                        </>
-                    ) : (
-                        <>
-                            <XCircle className="w-6 h-6 text-red-400" />
-                            <div>
-                                <p className="font-medium text-red-400">Not Connected</p>
-                                <p className="text-sm text-gray-400">
-                                    Configure a connection below
-                                </p>
-                            </div>
-                        </>
-                    )}
-                </div>
+        <div className="space-y-8 max-w-4xl mx-auto pb-12">
+            <div>
+                <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+                    <SettingsIcon className="w-6 h-6 text-blue-400" />
+                    System Settings & Configuration
+                </h1>
+                <p className="text-sm text-gray-400 mt-1">
+                    Manage your warehouse connection, view active resolution pipeline definitions, inspect security mode, and review engine telemetry.
+                </p>
             </div>
 
-            {/* Connection Form */}
-            <div className="bg-gray-800 rounded-xl p-6">
-                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <Cloud className="w-5 h-5" />
-                    Connect to Database
-                </h2>
+            {/* 1. Warehouse Connection Card */}
+            <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-700/60">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-blue-600/15 border border-blue-500/20 rounded-xl text-blue-400">
+                            <Database className="w-5 h-5" />
+                        </div>
+                        <div>
+                            <h2 className="text-base font-semibold text-white">Warehouse Connection</h2>
+                            <p className="text-xs text-gray-400">Target execution backend for IDR SQL identity workloads</p>
+                        </div>
+                    </div>
 
-                {/* Platform Selection */}
-                <div className="mb-4">
-                    <label className="block text-sm text-gray-400 mb-2">Platform</label>
-                    <div className="grid grid-cols-4 gap-2">
-                        {[
-                            { id: 'duckdb', label: 'DuckDB', icon: '🦆' },
-                            { id: 'bigquery', label: 'BigQuery', icon: '☁️' },
-                            { id: 'snowflake', label: 'Snowflake', icon: '❄️' },
-                            { id: 'databricks', label: 'Databricks', icon: '🧱' },
-                        ].map((p) => (
-                            <button
-                                key={p.id}
-                                onClick={() => setPlatform(p.id)}
-                                className={`p-3 rounded-lg border transition-colors ${platform === p.id
-                                    ? 'border-blue-500 bg-blue-600/20'
-                                    : 'border-gray-600 hover:border-gray-500'
-                                    }`}
-                            >
-                                <span className="text-2xl">{p.icon}</span>
-                                <p className="text-sm mt-1">{p.label}</p>
-                            </button>
-                        ))}
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleTestConnection}
+                            disabled={testing || statusLoading}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-200 text-xs font-medium rounded-lg border border-gray-600 transition-colors"
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${testing ? 'animate-spin' : ''}`} />
+                            Test Connection
+                        </button>
+                        <button
+                            onClick={() => navigate('/setup')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+                        >
+                            <Wand2 className="w-3.5 h-3.5" />
+                            Reconfigure in Wizard
+                        </button>
                     </div>
                 </div>
 
-                {/* DuckDB fields */}
-                {platform === 'duckdb' && (
-                    <div className="space-y-3">
-                        <InputField
-                            label="Database Path"
-                            value={database}
-                            onChange={setDatabase}
-                            placeholder="/path/to/database.duckdb"
-                            hint="Path relative to the API server, or absolute path"
-                        />
-                    </div>
-                )}
-
-                {/* BigQuery fields */}
-                {platform === 'bigquery' && (
-                    <div className="space-y-3">
-                        <InputField
-                            label="GCP Project ID"
-                            value={projectId}
-                            onChange={setProjectId}
-                            placeholder="my-gcp-project"
-                            hint="Requires GOOGLE_APPLICATION_CREDENTIALS env var on server"
-                        />
-                    </div>
-                )}
-
-                {/* Snowflake fields */}
-                {platform === 'snowflake' && (
-                    <div className="space-y-3">
-                        <InputField
-                            label="Account"
-                            value={sfAccount}
-                            onChange={setSfAccount}
-                            placeholder="xyz12345.us-east-1"
-                        />
-                        <div className="grid grid-cols-2 gap-3">
-                            <InputField
-                                label="User"
-                                value={sfUser}
-                                onChange={setSfUser}
-                                placeholder="username"
-                            />
-                            <InputField
-                                label="Password"
-                                value={sfPassword}
-                                onChange={setSfPassword}
-                                placeholder="••••••••"
-                                type="password"
-                            />
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                            <InputField
-                                label="Warehouse"
-                                value={sfWarehouse}
-                                onChange={setSfWarehouse}
-                                placeholder="COMPUTE_WH"
-                            />
-                            <InputField
-                                label="Database"
-                                value={sfDatabase}
-                                onChange={setSfDatabase}
-                                placeholder="IDR_DB"
-                            />
+                {/* Connection Status Details */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                    <div className="p-4 bg-gray-900/60 rounded-xl border border-gray-700/60 space-y-1">
+                        <span className="text-gray-400 font-medium">Status</span>
+                        <div className="flex items-center gap-2 pt-0.5">
+                            {status?.connected ? (
+                                <>
+                                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                                    <span className="font-semibold text-emerald-400">Online & Connected</span>
+                                </>
+                            ) : (
+                                <>
+                                    <XCircle className="w-4 h-4 text-rose-400" />
+                                    <span className="font-semibold text-rose-400">Not Connected</span>
+                                </>
+                            )}
                         </div>
                     </div>
-                )}
 
-                {/* Databricks fields */}
-                {platform === 'databricks' && (
-                    <div className="space-y-3">
-                        <InputField
-                            label="Server Hostname"
-                            value={dbHostname}
-                            onChange={setDbHostname}
-                            placeholder="adb-xxxxx.azuredatabricks.net"
-                        />
-                        <InputField
-                            label="HTTP Path"
-                            value={dbHttpPath}
-                            onChange={setDbHttpPath}
-                            placeholder="/sql/1.0/warehouses/xxxxx"
-                        />
-                        <InputField
-                            label="Access Token"
-                            value={dbToken}
-                            onChange={setDbToken}
-                            placeholder="dapi..."
-                            type="password"
-                        />
-                        <InputField
-                            label="Catalog"
-                            value={dbCatalog}
-                            onChange={setDbCatalog}
-                            placeholder="main"
-                        />
+                    <div className="p-4 bg-gray-900/60 rounded-xl border border-gray-700/60 space-y-1">
+                        <span className="text-gray-400 font-medium">Platform Backend</span>
+                        <p className="font-semibold text-gray-100 capitalize pt-0.5">
+                            {status?.platform ? status.platform : 'None Configured'}
+                        </p>
                     </div>
-                )}
 
-                {/* Connect Button */}
-                <button
-                    onClick={() => connectMutation.mutate()}
-                    disabled={connectMutation.isPending}
-                    className="w-full mt-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-                >
-                    {connectMutation.isPending ? (
-                        <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            Connecting...
-                        </>
-                    ) : (
-                        'Connect'
-                    )}
-                </button>
+                    <div className="p-4 bg-gray-900/60 rounded-xl border border-gray-700/60 space-y-1">
+                        <span className="text-gray-400 font-medium">Pipeline Configuration</span>
+                        <p className="font-semibold text-gray-100 pt-0.5">
+                            {status?.configured ? (
+                                <span className="text-blue-400">Configured & Active</span>
+                            ) : (
+                                <span className="text-amber-400">Pending Setup</span>
+                            )}
+                        </p>
+                    </div>
+                </div>
 
-                {/* Error/Success Messages */}
-                {connectMutation.isError && (
-                    <p className="mt-3 text-sm text-red-400">
-                        ❌ {(connectMutation.error as Error).message}
-                    </p>
-                )}
-                {connectMutation.isSuccess && (
-                    <p className="mt-3 text-sm text-green-400">
-                        ✓ Connected successfully!
-                    </p>
+                {testMessage && (
+                    <div className="p-3 bg-gray-900/80 rounded-lg border border-gray-700 text-xs text-gray-300 font-mono flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                        <span>{testMessage}</span>
+                    </div>
                 )}
             </div>
-        </div>
-    )
-}
 
-function InputField({
-    label,
-    value,
-    onChange,
-    placeholder,
-    hint,
-    type = 'text'
-}: {
-    label: string
-    value: string
-    onChange: (v: string) => void
-    placeholder: string
-    hint?: string
-    type?: string
-}) {
-    return (
-        <div>
-            <label className="block text-sm text-gray-400 mb-1">{label}</label>
-            <input
-                type={type}
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                placeholder={placeholder}
-                className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-            />
-            {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
+            {/* 2. Pipeline Configuration Card */}
+            <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-700/60">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-purple-600/15 border border-purple-500/20 rounded-xl text-purple-400">
+                            <FileCode className="w-5 h-5" />
+                        </div>
+                        <div>
+                            <h2 className="text-base font-semibold text-white">Active Pipeline Definition</h2>
+                            <p className="text-xs text-gray-400">Resolved entities, matching rules, and survivorship strategies</p>
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={() => navigate('/setup')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium rounded-lg border border-gray-600 transition-colors self-start sm:self-auto"
+                    >
+                        <span>Edit Configuration</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+
+                {configLoading ? (
+                    <p className="text-xs text-gray-400">Loading pipeline metadata...</p>
+                ) : status?.configured && sources.length > 0 ? (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                            <div className="p-3 bg-gray-900/60 rounded-xl border border-gray-700/60">
+                                <span className="text-gray-400 block">Sources / Entity Types</span>
+                                <span className="text-lg font-bold text-white mt-1 block">
+                                    {sources.length} tables
+                                </span>
+                            </div>
+                            <div className="p-3 bg-gray-900/60 rounded-xl border border-gray-700/60">
+                                <span className="text-gray-400 block">Resolution Rules</span>
+                                <span className="text-lg font-bold text-white mt-1 block">
+                                    {rules.length + fuzzyRules.length} rules
+                                </span>
+                            </div>
+                            <div className="p-3 bg-gray-900/60 rounded-xl border border-gray-700/60">
+                                <span className="text-gray-400 block">Survivorship Rules</span>
+                                <span className="text-lg font-bold text-white mt-1 block">
+                                    {survivorship.length} attributes
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Sources breakdown */}
+                        <div className="space-y-2">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                                Mapped Source Tables:
+                            </span>
+                            <div className="flex flex-wrap gap-2">
+                                {sources.map((s: any, idx: number) => {
+                                    const tableName = s.table || s.id || `Source ${idx + 1}`
+                                    return (
+                                        <div
+                                            key={idx}
+                                            className="px-3 py-1.5 bg-gray-900/80 rounded-lg border border-gray-700/70 text-xs flex items-center gap-2"
+                                        >
+                                            <Layers className="w-3.5 h-3.5 text-blue-400" />
+                                            <span className="font-semibold text-gray-200">
+                                                {formatSourceName(s.id || tableName)}
+                                            </span>
+                                            <span className="font-mono text-[11px] text-gray-500">
+                                                ({tableName})
+                                            </span>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="p-6 text-center text-gray-500 bg-gray-900/40 rounded-xl border border-dashed border-gray-700">
+                        <Layers className="w-8 h-8 mx-auto mb-2 opacity-50 text-blue-400" />
+                        <p className="text-sm font-medium text-gray-300">No identity pipeline configured yet</p>
+                        <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+                            Run through the Setup Wizard to select tables, configure entity keys, and define match rules.
+                        </p>
+                        <button
+                            onClick={() => navigate('/setup')}
+                            className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-md transition-all inline-flex items-center gap-1.5"
+                        >
+                            <Wand2 className="w-3.5 h-3.5" />
+                            Start Setup Wizard
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* 3. Authentication & Security Card */}
+            <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl space-y-4">
+                <div className="flex items-center gap-3 pb-3 border-b border-gray-700/60">
+                    <div className="p-2.5 bg-emerald-600/15 border border-emerald-500/20 rounded-xl text-emerald-400">
+                        <Shield className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <h2 className="text-base font-semibold text-white">Authentication & Access Control</h2>
+                        <p className="text-xs text-gray-400">Security posture and API authentication enforcement</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <div className="p-4 bg-gray-900/60 rounded-xl border border-gray-700/60 space-y-1">
+                        <span className="text-gray-400 font-medium">Auth Provider Mode</span>
+                        <div className="pt-0.5">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">
+                                Insecure Dev Auth Mode (Active)
+                            </span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-1">
+                            Local development mode enabled with <code className="text-gray-400 font-mono">IDR_ALLOW_INSECURE_DEV_AUTH=true</code>.
+                        </p>
+                    </div>
+
+                    <div className="p-4 bg-gray-900/60 rounded-xl border border-gray-700/60 space-y-1">
+                        <span className="text-gray-400 font-medium">Enterprise SSO / OIDC</span>
+                        <p className="text-gray-300 font-medium pt-0.5">Optional Production Integration</p>
+                        <p className="text-[11px] text-gray-500 mt-1">
+                            Set <code className="text-gray-400 font-mono">IDR_AUTH_ISSUER</code> and <code className="text-gray-400 font-mono">IDR_AUTH_CLIENT_ID</code> to enforce bearer JWT validation.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* 4. System Telemetry & Engine Information */}
+            <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl space-y-4">
+                <div className="flex items-center gap-3 pb-3 border-b border-gray-700/60">
+                    <div className="p-2.5 bg-cyan-600/15 border border-cyan-500/20 rounded-xl text-cyan-400">
+                        <Server className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <h2 className="text-base font-semibold text-white">System Information</h2>
+                        <p className="text-xs text-gray-400">Build environment, API endpoints, and engine capabilities</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/60">
+                        <span className="text-gray-400 block text-[11px]">IDR Engine</span>
+                        <span className="font-mono text-gray-200 font-semibold mt-0.5 block">v0.5.0</span>
+                    </div>
+                    <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/60">
+                        <span className="text-gray-400 block text-[11px]">License</span>
+                        <span className="font-mono text-gray-200 font-semibold mt-0.5 block">Apache 2.0 (OSS)</span>
+                    </div>
+                    <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/60">
+                        <span className="text-gray-400 block text-[11px]">API Endpoint</span>
+                        <span className="font-mono text-gray-200 font-semibold mt-0.5 block">/api</span>
+                    </div>
+                    <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/60">
+                        <span className="text-gray-400 block text-[11px]">Graph Algorithm</span>
+                        <span className="font-mono text-blue-400 font-semibold mt-0.5 block">Label Propagation</span>
+                    </div>
+                </div>
+            </div>
         </div>
     )
 }
