@@ -223,6 +223,13 @@
 </a>
 </li>
 <li class="md-nav__item">
+<a class="md-nav__link" href="#comparison-in-warehouse-idr-vs-alternatives">
+<span class="md-ellipsis">
+      📊 Comparison: In-Warehouse IDR vs. Alternatives
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
 <a class="md-nav__link" href="#60-second-quickstart">
 <span class="md-ellipsis">
       ⚡ 60-Second Quickstart
@@ -587,6 +594,13 @@
 </a>
 </li>
 <li class="md-nav__item">
+<a class="md-nav__link" href="#comparison-in-warehouse-idr-vs-alternatives">
+<span class="md-ellipsis">
+      📊 Comparison: In-Warehouse IDR vs. Alternatives
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
 <a class="md-nav__link" href="#60-second-quickstart">
 <span class="md-ellipsis">
       ⚡ 60-Second Quickstart
@@ -654,9 +668,74 @@
 <li><strong>Deterministic &amp; Fully Auditable</strong>: Every edge, link, and cluster decision is documented with confidence scores, rule IDs, and full lineage. No probabilistic hallucinations.</li>
 <li><strong>Anchor-Based Edge Building ($O(N)$ vs $O(N^2)$)</strong>: Avoids Cartesian blowouts on common identifiers by connecting groups via star-topology anchor edges.</li>
 <li><strong>Pure SQL Connected Components</strong>: Distributed Label Propagation executes natively in SQL without requiring graph database infrastructure (Neo4j, AWS Neptune).</li>
-<li><strong>AI-Ready with Model Context Protocol (MCP)</strong>: Native MCP server exposing 17 tools for AI agents (Cursor, Claude Desktop, Antigravity) to inspect, configure, autonomously profile schemas, simulate rule risks, and resolve Customer 360 contexts.</li>
-<li><strong>Rich Developer Ecosystem</strong>: First-class Python CLI (<code>idr</code>), FastAPI REST service, Prometheus metrics, interactive React Web UI, and dbt package (<code>dbt_idr</code>).</li>
+<li><strong>Frictionless Zero-Retype Setup</strong>: Auto-detects existing local credentials from <code>~/.databrickscfg</code>, <code>~/.snowflake/config.toml</code>, <code>~/.dbt/profiles.yml</code>, and Google Cloud ADC.</li>
+<li><strong>AI-Ready with Model Context Protocol (MCP)</strong>: Native FastMCP server exposing 17 tools for AI agents (Cursor, Claude Desktop, Antigravity) to inspect, configure, autonomously profile schemas, simulate rule risks, and resolve Customer 360 contexts.</li>
+<li><strong>Rich Developer Ecosystem</strong>: First-class Python CLI (<code>idr</code>), FastAPI REST service, Prometheus metrics, interactive React Web UI, and native dbt package (<code>dbt_idr</code>).</li>
 </ul>
+<hr/>
+<h2 id="comparison-in-warehouse-idr-vs-alternatives">📊 Comparison: In-Warehouse IDR vs. Alternatives</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Capability</th>
+<th style="text-align: left;"><code>sql-identity-oss</code></th>
+<th style="text-align: left;">SaaS CDPs (Segment / Hightouch)</th>
+<th style="text-align: left;">Legacy MDM (Tamr / Informatica)</th>
+<th style="text-align: left;">Ad-Hoc SQL JOINs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Data Movement</strong></td>
+<td style="text-align: left;"><strong>Zero (In-Warehouse)</strong></td>
+<td style="text-align: left;">High (Data synced to vendor cloud)</td>
+<td style="text-align: left;">High (Data extracted to external clusters)</td>
+<td style="text-align: left;">Zero</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Cost / License</strong></td>
+<td style="text-align: left;"><strong>Free / Apache 2.0 (OSS)</strong></td>
+<td style="text-align: left;">\$30k–\$150k+/yr</td>
+<td style="text-align: left;">\$100k+/yr enterprise licenses</td>
+<td style="text-align: left;">High engineering hours</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Graph Resolution</strong></td>
+<td style="text-align: left;"><strong>Multi-hop Label Propagation</strong></td>
+<td style="text-align: left;">Limited / Flat rules</td>
+<td style="text-align: left;">ML black box</td>
+<td style="text-align: left;">Fails on &gt;2 hops (Join blowouts)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Auditability</strong></td>
+<td style="text-align: left;"><strong>100% Explainable SQL &amp; Lineage</strong></td>
+<td style="text-align: left;">Closed vendor black box</td>
+<td style="text-align: left;">Statistical probabilities</td>
+<td style="text-align: left;">Custom scripts</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Survivorship</strong></td>
+<td style="text-align: left;"><strong>Dynamic (Recency, Priority, Mode)</strong></td>
+<td style="text-align: left;">Basic / First seen</td>
+<td style="text-align: left;">Complex custom rules</td>
+<td style="text-align: left;">Manual CASE/COALESCE</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>dbt &amp; SQL Native</strong></td>
+<td style="text-align: left;"><strong>Full dbt package (<code>dbt_idr</code>)</strong></td>
+<td style="text-align: left;">No (Proprietary UI/APIs)</td>
+<td style="text-align: left;">No (Custom pipelines)</td>
+<td style="text-align: left;">Manual SQL</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>AI Agent Readiness</strong></td>
+<td style="text-align: left;"><strong>17 FastMCP Tools included</strong></td>
+<td style="text-align: left;">Closed API</td>
+<td style="text-align: left;">Closed API</td>
+<td style="text-align: left;">None</td>
+</tr>
+</tbody>
+</table>
 <hr/>
 <h2 id="60-second-quickstart">⚡ 60-Second Quickstart</h2>
 <p>Try identity resolution immediately using your local DuckDB engine—no cloud credentials or setup required:</p>
@@ -783,7 +862,7 @@
 <div class="highlight"><pre><span></span><code><a href="#__codelineno-5-1" id="__codelineno-5-1" name="__codelineno-5-1"></a><span class="c1"># packages.yml</span>
 <a href="#__codelineno-5-2" id="__codelineno-5-2" name="__codelineno-5-2"></a><span class="nt">packages</span><span class="p">:</span>
 <a href="#__codelineno-5-3" id="__codelineno-5-3" name="__codelineno-5-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">package</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anilkulkarni87/dbt_idr</span>
-<a href="#__codelineno-5-4" id="__codelineno-5-4" name="__codelineno-5-4"></a><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.6.0</span>
+<a href="#__codelineno-5-4" id="__codelineno-5-4" name="__codelineno-5-4"></a><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.6.1</span>
 </code></pre></div>
 </div>
 </div>
