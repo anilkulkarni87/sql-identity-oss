@@ -60,48 +60,62 @@ packages:
 
 ---
 
-## 2. Model Context Protocol (MCP) Registries
+## 2. Model Context Protocol (MCP) Registries & Distribution
 
-### A. Smithery.ai Registration
-We have committed and pushed [`smithery.yaml`](../smithery.yaml) to the repository root.
+With recent ecosystem shifts (Smithery transitioning to **Arcade** and `mcp.so` becoming paid), the authoritative, free, high-traffic directories for developer & agent adoption are:
 
-1. Navigate to [https://smithery.ai](https://smithery.ai).
-2. Click **"Publish a Server"** (or connect your GitHub account).
-3. Paste the repository URL:
-   `https://github.com/anilkulkarni87/sql-identity-oss`
-4. Set the Tags:
-   - `Customer 360`
-   - `Data Engineering`
-   - `Database Tools`
-   - `Identity Resolution`
-5. Smithery automatically parses `smithery.yaml`, validates the 17 FastMCP tools, and enables 1-click installation:
-   ```bash
-   npx -y @smithery/cli install sql-identity-resolution --client claude
-   ```
+### A. Cursor Native Workspace Preset (`.cursor/mcp.json`)
+We have pre-configured [`.cursor/mcp.json`](../.cursor/mcp.json) in the repository root. Anyone opening `sql-identity-oss` in Cursor immediately has all 17 identity resolution agent tools available out of the box with zero manual configuration.
+
+```json
+{
+  "mcpServers": {
+    "sql-identity-resolution": {
+      "command": "python",
+      "args": ["-m", "idr_mcp"],
+      "env": {
+        "IDR_PLATFORM": "duckdb",
+        "IDR_DB_PATH": "retail.duckdb",
+        "IDR_READ_PII": "false"
+      }
+    }
+  }
+}
+```
 
 ---
 
-### B. mcp.so & Cursor Directory Registration
+### B. Awesome-MCP-Servers (`punkpeye/awesome-mcp-servers`)
+The most heavily starred MCP index on GitHub (40k+ stars). Every MCP client developer and agent platform indexes this list.
 
-1. Navigate to [https://mcp.so/submit](https://mcp.so/submit) or [https://cursor.directory](https://cursor.directory).
-2. Submit the server metadata:
-   - **Name**: `SQL Identity Resolution (idr-mcp)`
-   - **Repository**: `https://github.com/anilkulkarni87/sql-identity-oss`
-   - **Category**: `Data Engineering & Analytics` / `Customer 360`
-   - **Tags**: `Customer 360`, `Data Engineering`, `Database Tools`, `DuckDB`, `Snowflake`, `Databricks`, `BigQuery`
-   - **Install Command**:
-     ```json
-     {
-       "mcpServers": {
-         "sql-identity-resolution": {
-           "command": "uvx",
-           "args": ["--from", "sql-identity-resolution[all]", "idr-mcp"],
-           "env": {
-             "IDR_PLATFORM": "duckdb",
-             "IDR_DB_PATH": "retail.duckdb",
-             "IDR_READ_PII": "false"
-           }
-         }
-       }
-     }
-     ```
+1. Fork [`https://github.com/punkpeye/awesome-mcp-servers`](https://github.com/punkpeye/awesome-mcp-servers).
+2. Edit `README.md` under the **Data & Analytics** or **Database** section:
+   ```markdown
+   - [SQL Identity Resolution (idr-mcp)](https://github.com/anilkulkarni87/sql-identity-oss) - In-warehouse deterministic identity resolution, entity graph traversal, and Customer 360 golden profile generation with zero data movement across Snowflake, Databricks, BigQuery, and DuckDB.
+   ```
+3. Submit a Pull Request.
+
+---
+
+### C. Anthropic Official MCP Servers (`modelcontextprotocol/servers`)
+The official reference repository maintained by Anthropic:
+
+1. Fork [`https://github.com/modelcontextprotocol/servers`](https://github.com/modelcontextprotocol/servers).
+2. Open a PR referencing `anilkulkarni87/sql-identity-oss` as a community server under `Database & Data Warehousing`.
+
+---
+
+### D. Glama.ai Registry (`glama.ai/mcp/servers`)
+Free, community-driven directory indexing MCP servers directly from GitHub:
+1. Navigate to [https://glama.ai/mcp/servers](https://glama.ai/mcp/servers).
+2. Click **Submit a Server** and paste `https://github.com/anilkulkarni87/sql-identity-oss`.
+3. Tags: `Customer 360`, `Database`, `Data Engineering`, `FastMCP`.
+
+---
+
+### E. Arcade (formerly Smithery)
+[`smithery.yaml`](../smithery.yaml) remains committed at the repository root and is compatible with Arcade's CLI for `uvx` execution:
+```bash
+uvx --from sql-identity-resolution[all] idr-mcp
+```
+

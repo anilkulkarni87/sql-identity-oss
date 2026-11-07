@@ -52,3 +52,4 @@ exampleConfig:
   idrPlatform: "duckdb"
   idrDbPath: "retail.duckdb"
   idrReadPii: false
+

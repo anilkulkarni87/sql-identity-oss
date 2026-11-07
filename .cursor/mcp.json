@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "sql-identity-resolution": {
+      "command": "python",
+      "args": ["-m", "idr_mcp"],
+      "env": {
+        "IDR_PLATFORM": "duckdb",
+        "IDR_DB_PATH": "retail.duckdb",
+        "IDR_READ_PII": "false"
+      }
+    }
+  }
+}

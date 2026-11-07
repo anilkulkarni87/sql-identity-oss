@@ -1,0 +1,33 @@
+name: Sync dbt-idr Mirror Repository
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'dbt_idr/**'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Sync to anilkulkarni87/dbt-idr
+    runs-on: ubuntu-latest
+    if: github.repository == 'anilkulkarni87/sql-identity-oss'
+
+    steps:
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push dbt_idr subtree to mirror repo
+        env:
+          SYNC_PAT: ${{ secrets.DBT_MIRROR_SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_PAT" ]; then
+            echo "::notice ::DBT_MIRROR_SYNC_TOKEN secret not configured; skipping automatic push to mirror repo."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git subtree push --prefix=dbt_idr https://x-access-token:${SYNC_PAT}@github.com/anilkulkarni87/dbt-idr.git main

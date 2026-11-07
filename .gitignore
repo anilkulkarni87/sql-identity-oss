@@ -26,6 +26,7 @@ env/
 venv/
 .env
 .venv/
+uv.lock
 
 # Packaging
 build/
