@@ -649,6 +649,87 @@
 </div>
 <div class="md-content" data-md-component="content">
 <article class="md-content__inner md-typeset">
+<style>
+.idr-hero {
+  text-align: center;
+  padding: 3rem 1.5rem 2rem;
+  margin: 0.5rem 0 2rem;
+  background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.18) 0%, rgba(99, 102, 241, 0.08) 50%, transparent 100%);
+  border-radius: 1.25rem;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+.idr-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 9999px;
+  margin-bottom: 1.25rem;
+}
+.idr-hero-title {
+  font-size: 2.75rem !important;
+  font-weight: 800 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.03em !important;
+  margin: 0 0 1rem 0 !important;
+  color: #f8fafc !important;
+}
+.idr-gradient-text {
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.idr-hero-subtitle {
+  font-size: 1.15rem !important;
+  line-height: 1.6 !important;
+  max-width: 700px;
+  margin: 0 auto 1.75rem !important;
+  color: #94a3b8 !important;
+}
+.idr-hero-cta {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.idr-hero-cta .md-button {
+  margin: 0 !important;
+}
+.idr-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2.5rem;
+}
+.idr-stat-card {
+  text-align: center;
+  padding: 1.25rem 1rem;
+  background-color: rgba(22, 27, 34, 0.8);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 0.75rem;
+}
+.idr-stat-number {
+  font-size: 2.25rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #38bdf8;
+  font-family: var(--md-code-font, monospace);
+}
+.idr-stat-label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-top: 0.35rem;
+}
+</style>
 <div class="idr-hero">
 <div class="idr-hero-badge">
     ⚡ Warehouse-Native Identity Resolution v0.6.1 • Apache 2.0
@@ -662,10 +743,10 @@
     Pure SQL connected components, deterministic confidence scoring, and 17 FastMCP agent tools.
   </p>
 <div class="idr-hero-cta">
-<a class="idr-btn-primary" href="03-quickstart/">Get Started in 60s →</a>
-<a class="idr-btn-secondary" href="https://github.com/anilkulkarni87/sql-identity-oss" target="_blank">
-<svg fill="currentColor" height="18" viewbox="0 0 24 24" width="18"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"></path></svg>
-      GitHub (Apache 2.0)
+<a class="md-button md-button--primary" href="03-quickstart/">Get Started in 60s →</a>
+<a class="md-button" href="https://github.com/anilkulkarni87/sql-identity-oss" target="_blank">
+<svg fill="currentColor" height="16" style="vertical-align: text-bottom; margin-right: 4px;" viewbox="0 0 24 24" width="16"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"></path></svg>
+      View on GitHub
     </a>
 </div>
 <p align="center" style="margin: 0; display: flex; justify-content: center; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
@@ -694,37 +775,39 @@
 </div>
 </div>
 <h2 id="architectural-highlights">🧩 Architectural Highlights</h2>
-<div class="idr-cards-grid">
-<div class="idr-card">
-<div class="idr-card-icon">🛡️</div>
-<h3>Zero Data Egress</h3>
-<p>All data stays entirely inside your warehouse security perimeter (DuckDB, Snowflake, BigQuery, Databricks). Fully compliant with HIPAA, GDPR, and CCPA.</p>
-</div>
-<div class="idr-card">
-<div class="idr-card-icon">🎯</div>
-<h3>Deterministic &amp; Auditable</h3>
+<div class="grid cards">
+<ul>
+<li>
+<p><span class="twemoji lg middle"><svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="m10 17-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9m-6-8L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5z"></path></svg></span> <strong>Zero Data Egress</strong></p>
+<hr/>
+<p>All customer data stays entirely inside your warehouse security perimeter (DuckDB, Snowflake, BigQuery, Databricks). Fully compliant with HIPAA, GDPR, and CCPA.</p>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M11 2v2.07A8 8 0 0 0 4.07 11H2v2h2.07A8 8 0 0 0 11 19.93V22h2v-2.07A8 8 0 0 0 19.93 13H22v-2h-2.07A8 8 0 0 0 13 4.07V2m-2 4.08V8h2V6.09c2.5.41 4.5 2.41 4.92 4.91H16v2h1.91c-.41 2.5-2.41 4.5-4.91 4.92V16h-2v1.91C8.5 17.5 6.5 15.5 6.08 13H8v-2H6.09C6.5 8.5 8.5 6.5 11 6.08M12 11a1 1 0 0 0-1 1 1 1 0 0 0 1 1 1 1 0 0 0 1-1 1 1 0 0 0-1-1"></path></svg></span> <strong>Deterministic &amp; Auditable</strong></p>
+<hr/>
 <p>Every edge, cluster, and golden attribute is backed by explicit match rules and Spanning Tree Connectivity scoring. No probabilistic black-box hallucinations.</p>
-</div>
-<div class="idr-card">
-<div class="idr-card-icon">⚡</div>
-<h3>Anchor-Based Graph Building</h3>
-<p>Avoids Cartesian join blowouts on common identifiers by connecting groups via star-topology anchor edges (O(N) complexity instead of O(N²)).</p>
-</div>
-<div class="idr-card">
-<div class="idr-card-icon">🔄</div>
-<h3>Incremental Delta Upsert</h3>
-<p>Local Subgraph Stitching isolates only impacted clusters during incremental runs, updating 1.5M clusters in seconds without full historical scans.</p>
-</div>
-<div class="idr-card">
-<div class="idr-card-icon">🔑</div>
-<h3>Zero-Retype Credentials</h3>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="m12 5.37-.44-.06L6 14.9c.24.21.4.48.47.78h11.06c.07-.3.23-.57.47-.78l-5.56-9.59zM6.6 16.53l4.28 2.53c.29-.27.69-.43 1.12-.43s.83.16 1.12.43l4.28-2.53zM12 22a1.68 1.68 0 0 1-1.68-1.68l.09-.56-4.3-2.55c-.31.36-.76.58-1.27.58a1.68 1.68 0 0 1-1.68-1.68c0-.79.53-1.45 1.26-1.64V9.36c-.83-.11-1.47-.82-1.47-1.68A1.68 1.68 0 0 1 4.63 6c.55 0 1.03.26 1.34.66l4.41-2.53-.06-.45c0-.93.75-1.68 1.68-1.68s1.68.75 1.68 1.68l-.06.45 4.41 2.53c.31-.4.79-.66 1.34-.66a1.68 1.68 0 0 1 1.68 1.68c0 .86-.64 1.57-1.47 1.68v5.11c.73.19 1.26.85 1.26 1.64a1.68 1.68 0 0 1-1.68 1.68c-.51 0-.96-.22-1.27-.58l-4.3 2.55.09.56A1.68 1.68 0 0 1 12 22M10.8 4.86 6.3 7.44l.02.24c0 .71-.44 1.32-1.06 1.57l.03 5.25zm2.4 0 5.51 9.64.03-5.25c-.62-.25-1.06-.86-1.06-1.57l.02-.24z"></path></svg></span> <strong>Anchor-Based Graph Building</strong></p>
+<hr/>
+<p>Avoids Cartesian join blowouts on common identifiers by connecting groups via star-topology anchor edges (<code>O(N)</code> complexity instead of <code>O(N²)</code>).</p>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 18a6 6 0 0 1-6-6c0-1 .25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12a8 8 0 0 0 8 8v3l4-4-4-4m0-11V1L8 5l4 4V6a6 6 0 0 1 6 6c0 1-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12a8 8 0 0 0-8-8"></path></svg></span> <strong>Incremental Delta Upsert</strong></p>
+<hr/>
+<p>Local Subgraph Stitching isolates only impacted clusters during incremental runs, updating 1.5M clusters in seconds without full historical table scans.</p>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12.67 13.67c-.47.46-1.04.83-1.67 1.06V23H8v-2H5v-3h3v-3.28c-1.74-.62-3-2.26-3-4.22C5 8 7 6 9.5 6h.1c-.47.95-.68 2-.57 3.08-.59.2-1.03.76-1.03 1.42 0 .83.67 1.5 1.5 1.5.23 0 .45-.06.65-.15.64.84 1.52 1.47 2.52 1.82m8.06 5.77-2.76 1.16-.78-1.84-2.76 1.17-1.17-2.77L16.03 16l-1.27-3c-1.85.08-3.65-.95-4.41-2.75-.96-2.29.12-4.93 2.41-5.9.24-.1.5-.17.74-.23C12.84 2.87 11.5 2 10 2 7.79 2 6 3.79 6 6v.24c-.3.26-.6.58-.85.91C5.06 6.78 5 6.4 5 6c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.42-.6 2.67-1.55 3.57.42.43 1.05.56 1.63.31.77-.32 1.12-1.2.8-1.96a1 1 0 0 0-.14-.26C15.9 7.13 16 6.58 16 6c0-.63-.1-1.24-.28-1.81 1.28.36 2.38 1.25 2.93 2.57.76 1.8.24 3.81-1.15 5.05zM13 8.6c.37-.41.65-.89.82-1.42-.54.27-.85.82-.82 1.42"></path></svg></span> <strong>Zero-Retype Credentials</strong></p>
+<hr/>
 <p>Auto-detects active credentials from <code>~/.databrickscfg</code>, <code>~/.snowflake/connections.toml</code>, <code>~/.dbt/profiles.yml</code>, and Google Cloud ADC with 1-click connect.</p>
-</div>
-<div class="idr-card">
-<div class="idr-card-icon">🤖</div>
-<h3>AI Agent Ready (MCP)</h3>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 0 0 5 15.5 2.5 2.5 0 0 0 7.5 18a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0 2.5-2.5 2.5 2.5 0 0 0-2.5-2.5"></path></svg></span> <strong>AI Agent Ready (MCP)</strong></p>
+<hr/>
 <p>Includes 17 FastMCP tools allowing Cursor, Claude Desktop, and Antigravity to autonomously profile schemas, simulate rule impact, and resolve Customer 360 records.</p>
-</div>
+</li>
+</ul>
 </div>
 <hr/>
 <h2 id="comparison-in-warehouse-idr-vs-alternatives">📊 Comparison: In-Warehouse IDR vs. Alternatives</h2>
