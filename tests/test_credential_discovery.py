@@ -103,3 +103,4 @@ token = token123
     conns = discover_all_connections()
     db_conns = [c for c in conns if c.get("params", {}).get("server_hostname") == "dbc-shared.databricks.com"]
     assert len(db_conns) == 1
+
