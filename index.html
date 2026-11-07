@@ -19,12 +19,12 @@
 <link href="stylesheets/extra.css" rel="stylesheet"/>
 <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
 </head>
-<body data-md-color-accent="indigo" data-md-color-primary="indigo" data-md-color-scheme="default" dir="ltr">
+<body data-md-color-accent="indigo" data-md-color-primary="indigo" data-md-color-scheme="slate" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox"/>
 <label class="md-overlay" for="__drawer"></label>
 <div data-md-component="skip">
-<a class="md-skip" href="#sql-identity-resolution-sql-identity-oss">
+<a class="md-skip" href="#architectural-highlights">
           Skip to content
         </a>
 </div>
@@ -55,13 +55,13 @@
 </div>
 </div>
 <form class="md-header__option" data-md-component="palette">
-<input aria-label="Switch to dark mode" class="md-option" data-md-color-accent="indigo" data-md-color-media="" data-md-color-primary="indigo" data-md-color-scheme="default" id="__palette_0" name="__palette" type="radio"/>
-<label class="md-header__button md-icon" for="__palette_1" hidden="" title="Switch to dark mode">
-<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
-</label>
-<input aria-label="Switch to light mode" class="md-option" data-md-color-accent="indigo" data-md-color-media="" data-md-color-primary="indigo" data-md-color-scheme="slate" id="__palette_1" name="__palette" type="radio"/>
-<label class="md-header__button md-icon" for="__palette_0" hidden="" title="Switch to light mode">
+<input aria-label="Switch to light mode" class="md-option" data-md-color-accent="indigo" data-md-color-media="" data-md-color-primary="indigo" data-md-color-scheme="slate" id="__palette_0" name="__palette" type="radio"/>
+<label class="md-header__button md-icon" for="__palette_1" hidden="" title="Switch to light mode">
 <svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+<input aria-label="Switch to dark mode" class="md-option" data-md-color-accent="indigo" data-md-color-media="" data-md-color-primary="indigo" data-md-color-scheme="default" id="__palette_1" name="__palette" type="radio"/>
+<label class="md-header__button md-icon" for="__palette_0" hidden="" title="Switch to dark mode">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
 </label>
 </form>
 <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
@@ -175,7 +175,7 @@
 </nav>
 <main class="md-main" data-md-component="main">
 <div class="md-main__inner md-grid">
-<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden="">
 <div class="md-sidebar__scrollwrap">
 <div class="md-sidebar__inner">
 <nav aria-label="Navigation" class="md-nav md-nav--primary md-nav--lifted" data-md-level="0">
@@ -216,9 +216,9 @@
     </label>
 <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#why-sql-identity-resolution">
+<a class="md-nav__link" href="#architectural-highlights">
 <span class="md-ellipsis">
-      🚀 Why SQL Identity Resolution?
+      🧩 Architectural Highlights
     </span>
 </a>
 </li>
@@ -577,7 +577,7 @@
 </div>
 </div>
 </div>
-<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" hidden="">
 <div class="md-sidebar__scrollwrap">
 <div class="md-sidebar__inner">
 <nav aria-label="Table of contents" class="md-nav md-nav--secondary">
@@ -587,9 +587,9 @@
     </label>
 <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#why-sql-identity-resolution">
+<a class="md-nav__link" href="#architectural-highlights">
 <span class="md-ellipsis">
-      🚀 Why SQL Identity Resolution?
+      🧩 Architectural Highlights
     </span>
 </a>
 </li>
@@ -649,29 +649,83 @@
 </div>
 <div class="md-content" data-md-component="content">
 <article class="md-content__inner md-typeset">
-<h1 id="sql-identity-resolution-sql-identity-oss">SQL Identity Resolution (<code>sql-identity-oss</code>)</h1>
-<p align="center">
-<strong>Warehouse-Native, Deterministic Identity Resolution &amp; Customer 360 for Modern Data Platforms</strong>
-</p>
-<p align="center">
+<div class="idr-hero">
+<div class="idr-hero-badge">
+    ⚡ Warehouse-Native Identity Resolution v0.6.1 • Apache 2.0
+  </div>
+<h1 class="idr-hero-title">
+    Deterministic Customer 360.<br/>
+<span class="idr-gradient-text">Zero Data Movement.</span>
+</h1>
+<p class="idr-hero-subtitle">
+    Unify fragmented customer records natively inside DuckDB, Snowflake, BigQuery, and Databricks.
+    Pure SQL connected components, deterministic confidence scoring, and 17 FastMCP agent tools.
+  </p>
+<div class="idr-hero-cta">
+<a class="idr-btn-primary" href="03-quickstart/">Get Started in 60s →</a>
+<a class="idr-btn-secondary" href="https://github.com/anilkulkarni87/sql-identity-oss" target="_blank">
+<svg fill="currentColor" height="18" viewbox="0 0 24 24" width="18"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"></path></svg>
+      GitHub (Apache 2.0)
+    </a>
+</div>
+<p align="center" style="margin: 0; display: flex; justify-content: center; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
 <a href="https://github.com/anilkulkarni87/sql-identity-oss/actions/workflows/test.yml"><img alt="CI Tests" src="https://github.com/anilkulkarni87/sql-identity-oss/actions/workflows/test.yml/badge.svg"/></a>
-<a href="https://pypi.org/project/sql-identity-resolution/"><img alt="PyPI" src="https://img.shields.io/pypi/v/sql-identity-resolution.svg"/></a>
+<img alt="Python Versions" src="https://img.shields.io/badge/Python-3.9_%7C_3.10_%7C_3.11_%7C_3.12_%7C_3.13-blue.svg"/>
 <a href="https://github.com/anilkulkarni87/sql-identity-oss/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"/></a>
-<a href="https://anilkulkarni87.github.io/sql-identity-oss/"><img alt="Documentation" src="https://img.shields.io/badge/docs-GitHub_Pages-indigo.svg"/></a>
+<img alt="Scale Verified" src="https://img.shields.io/badge/Scale-50k_entities%2Fsec-success.svg"/>
 </p>
-<hr/>
-<h2 id="why-sql-identity-resolution">🚀 Why SQL Identity Resolution?</h2>
-<p>Unifying fragmented customer records across CRM, point-of-sale, e-commerce, mobile applications, and support tickets has historically required either <strong>costly SaaS identity vendors</strong> (sending sensitive PII outside your cloud boundary) or <strong>opaque black-box ML tools</strong>.</p>
-<p><strong><code>sql-identity-oss</code></strong> resolves identity <strong>entirely inside your data warehouse</strong>:</p>
-<ul>
-<li><strong>Zero Data Egress</strong>: All data stays inside your security perimeter (DuckDB, Snowflake, BigQuery, Databricks). Fully compliant with HIPAA, GDPR, and CCPA.</li>
-<li><strong>Deterministic &amp; Fully Auditable</strong>: Every edge, link, and cluster decision is documented with confidence scores, rule IDs, and full lineage. No probabilistic hallucinations.</li>
-<li><strong>Anchor-Based Edge Building ($O(N)$ vs $O(N^2)$)</strong>: Avoids Cartesian blowouts on common identifiers by connecting groups via star-topology anchor edges.</li>
-<li><strong>Pure SQL Connected Components</strong>: Distributed Label Propagation executes natively in SQL without requiring graph database infrastructure (Neo4j, AWS Neptune).</li>
-<li><strong>Frictionless Zero-Retype Setup</strong>: Auto-detects existing local credentials from <code>~/.databrickscfg</code>, <code>~/.snowflake/config.toml</code>, <code>~/.dbt/profiles.yml</code>, and Google Cloud ADC.</li>
-<li><strong>AI-Ready with Model Context Protocol (MCP)</strong>: Native FastMCP server exposing 17 tools for AI agents (Cursor, Claude Desktop, Antigravity) to inspect, configure, autonomously profile schemas, simulate rule risks, and resolve Customer 360 contexts.</li>
-<li><strong>Rich Developer Ecosystem</strong>: First-class Python CLI (<code>idr</code>), FastAPI REST service, Prometheus metrics, interactive React Web UI, and native dbt package (<code>dbt_idr</code>).</li>
-</ul>
+</div>
+<div class="idr-stats-grid">
+<div class="idr-stat-card">
+<div class="idr-stat-number">0</div>
+<div class="idr-stat-label">Data Movement / Egress</div>
+</div>
+<div class="idr-stat-card">
+<div class="idr-stat-number">50,000+</div>
+<div class="idr-stat-label">Entities / Sec Scale</div>
+</div>
+<div class="idr-stat-card">
+<div class="idr-stat-number">4</div>
+<div class="idr-stat-label">Cloud Warehouses Supported</div>
+</div>
+<div class="idr-stat-card">
+<div class="idr-stat-number">17</div>
+<div class="idr-stat-label">FastMCP Agent Tools</div>
+</div>
+</div>
+<h2 id="architectural-highlights">🧩 Architectural Highlights</h2>
+<div class="idr-cards-grid">
+<div class="idr-card">
+<div class="idr-card-icon">🛡️</div>
+<h3>Zero Data Egress</h3>
+<p>All data stays entirely inside your warehouse security perimeter (DuckDB, Snowflake, BigQuery, Databricks). Fully compliant with HIPAA, GDPR, and CCPA.</p>
+</div>
+<div class="idr-card">
+<div class="idr-card-icon">🎯</div>
+<h3>Deterministic &amp; Auditable</h3>
+<p>Every edge, cluster, and golden attribute is backed by explicit match rules and Spanning Tree Connectivity scoring. No probabilistic black-box hallucinations.</p>
+</div>
+<div class="idr-card">
+<div class="idr-card-icon">⚡</div>
+<h3>Anchor-Based Graph Building</h3>
+<p>Avoids Cartesian join blowouts on common identifiers by connecting groups via star-topology anchor edges (O(N) complexity instead of O(N²)).</p>
+</div>
+<div class="idr-card">
+<div class="idr-card-icon">🔄</div>
+<h3>Incremental Delta Upsert</h3>
+<p>Local Subgraph Stitching isolates only impacted clusters during incremental runs, updating 1.5M clusters in seconds without full historical scans.</p>
+</div>
+<div class="idr-card">
+<div class="idr-card-icon">🔑</div>
+<h3>Zero-Retype Credentials</h3>
+<p>Auto-detects active credentials from <code>~/.databrickscfg</code>, <code>~/.snowflake/connections.toml</code>, <code>~/.dbt/profiles.yml</code>, and Google Cloud ADC with 1-click connect.</p>
+</div>
+<div class="idr-card">
+<div class="idr-card-icon">🤖</div>
+<h3>AI Agent Ready (MCP)</h3>
+<p>Includes 17 FastMCP tools allowing Cursor, Claude Desktop, and Antigravity to autonomously profile schemas, simulate rule impact, and resolve Customer 360 records.</p>
+</div>
+</div>
 <hr/>
 <h2 id="comparison-in-warehouse-idr-vs-alternatives">📊 Comparison: In-Warehouse IDR vs. Alternatives</h2>
 <table>
@@ -745,14 +799,7 @@
 <a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a><span class="c1"># 2. Run the automated quickstart</span>
 <a href="#__codelineno-0-5" id="__codelineno-0-5" name="__codelineno-0-5"></a>idr<span class="w"> </span>quickstart
 </code></pre></div>
-<p>This single command:</p>
-<ol>
-<li>Synthesizes 10,000 multi-source customer records across Web, Store, Mobile, and Call Center.</li>
-<li>Injects cross-channel identifier overlaps (Email, Phone, Loyalty ID).</li>
-<li>Provisions schemas (<code>idr_meta</code>, <code>idr_work</code>, <code>idr_out</code>) and applies matching rules.</li>
-<li>Executes the 6-stage identity resolution pipeline.</li>
-<li>Materializes cluster memberships and golden customer profiles with survivorship logic.</li>
-</ol>
+<p>This single command synthesizes 10,000 multi-source customer records across Web, Store, Mobile, and Call Center, injects cross-channel identifier overlaps (Email, Phone, Loyalty ID), provisions schemas (<code>idr_meta</code>, <code>idr_work</code>, <code>idr_out</code>), applies matching rules, and materializes golden customer profiles with full survivorship logic.</p>
 <hr/>
 <h2 id="supported-warehouses-execution-matrix">🏗️ Supported Warehouses &amp; Execution Matrix</h2>
 <table>
@@ -769,7 +816,7 @@
 <tr>
 <td style="text-align: left;"><strong>DuckDB</strong></td>
 <td style="text-align: left;">Local file / In-memory</td>
-<td style="text-align: left;"><code>INSERT INTO</code></td>
+<td style="text-align: left;"><code>INSERT INTO</code> (Upsert)</td>
 <td style="text-align: left;">Single-node (up to 50M rows)</td>
 <td style="text-align: left;">Yes (Dev / Edge)</td>
 </tr>
