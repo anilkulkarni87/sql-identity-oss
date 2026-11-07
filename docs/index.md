@@ -4,6 +4,88 @@ hide:
   - toc
 ---
 
+<style>
+.idr-hero {
+  text-align: center;
+  padding: 3rem 1.5rem 2rem;
+  margin: 0.5rem 0 2rem;
+  background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.18) 0%, rgba(99, 102, 241, 0.08) 50%, transparent 100%);
+  border-radius: 1.25rem;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+.idr-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 9999px;
+  margin-bottom: 1.25rem;
+}
+.idr-hero-title {
+  font-size: 2.75rem !important;
+  font-weight: 800 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.03em !important;
+  margin: 0 0 1rem 0 !important;
+  color: #f8fafc !important;
+}
+.idr-gradient-text {
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.idr-hero-subtitle {
+  font-size: 1.15rem !important;
+  line-height: 1.6 !important;
+  max-width: 700px;
+  margin: 0 auto 1.75rem !important;
+  color: #94a3b8 !important;
+}
+.idr-hero-cta {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.idr-hero-cta .md-button {
+  margin: 0 !important;
+}
+.idr-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2.5rem;
+}
+.idr-stat-card {
+  text-align: center;
+  padding: 1.25rem 1rem;
+  background-color: rgba(22, 27, 34, 0.8);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 0.75rem;
+}
+.idr-stat-number {
+  font-size: 2.25rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #38bdf8;
+  font-family: var(--md-code-font, monospace);
+}
+.idr-stat-label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-top: 0.35rem;
+}
+</style>
+
 <div class="idr-hero">
   <div class="idr-hero-badge">
     ⚡ Warehouse-Native Identity Resolution v0.6.1 • Apache 2.0
@@ -17,10 +99,10 @@ hide:
     Pure SQL connected components, deterministic confidence scoring, and 17 FastMCP agent tools.
   </p>
   <div class="idr-hero-cta">
-    <a href="03-quickstart/" class="idr-btn-primary">Get Started in 60s →</a>
-    <a href="https://github.com/anilkulkarni87/sql-identity-oss" class="idr-btn-secondary" target="_blank">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-      GitHub (Apache 2.0)
+    <a href="03-quickstart/" class="md-button md-button--primary">Get Started in 60s →</a>
+    <a href="https://github.com/anilkulkarni87/sql-identity-oss" class="md-button" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px;"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+      View on GitHub
     </a>
   </div>
   <p align="center" style="margin: 0; display: flex; justify-content: center; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
@@ -52,37 +134,44 @@ hide:
 
 ## 🧩 Architectural Highlights
 
-<div class="idr-cards-grid">
-  <div class="idr-card">
-    <div class="idr-card-icon">🛡️</div>
-    <h3>Zero Data Egress</h3>
-    <p>All data stays entirely inside your warehouse security perimeter (DuckDB, Snowflake, BigQuery, Databricks). Fully compliant with HIPAA, GDPR, and CCPA.</p>
-  </div>
-  <div class="idr-card">
-    <div class="idr-card-icon">🎯</div>
-    <h3>Deterministic & Auditable</h3>
-    <p>Every edge, cluster, and golden attribute is backed by explicit match rules and Spanning Tree Connectivity scoring. No probabilistic black-box hallucinations.</p>
-  </div>
-  <div class="idr-card">
-    <div class="idr-card-icon">⚡</div>
-    <h3>Anchor-Based Graph Building</h3>
-    <p>Avoids Cartesian join blowouts on common identifiers by connecting groups via star-topology anchor edges (O(N) complexity instead of O(N²)).</p>
-  </div>
-  <div class="idr-card">
-    <div class="idr-card-icon">🔄</div>
-    <h3>Incremental Delta Upsert</h3>
-    <p>Local Subgraph Stitching isolates only impacted clusters during incremental runs, updating 1.5M clusters in seconds without full historical scans.</p>
-  </div>
-  <div class="idr-card">
-    <div class="idr-card-icon">🔑</div>
-    <h3>Zero-Retype Credentials</h3>
-    <p>Auto-detects active credentials from <code>~/.databrickscfg</code>, <code>~/.snowflake/connections.toml</code>, <code>~/.dbt/profiles.yml</code>, and Google Cloud ADC with 1-click connect.</p>
-  </div>
-  <div class="idr-card">
-    <div class="idr-card-icon">🤖</div>
-    <h3>AI Agent Ready (MCP)</h3>
-    <p>Includes 17 FastMCP tools allowing Cursor, Claude Desktop, and Antigravity to autonomously profile schemas, simulate rule impact, and resolve Customer 360 records.</p>
-  </div>
+<div class="grid cards" markdown>
+
+-   :material-shield-check:{ .lg .middle } __Zero Data Egress__
+
+    ---
+
+    All customer data stays entirely inside your warehouse security perimeter (DuckDB, Snowflake, BigQuery, Databricks). Fully compliant with HIPAA, GDPR, and CCPA.
+
+-   :material-target:{ .lg .middle } __Deterministic & Auditable__
+
+    ---
+
+    Every edge, cluster, and golden attribute is backed by explicit match rules and Spanning Tree Connectivity scoring. No probabilistic black-box hallucinations.
+
+-   :material-graphql:{ .lg .middle } __Anchor-Based Graph Building__
+
+    ---
+
+    Avoids Cartesian join blowouts on common identifiers by connecting groups via star-topology anchor edges (`O(N)` complexity instead of `O(N²)`).
+
+-   :material-sync:{ .lg .middle } __Incremental Delta Upsert__
+
+    ---
+
+    Local Subgraph Stitching isolates only impacted clusters during incremental runs, updating 1.5M clusters in seconds without full historical table scans.
+
+-   :material-key-chain:{ .lg .middle } __Zero-Retype Credentials__
+
+    ---
+
+    Auto-detects active credentials from `~/.databrickscfg`, `~/.snowflake/connections.toml`, `~/.dbt/profiles.yml`, and Google Cloud ADC with 1-click connect.
+
+-   :material-robot:{ .lg .middle } __AI Agent Ready (MCP)__
+
+    ---
+
+    Includes 17 FastMCP tools allowing Cursor, Claude Desktop, and Antigravity to autonomously profile schemas, simulate rule impact, and resolve Customer 360 records.
+
 </div>
 
 ---
