@@ -144,13 +144,22 @@ cluster_entities as (
             {% do case_parts.append("when source_id = '" ~ p.strip() ~ "' then " ~ loop.index) %}
         {% endfor %}
         {% set order_clause = "case " ~ (case_parts | join(' ')) ~ " else 999 end asc, record_updated_at desc" %}
+    {% elif rule and rule['strategy'] == 'FREQUENCY' %}
+        {# Frequency strategy: pick most frequent value in cluster, tie-broken by recency #}
+        {% set order_clause = "attr_freq desc, record_updated_at desc" %}
     {% endif %}
 
 , {{ attr_name }}_ranked as (
     select resolved_id, {{ attr_name }},
            row_number() over (partition by resolved_id order by {{ order_clause }}) as rn
-    from cluster_entities
-    where {{ attr_name }} is not null
+    from (
+        select resolved_id, source_id, {{ attr_name }}, record_updated_at
+               {% if rule and rule['strategy'] == 'FREQUENCY' %}
+               , count(*) over (partition by resolved_id, {{ attr_name }}) as attr_freq
+               {% endif %}
+        from cluster_entities
+        where {{ attr_name }} is not null
+    ) {{ attr_name }}_sub
 )
 {% endfor %}
 

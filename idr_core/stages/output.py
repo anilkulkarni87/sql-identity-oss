@@ -362,7 +362,8 @@ class OutputStage(BaseStage):
         # 5. Build Unified Profiles (Golden Record)
         try:
             builder = ProfileBuilder(self.adapter)
-            builder.build_profiles(self.run_id)
+            run_mode = self.config.run_mode if self.config else "FULL"
+            builder.build_profiles(self.run_id, run_mode=run_mode)
         except Exception as e:
             self.logger.warning(f"Profile generation failed: {e}", extra={"run_id": self.run_id})
             self._warnings.append(f"Profile generation failed: {str(e)}")

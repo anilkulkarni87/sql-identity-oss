@@ -21,12 +21,13 @@ class ProfileBuilder:
         self.dialect_name = adapter.dialect
         self.dialect = get_dialect_config(self.dialect_name)
 
-    def build_profiles(self, run_id: str) -> None:
+    def build_profiles(self, run_id: str, run_mode: str = "FULL") -> None:
         """
         Execute the profile building process.
 
         Args:
             run_id: Current run ID to tag outputs
+            run_mode: Execution mode ('FULL' or 'INCR')
         """
         # 1. Fetch metadata
         survivorship_rules = self.adapter.query(
@@ -41,9 +42,20 @@ class ProfileBuilder:
             print("No survivorship rules defined. Skipping profile generation.")
             return
 
+        is_incremental = (
+            run_mode == "INCR"
+            and self.adapter.table_exists("idr_out.golden_profiles")
+            and self.adapter.table_exists("idr_work.impacted_resolved_ids")
+        )
+
         # 2. Build the Attribute Staging CTE
-        # This creates a normalized view of (resolved_id, attribute_name, value, timestamp, priority)
-        staging_cte = self._build_staging_cte(survivorship_rules, attr_mappings, source_tables)
+        # In INCR mode, strictly filter staging to impacted cluster members
+        staging_cte = self._build_staging_cte(
+            survivorship_rules, attr_mappings, source_tables, is_incremental=is_incremental
+        )
+
+        if not staging_cte:
+            return
 
         # 3. Build the Pivoted Selection Logic
         # Map both table_fqn and table_id -> validated table_id so source_priority_list
@@ -58,37 +70,98 @@ class ProfileBuilder:
 
         # For each attribute, generate the specific aggregation SQL based on strategy
         selection_columns = []
+        attr_names = []
         for rule in survivorship_rules:
+            attr_name = validate_identifier(str(rule["attribute_name"]), "attribute_name")
+            attr_names.append(attr_name)
             col_sql = self._build_column_selection(rule, source_id_lookup=source_id_lookup)
             selection_columns.append(col_sql)
 
-        # 4. Execute final Create Table As Select (CTAS)
+        # 4. Execute final generation: Upsert in INCR mode, CTAS in FULL mode
         select_clause = ",\n    ".join(selection_columns)
+        all_cols = ["resolved_id", "run_id", "updated_at"] + attr_names
+        update_cols = ["run_id", "updated_at"] + attr_names
 
-        # Databricks Delta Lake requires timestampNtz feature enabled when projecting Parquet timestamps without timezone
-        tblproperties_clause = ""
-        if self.dialect_name == "databricks":
-            tblproperties_clause = "\n            TBLPROPERTIES ('delta.feature.timestampNtz' = 'supported')"
+        if is_incremental:
+            print("Incrementally updating Golden Profiles for impacted clusters...")
+            # Step A: Materialize delta profiles for impacted clusters only
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.golden_profiles_delta AS
+                WITH staging AS (
+                    {staging_cte}
+                )
+                SELECT
+                    resolved_id,
+                    '{run_id}' as run_id,
+                    {self.dialect["current_timestamp"]} as updated_at,
+                    {select_clause}
+                FROM staging
+                GROUP BY resolved_id
+            """)
 
-        final_sql = f"""
-            CREATE OR REPLACE TABLE idr_out.golden_profiles{tblproperties_clause} AS
-            WITH staging AS (
-                {staging_cte}
-            )
-            SELECT
-                resolved_id,
-                '{run_id}' as run_id,
-                {self.dialect["current_timestamp"]} as updated_at,
-                {select_clause}
-            FROM staging
-            GROUP BY resolved_id
-        """
+            # Step B: Upsert delta profiles into production table
+            if self.dialect_name in ("duckdb", "postgres"):
+                keys_sql = "resolved_id"
+                inserts_sql = ", ".join(all_cols)
+                updates_sql = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_cols])
+                upsert_sql = f"""
+                    INSERT INTO idr_out.golden_profiles ({inserts_sql})
+                    SELECT {inserts_sql} FROM idr_work.golden_profiles_delta
+                    ON CONFLICT ({keys_sql}) DO UPDATE SET
+                    {updates_sql}
+                """
+                self.adapter.execute(upsert_sql)
+            else:
+                join_cond = "T.resolved_id = S.resolved_id"
+                updates_sql = ", ".join([f"T.{col} = S.{col}" for col in update_cols])
+                inserts_sql = ", ".join(all_cols)
+                values_sql = ", ".join([f"S.{col}" for col in all_cols])
+                merge_sql = f"""
+                    MERGE INTO idr_out.golden_profiles T
+                    USING idr_work.golden_profiles_delta S
+                    ON {join_cond}
+                    WHEN MATCHED THEN
+                        UPDATE SET {updates_sql}
+                    WHEN NOT MATCHED THEN
+                        INSERT ({inserts_sql})
+                        VALUES ({values_sql})
+                """
+                self.adapter.execute(merge_sql)
 
-        print("Generating Golden Profiles...")
-        self.adapter.execute(final_sql)
-        print("✅ Golden Profiles generated.")
+            # Step C: Cleanup phantom clusters that dissolved / merged away
+            self.adapter.execute("""
+                DELETE FROM idr_out.golden_profiles
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM idr_out.identity_resolved_membership_current m
+                    WHERE m.resolved_id = idr_out.golden_profiles.resolved_id
+                )
+            """)
+            print("✅ Golden Profiles incrementally updated.")
+        else:
+            # Databricks Delta Lake requires timestampNtz feature enabled when projecting Parquet timestamps without timezone
+            tblproperties_clause = ""
+            if self.dialect_name == "databricks":
+                tblproperties_clause = "\n            TBLPROPERTIES ('delta.feature.timestampNtz' = 'supported')"
 
-    def _build_staging_cte(self, rules, mappings, sources) -> str:
+            final_sql = f"""
+                CREATE OR REPLACE TABLE idr_out.golden_profiles{tblproperties_clause} AS
+                WITH staging AS (
+                    {staging_cte}
+                )
+                SELECT
+                    resolved_id,
+                    '{run_id}' as run_id,
+                    {self.dialect["current_timestamp"]} as updated_at,
+                    {select_clause}
+                FROM staging
+                GROUP BY resolved_id
+            """
+
+            print("Generating Golden Profiles...")
+            self.adapter.execute(final_sql)
+            print("✅ Golden Profiles generated.")
+
+    def _build_staging_cte(self, rules, mappings, sources, is_incremental: bool = False) -> str:
         """
         Generates a massive UNION ALL CTE to fetch attribute values.
         """
@@ -155,6 +228,9 @@ class ProfileBuilder:
 
             cols_sql = ",\n                ".join(mapped_cols)
             recency_expr = f"src.{wm_col}" if wm_col else "NULL"
+            where_clause = ""
+            if is_incremental:
+                where_clause = "\n                WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)"
 
             unions.append(f"""
                 SELECT
@@ -165,6 +241,7 @@ class ProfileBuilder:
                 FROM {fqn} src
                 JOIN idr_out.identity_resolved_membership_current m
                   ON m.entity_key = CONCAT('{tid}:', CAST(({key_expr}) AS {self.dialect["string_type"]}))
+                {where_clause}
             """)
 
         return " UNION ALL ".join(unions)

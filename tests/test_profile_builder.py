@@ -277,3 +277,51 @@ class TestBuildStagingCte:
         ]
         result = duckdb_builder._build_staging_cte(rules, mappings, sources)
         assert "NULL AS recency_ts" in result
+
+
+# ============================================================
+# Incremental Golden Profile Upsert & Staging
+# ============================================================
+
+
+class TestIncrementalProfileBuilder:
+    """Tests for incremental golden profile building and local subgraph filtering."""
+
+    def test_incremental_staging_cte_filters_by_impacted_clusters(self, duckdb_builder):
+        rules = [{"attribute_name": "email", "strategy": "RECENCY"}]
+        mappings = [{"table_id": "crm", "attribute_name": "email", "attribute_expr": "email"}]
+        sources = [{
+            "table_id": "crm",
+            "table_fqn": "raw.crm",
+            "entity_key_expr": "id",
+            "watermark_column": "ts",
+        }]
+
+        full_sql = duckdb_builder._build_staging_cte(rules, mappings, sources, is_incremental=False)
+        assert "WHERE m.resolved_id IN" not in full_sql
+
+        incr_sql = duckdb_builder._build_staging_cte(rules, mappings, sources, is_incremental=True)
+        assert "WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)" in incr_sql
+
+    @pytest.mark.parametrize("dialect,expected_keyword", [
+        ("duckdb", "ON CONFLICT (resolved_id) DO UPDATE SET"),
+        ("snowflake", "MERGE INTO idr_out.golden_profiles T"),
+        ("databricks", "MERGE INTO idr_out.golden_profiles T"),
+        ("bigquery", "MERGE INTO idr_out.golden_profiles T"),
+    ])
+    def test_incremental_build_profiles_uses_upsert_and_cleans_phantoms(self, dialect, expected_keyword):
+        adapter = make_mock_adapter(dialect)
+        adapter.query.side_effect = [
+            [{"attribute_name": "email", "strategy": "RECENCY", "is_active": True}],  # rules
+            [{"table_id": "crm", "attribute_name": "email", "attribute_expr": "email"}],  # mappings
+            [{"table_id": "crm", "table_fqn": "raw.crm", "entity_key_expr": "id", "watermark_column": "ts", "is_active": True}],  # sources
+        ]
+        adapter.table_exists.return_value = True
+
+        builder = ProfileBuilder(adapter)
+        builder.build_profiles(run_id="run_incr_test", run_mode="INCR")
+
+        executed_sqls = "\n".join(call.args[0] for call in adapter.execute.call_args_list)
+        assert expected_keyword in executed_sqls
+        assert "golden_profiles_delta" in executed_sqls
+        assert "DELETE FROM idr_out.golden_profiles" in executed_sqls
