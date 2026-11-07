@@ -1,0 +1,54 @@
+# Smithery Model Context Protocol (MCP) Configuration
+# Registry: https://smithery.ai
+# Documentation: https://smithery.ai/docs/config
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      idrPlatform:
+        type: string
+        title: Target Warehouse Platform
+        description: Warehouse backend (duckdb, snowflake, bigquery, databricks)
+        default: duckdb
+      idrDbPath:
+        type: string
+        title: DuckDB Database Path
+        description: Local path to DuckDB database file
+        default: retail.duckdb
+      idrReadPii:
+        type: boolean
+        title: Allow PII Read Access
+        description: Expose unmasked raw emails and phone numbers to AI agents (default false masks PII)
+        default: false
+      databricksHost:
+        type: string
+        title: Databricks Server Hostname
+        description: Databricks workspace hostname (e.g. dbc-xxxx.cloud.databricks.com)
+      databricksToken:
+        type: string
+        title: Databricks Access Token
+        description: Databricks Personal Access Token
+      snowflakeAccount:
+        type: string
+        title: Snowflake Account Identifier
+        description: Snowflake account (e.g. xy12345.us-east-1)
+  commandFunction: |-
+    (config) => ({
+      command: 'uvx',
+      args: ['--from', 'sql-identity-resolution[all]', 'idr-mcp'],
+      env: {
+        IDR_PLATFORM: config.idrPlatform || 'duckdb',
+        IDR_DB_PATH: config.idrDbPath || 'retail.duckdb',
+        IDR_READ_PII: config.idrReadPii ? 'true' : 'false',
+        ...(config.databricksHost ? { DATABRICKS_HOST: config.databricksHost } : {}),
+        ...(config.databricksToken ? { DATABRICKS_TOKEN: config.databricksToken } : {}),
+        ...(config.snowflakeAccount ? { SNOWFLAKE_ACCOUNT: config.snowflakeAccount } : {})
+      }
+    })
+
+exampleConfig:
+  idrPlatform: "duckdb"
+  idrDbPath: "retail.duckdb"
+  idrReadPii: false
