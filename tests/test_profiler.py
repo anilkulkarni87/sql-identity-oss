@@ -150,3 +150,42 @@ def test_profiler_rejects_date_as_phone_and_excludes_non_identity_tables(profile
     assert "0 customer identifiers" in diag["reason"]
 
 
+def test_profiler_detects_phones_with_extensions_and_excludes_session_id(profiler_duckdb):
+    """Verify phones with extensions (e.g. 001-...x3389) are detected as phone, and session_id is not treated as device_id."""
+    profiler_duckdb.execute("""
+        CREATE TABLE ecommerce_test.orders_online (
+            order_id VARCHAR,
+            customer_id VARCHAR,
+            phone_number VARCHAR,
+            session_id VARCHAR,
+            total_amount DOUBLE
+        )
+    """)
+    profiler_duckdb.execute("""
+        INSERT INTO ecommerce_test.orders_online VALUES
+            ('ord_1', 'c1', '001-218-519-6001x3389', 'sess_abc123', 99.50),
+            ('ord_2', 'c2', '+1-695-993-1034x1316', 'sess_xyz789', 149.00),
+            ('ord_3', 'c3', '(791)366-9784x80184', 'sess_def456', 29.99),
+            ('ord_4', 'c4', '332.934.3378x56154', 'sess_ghi012', 45.00)
+    """)
+
+    profiler = IDRDataProfiler(profiler_duckdb)
+    result = profiler.profile_and_generate_config(["ecommerce_test.orders_online"], sample_size=10)
+
+    assert result["status"] == "SUCCESS"
+    source = result["suggested_config"]["sources"][0]
+    id_map = {i["type"]: i["expr"] for i in source["identifiers"]}
+
+    # customer_id is detected
+    assert id_map.get("customer_id") == "customer_id"
+
+    # phone_number with extensions MUST be detected as phone!
+    assert id_map.get("phone") == "phone_number"
+
+    # session_id MUST NOT be classified as device_id! It belongs in attributes!
+    assert id_map.get("device_id") is None
+    attr_names = {a["name"] for a in source["attributes"]}
+    assert "session_id" in attr_names
+
+
+

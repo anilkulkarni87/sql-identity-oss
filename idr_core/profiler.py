@@ -16,9 +16,11 @@ _EMAIL_RE = re.compile(
     r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
 )
 _PHONE_FORMATTED_RE = re.compile(
-    r"^(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}$"
+    r"^(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}(?:\s*(?:x|ext|ext\.)\s*\d+)?$",
+    re.IGNORECASE,
 )
-_PHONE_DIGITS_RE = re.compile(r"^\+?[0-9]{10,15}$")
+_PHONE_EXT_CLEAN_RE = re.compile(r"(?:x|ext|ext\.)\s*\d+$", re.IGNORECASE)
+_PHONE_DIGITS_RE = re.compile(r"^\+?[0-9]{7,15}$")
 _DATE_OR_TS_RE = re.compile(
     r"^(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2})"
 )
@@ -225,10 +227,14 @@ class IDRDataProfiler:
         # B. Phone Pattern Matching
         # Must NOT look like a date or year (e.g. 2026-03-31 or 20260331)
         phone_matches = 0
+        phone_name_hint = any(k in name for k in ("phone", "mobile", "cell", "tel", "contact_no", "msisdn"))
+
         for v in values:
             if _DATE_OR_TS_RE.match(v):
                 continue
-            clean = re.sub(r"[\s\-\(\)\.]", "", v)
+            # Strip phone extension if present (e.g. '001-218-519-6001x3389' or '(791)366-9784 ext 12')
+            base_v = _PHONE_EXT_CLEAN_RE.sub("", v).strip()
+            clean = re.sub(r"[\s\-\(\)\.]", "", base_v)
             # Filter out 8-digit dates (YYYYMMDD starting with 19 or 20)
             if len(clean) == 8 and (clean.startswith("19") or clean.startswith("20")):
                 continue
@@ -236,10 +242,9 @@ class IDRDataProfiler:
                 phone_matches += 1
 
         # Phone requires either semantic name clue or very high pattern match
-        phone_name_hint = any(k in name for k in ("phone", "mobile", "cell", "tel", "contact_no", "msisdn"))
-        if phone_name_hint and (phone_matches / n) >= 0.50:
+        if phone_name_hint and (phone_matches / n) >= 0.35:
             return "phone", round(phone_matches / n, 2)
-        elif (phone_matches / n) >= 0.85 and len(values[0]) >= 10:
+        elif (phone_matches / n) >= 0.75 and len(values[0]) >= 7:
             return "phone", round(phone_matches / n, 2)
 
         # C. Cross-table Customer Entity Reference (Foreign Key to Customer)
@@ -252,7 +257,8 @@ class IDRDataProfiler:
                 return "loyalty", 0.90
 
         # E. Device / Cookie / Anonymous Web Visitor ID
-        if any(k in name for k in ("device_id", "cookie_id", "idfa", "gaid", "visitor_id", "session_id")):
+        # Note: session_id is a transient event session, NOT a persistent device or person identifier.
+        if any(k in name for k in ("device_id", "cookie_id", "idfa", "gaid", "advertising_id", "visitor_id")):
             return "device_id", 0.85
 
         return None, 0.0
