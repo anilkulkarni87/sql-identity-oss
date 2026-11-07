@@ -72,6 +72,19 @@ def test_bigquery_confidence_score_uses_float64_and_concat():
     assert "CONCAT(" in executed_sqls
 
 
+@pytest.mark.parametrize("dialect", ["duckdb", "snowflake", "bigquery", "databricks"])
+def test_confidence_scoring_fidelity_and_corroboration_sql(dialect):
+    """Verify confidence scoring includes identifier fidelity and tree connectivity across all dialects."""
+    stage, adapter = make_output_stage(dialect)
+    stage.compute_confidence_scores()
+
+    executed_sqls = "\n".join(call.args[0] for call in adapter.execute.call_args_list)
+    assert "max_fidelity" in executed_sqls
+    assert "connectivity_ratio" in executed_sqls
+    assert "SINGLETON_NO_MATCH_REQUIRED" in executed_sqls
+    assert "High Confidence Corroboration" in executed_sqls
+
+
 @pytest.mark.parametrize(
     "dialect,expected_target",
     [
