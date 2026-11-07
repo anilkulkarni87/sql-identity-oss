@@ -654,10 +654,15 @@
   text-align: center;
   padding: 3rem 1.5rem 2rem;
   margin: 0.5rem 0 2rem;
-  background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.18) 0%, rgba(99, 102, 241, 0.08) 50%, transparent 100%);
+  background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.15) 0%, rgba(99, 102, 241, 0.08) 50%, transparent 100%);
   border-radius: 1.25rem;
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--md-default-fg-color--lightest, #e2e8f0);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+[data-md-color-scheme="slate"] .idr-hero {
+  background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.18) 0%, rgba(99, 102, 241, 0.08) 50%, transparent 100%);
+  border-color: rgba(56, 189, 248, 0.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 .idr-hero-badge {
   display: inline-flex;
@@ -666,11 +671,16 @@
   padding: 0.35rem 0.9rem;
   font-size: 0.82rem;
   font-weight: 600;
-  color: #38bdf8;
-  background-color: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #0284c7;
+  background-color: rgba(2, 132, 199, 0.08);
+  border: 1px solid rgba(2, 132, 199, 0.25);
   border-radius: 9999px;
   margin-bottom: 1.25rem;
+}
+[data-md-color-scheme="slate"] .idr-hero-badge {
+  color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
 }
 .idr-hero-title {
   font-size: 2.75rem !important;
@@ -678,9 +688,17 @@
   line-height: 1.15 !important;
   letter-spacing: -0.03em !important;
   margin: 0 0 1rem 0 !important;
+  color: var(--md-default-fg-color, #0f172a) !important;
+}
+[data-md-color-scheme="slate"] .idr-hero-title {
   color: #f8fafc !important;
 }
 .idr-gradient-text {
+  background: linear-gradient(135deg, #0284c7 0%, #6366f1 50%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+[data-md-color-scheme="slate"] .idr-gradient-text {
   background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -690,7 +708,7 @@
   line-height: 1.6 !important;
   max-width: 700px;
   margin: 0 auto 1.75rem !important;
-  color: #94a3b8 !important;
+  color: var(--md-default-fg-color--light, #64748b) !important;
 }
 .idr-hero-cta {
   display: flex;
@@ -712,21 +730,30 @@
 .idr-stat-card {
   text-align: center;
   padding: 1.25rem 1rem;
-  background-color: rgba(22, 27, 34, 0.8);
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  background-color: var(--md-default-bg-color, #ffffff);
+  border: 1px solid var(--md-default-fg-color--lightest, #e2e8f0);
   border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+[data-md-color-scheme="slate"] .idr-stat-card {
+  background-color: rgba(22, 27, 34, 0.8);
+  border-color: rgba(56, 189, 248, 0.2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 .idr-stat-number {
   font-size: 2.25rem;
   font-weight: 800;
   line-height: 1.1;
-  color: #38bdf8;
+  color: #0284c7;
   font-family: var(--md-code-font, monospace);
+}
+[data-md-color-scheme="slate"] .idr-stat-number {
+  color: #38bdf8;
 }
 .idr-stat-label {
   font-size: 0.82rem;
   font-weight: 500;
-  color: #94a3b8;
+  color: var(--md-default-fg-color--light, #64748b);
   margin-top: 0.35rem;
 }
 </style>
