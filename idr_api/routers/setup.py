@@ -141,6 +141,18 @@ async def get_status(current_user: Dict[str, Any] = Depends(get_current_user)):
     return {"connected": connected, "configured": configured, "platform": platform}
 
 
+@router.get("/discovered-connections")
+async def get_discovered_connections():
+    """Discover available warehouse connections from CLI configs, dbt profiles, env, and ADC."""
+    from idr_core.credential_discovery import discover_all_connections
+
+    try:
+        conns = discover_all_connections()
+    except Exception as e:
+        conns = []
+    return {"connections": conns}
+
+
 # Define config model locally since it's not in idr_core
 class IDRConfig(BaseModel):
     sources: List[Dict[str, Any]] = []

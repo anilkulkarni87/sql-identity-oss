@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
     Database, Settings as SettingsIcon, CheckCircle, XCircle,
     RefreshCw, Wand2, Shield, Server, FileCode, ArrowRight,
-    Layers, AlertCircle
+    Layers, AlertCircle, Sparkles, Loader2
 } from 'lucide-react'
 import { api } from '../api/client'
 import { formatSourceName } from '../utils/colors'
@@ -13,6 +13,7 @@ export default function Settings() {
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const [testing, setTesting] = useState(false)
+    const [connectingId, setConnectingId] = useState<string | null>(null)
     const [testMessage, setTestMessage] = useState<string | null>(null)
 
     // Setup status (connection & configured flags)
@@ -20,6 +21,29 @@ export default function Settings() {
         queryKey: ['setupStatus'],
         queryFn: () => api.getSetupStatus()
     })
+
+    // Auto-discovered local warehouse connections
+    const { data: discoveredData } = useQuery({
+        queryKey: ['discoveredConnections'],
+        queryFn: () => api.getDiscoveredConnections(),
+        staleTime: 60000,
+    })
+    const discoveredConnections = discoveredData?.connections || []
+
+    const handleQuickConnect = async (conn: any) => {
+        setConnectingId(conn.id)
+        setTestMessage(null)
+        try {
+            await api.setupConnect(conn.platform, conn.params || {})
+            await queryClient.invalidateQueries({ queryKey: ['setupStatus'] })
+            await queryClient.invalidateQueries({ queryKey: ['health'] })
+            setTestMessage(`Successfully connected to ${conn.name}!`)
+        } catch (err: any) {
+            setTestMessage(`Connection failed: ${err.message || String(err)}`)
+        } finally {
+            setConnectingId(null)
+        }
+    }
 
     // Active pipeline configuration (sources, rules, survivorship)
     const { data: config, isLoading: configLoading } = useQuery({
@@ -133,6 +157,51 @@ export default function Settings() {
                         </p>
                     </div>
                 </div>
+
+                {/* Auto-Discovered Connections in Environment */}
+                {discoveredConnections.length > 0 && (
+                    <div className="pt-3 border-t border-gray-700/60 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                                Detected Warehouse Connections ({discoveredConnections.length})
+                            </span>
+                            <span className="text-[11px] text-gray-500">1-click switch</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {discoveredConnections.map(conn => (
+                                <div
+                                    key={conn.id}
+                                    className="p-3 bg-gray-900/60 border border-gray-700/60 hover:border-blue-500/50 rounded-lg flex items-center justify-between gap-2 transition-all"
+                                >
+                                    <div className="min-w-0 space-y-0.5">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="text-xs font-semibold text-white truncate">{conn.name}</span>
+                                            <span className="text-[10px] uppercase font-mono px-1 py-0.5 rounded bg-gray-800 text-blue-300 border border-gray-700">
+                                                {conn.platform}
+                                            </span>
+                                        </div>
+                                        <p className="text-[11px] text-gray-400 truncate font-mono">{conn.description}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => handleQuickConnect(conn)}
+                                        disabled={connectingId !== null}
+                                        className="px-2.5 py-1 bg-blue-600/80 hover:bg-blue-600 disabled:opacity-50 text-white text-xs font-medium rounded transition-colors whitespace-nowrap flex items-center gap-1"
+                                    >
+                                        {connectingId === conn.id ? (
+                                            <>
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                                <span>Connecting...</span>
+                                            </>
+                                        ) : (
+                                            'Connect'
+                                        )}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {testMessage && (
                     <div className="p-3 bg-gray-900/80 rounded-lg border border-gray-700 text-xs text-gray-300 font-mono flex items-center gap-2">

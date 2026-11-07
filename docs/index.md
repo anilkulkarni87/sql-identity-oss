@@ -23,8 +23,23 @@ Unifying fragmented customer records across CRM, point-of-sale, e-commerce, mobi
 * **Deterministic & Fully Auditable**: Every edge, link, and cluster decision is documented with confidence scores, rule IDs, and full lineage. No probabilistic hallucinations.
 * **Anchor-Based Edge Building ($O(N)$ vs $O(N^2)$)**: Avoids Cartesian blowouts on common identifiers by connecting groups via star-topology anchor edges.
 * **Pure SQL Connected Components**: Distributed Label Propagation executes natively in SQL without requiring graph database infrastructure (Neo4j, AWS Neptune).
-* **AI-Ready with Model Context Protocol (MCP)**: Native MCP server exposing 17 tools for AI agents (Cursor, Claude Desktop, Antigravity) to inspect, configure, autonomously profile schemas, simulate rule risks, and resolve Customer 360 contexts.
-* **Rich Developer Ecosystem**: First-class Python CLI (`idr`), FastAPI REST service, Prometheus metrics, interactive React Web UI, and dbt package (`dbt_idr`).
+* **Frictionless Zero-Retype Setup**: Auto-detects existing local credentials from `~/.databrickscfg`, `~/.snowflake/config.toml`, `~/.dbt/profiles.yml`, and Google Cloud ADC.
+* **AI-Ready with Model Context Protocol (MCP)**: Native FastMCP server exposing 17 tools for AI agents (Cursor, Claude Desktop, Antigravity) to inspect, configure, autonomously profile schemas, simulate rule risks, and resolve Customer 360 contexts.
+* **Rich Developer Ecosystem**: First-class Python CLI (`idr`), FastAPI REST service, Prometheus metrics, interactive React Web UI, and native dbt package (`dbt_idr`).
+
+---
+
+## 📊 Comparison: In-Warehouse IDR vs. Alternatives
+
+| Capability | `sql-identity-oss` | SaaS CDPs (Segment / Hightouch) | Legacy MDM (Tamr / Informatica) | Ad-Hoc SQL JOINs |
+| :--- | :--- | :--- | :--- | :--- |
+| **Data Movement** | **Zero (In-Warehouse)** | High (Data synced to vendor cloud) | High (Data extracted to external clusters) | Zero |
+| **Cost / License** | **Free / Apache 2.0 (OSS)** | \$30k–\$150k+/yr | \$100k+/yr enterprise licenses | High engineering hours |
+| **Graph Resolution** | **Multi-hop Label Propagation** | Limited / Flat rules | ML black box | Fails on >2 hops (Join blowouts) |
+| **Auditability** | **100% Explainable SQL & Lineage** | Closed vendor black box | Statistical probabilities | Custom scripts |
+| **Survivorship** | **Dynamic (Recency, Priority, Mode)** | Basic / First seen | Complex custom rules | Manual CASE/COALESCE |
+| **dbt & SQL Native** | **Full dbt package (`dbt_idr`)** | No (Proprietary UI/APIs) | No (Custom pipelines) | Manual SQL |
+| **AI Agent Readiness** | **17 FastMCP Tools included** | Closed API | Closed API | None |
 
 ---
 
@@ -135,7 +150,7 @@ flowchart TD
     # packages.yml
     packages:
       - package: anilkulkarni87/dbt_idr
-        version: 0.6.0
+        version: 0.6.1
     ```
 
 ---

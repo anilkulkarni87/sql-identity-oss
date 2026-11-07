@@ -196,6 +196,18 @@ export const api = {
         platform: string | null
     }>('/setup/status'),
 
+    getDiscoveredConnections: () => fetchJson<{
+        connections: Array<{
+            id: string
+            source: string
+            platform: string
+            name: string
+            description: string
+            params: Record<string, string>
+            masked_summary?: string
+        }>
+    }>('/setup/discovered-connections'),
+
     getSetupConfig: () => fetchJson<{
         sources: Array<Record<string, unknown>>
         rules?: Array<Record<string, unknown>>

@@ -242,6 +242,15 @@ class TestConnectEndpoint:
         assert data["status"] == "connected"
         assert data["platform"] == "duckdb"
 
+    def test_discovered_connections_endpoint(self, client, monkeypatch):
+        monkeypatch.setenv("DATABRICKS_HOST", "dbc-test.cloud.databricks.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "dapi_test")
+        resp = client.get("/api/setup/discovered-connections")
+        assert resp.status_code == 200
+        conns = resp.json().get("connections", [])
+        assert isinstance(conns, list)
+        assert any(c["platform"] == "databricks" for c in conns)
+
 
 # ============================================================
 # Entity search validation

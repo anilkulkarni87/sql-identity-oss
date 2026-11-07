@@ -1,5 +1,5 @@
 name: 'dbt_idr'
-version: '0.5.0'
+version: '0.6.1'
 config-version: 2
 
 # Default profile - users override in their project
