@@ -31,3 +31,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git subtree push --prefix=dbt_idr https://x-access-token:${SYNC_PAT}@github.com/anilkulkarni87/dbt-idr.git main
+

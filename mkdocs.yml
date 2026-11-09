@@ -94,6 +94,8 @@ nav:
   - Supported Warehouses:
     - Platforms Overview: 06-platforms.md
     - Databricks Testing Guide: DATABRICKS_TESTING_GUIDE.md
+    - Snowflake Testing Guide: SNOWFLAKE_TESTING_GUIDE.md
+    - BigQuery Testing Guide: BIGQUERY_TESTING_GUIDE.md
     - Sizing & Hardware: 24-sizing.md
     - Scaling Strategies: 25-scaling.md
   - Configuration & Operations:

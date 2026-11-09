@@ -44,6 +44,9 @@ idr run --platform duckdb --db production.duckdb --mode FULL
 
 Enterprise cloud data warehouse with auto-scaling compute.
 
+!!! tip "Snowflake Testing & Walkthrough Guide"
+    Follow our step-by-step [Snowflake Testing Guide](SNOWFLAKE_TESTING_GUIDE.md) to test on a 30-day free trial with zero-install SQL sample data, zero-retype credential discovery, UI graph visualization, and FastMCP AI agent integration.
+
 ### Installation
 ```bash
 pip install "sql-identity-resolution[snowflake]"
@@ -89,6 +92,9 @@ idr run --platform snowflake --mode FULL
 
 Serverless, highly scalable SQL engine.
 
+!!! tip "BigQuery Testing & Walkthrough Guide"
+    Follow our step-by-step [BigQuery Testing Guide](BIGQUERY_TESTING_GUIDE.md) to test on the free BigQuery Sandbox with zero credit card required, automated ADC credential discovery, and BigQuery Studio SQL verification.
+
 ### Installation
 ```bash
 pip install "sql-identity-resolution[bigquery]"
@@ -130,6 +136,9 @@ idr run --platform bigquery --project $IDR_PROJECT --mode FULL
 ## 🧱 Databricks (Delta Lake / Unity Catalog)
 
 Distributed data lakehouse powered by Apache Spark and Delta Lake.
+
+!!! tip "Databricks Testing & Walkthrough Guide"
+    Follow our step-by-step [Databricks Testing Guide](DATABRICKS_TESTING_GUIDE.md) for running on Databricks Free Tier (Community Edition or 14-Day Cloud Trial).
 
 ### Installation
 ```bash
