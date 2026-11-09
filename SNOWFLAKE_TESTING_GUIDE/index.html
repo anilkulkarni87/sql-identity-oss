@@ -1,0 +1,2385 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Production-grade deterministic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks">
+      
+      
+      
+        <link rel="canonical" href="https://anilkulkarni87.github.io/sql-identity-oss/SNOWFLAKE_TESTING_GUIDE/">
+      
+      
+        <link rel="prev" href="../DATABRICKS_TESTING_GUIDE/">
+      
+      
+        <link rel="next" href="../BIGQUERY_TESTING_GUIDE/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.47">
+    
+    
+      
+        <title>Snowflake Testing Guide - SQL Identity Resolution</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.6f8fc17f.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#snowflake-free-trial-testing-walkthrough-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="SQL Identity Resolution" class="md-header__button md-logo" aria-label="SQL Identity Resolution" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            SQL Identity Resolution
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Snowflake Testing Guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sql-identity-oss
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../01-overview/" class="md-tabs__link">
+          
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../19-matching-algorithm/" class="md-tabs__link">
+          
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../06-platforms/" class="md-tabs__link">
+          
+  
+  Supported Warehouses
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../04-configuration/" class="md-tabs__link">
+          
+  
+  Configuration & Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../05-cli/" class="md-tabs__link">
+          
+  
+  Interfaces & Tooling
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../13-scale-testing/" class="md-tabs__link">
+          
+  
+  Testing & Benchmarks
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="SQL Identity Resolution" class="md-nav__button md-logo" aria-label="SQL Identity Resolution" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    SQL Identity Resolution
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sql-identity-oss
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting Started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-quickstart/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Quickstart
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-installation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../18-architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../21-how-it-works/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How It Works
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../27-distribution/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Distribution & Deployment
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Core Concepts
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Core Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../19-matching-algorithm/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Matching Algorithm
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../20-data-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Data Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-schema/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Schema & DDL Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Pipeline Stages
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Supported Warehouses
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Supported Warehouses
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-platforms/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Platforms Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DATABRICKS_TESTING_GUIDE/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Databricks Testing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Snowflake Testing Guide
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Snowflake Testing Guide
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-testing-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      🗺️ The Testing Journey
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-1-prerequisites-connection-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      📋 Part 1: Prerequisites &amp; Connection Setup
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="📋 Part 1: Prerequisites & Connection Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-core-connection-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      A. Core Connection Parameters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-zero-retype-credential-auto-discovery-new-in-v061" class="md-nav__link">
+    <span class="md-ellipsis">
+      B. Zero-Retype Credential Auto-Discovery (New in v0.6.1)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-2-ingest-test-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      📦 Part 2: Ingest Test Data
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="📦 Part 2: Ingest Test Data">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-generate-parquet-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Generate Parquet Dataset
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-load-parquet-into-snowflake-via-snowsql-or-internal-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Load Parquet into Snowflake via SnowSQL or Internal Stage
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-3-testing-via-the-interactive-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      🖥️ Part 3: Testing via the Interactive Web UI
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🖥️ Part 3: Testing via the Interactive Web UI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-launch-backend-api-react-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Launch Backend API &amp; React UI
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-step-1-connect-to-snowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Step 1: Connect to Snowflake
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-step-2-select-sources-entity-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Step 2: Select Sources &amp; Entity Keys
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-step-3-map-identifiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Step 3: Map Identifiers
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-step-4-configure-deterministic-match-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Step 4: Configure Deterministic Match Rules
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-step-5-configure-golden-profile-survivorship" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Step 5: Configure Golden Profile Survivorship
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-step-6-execute-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. Step 6: Execute Resolution
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-inspect-the-entity-graph-in-explorer" class="md-nav__link">
+    <span class="md-ellipsis">
+      8. Inspect the Entity Graph in /explorer
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-4-testing-autonomous-ai-mcp-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      🤖 Part 4: Testing Autonomous AI MCP Tools
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🤖 Part 4: Testing Autonomous AI MCP Tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-start-the-fastmcp-server-for-snowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Start the FastMCP Server for Snowflake
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-example-agent-prompts-in-cursor-or-claude-desktop" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Example Agent Prompts (in Cursor or Claude Desktop)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-5-inspect-results-directly-in-snowsight-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      🔍 Part 5: Inspect Results Directly in Snowsight SQL
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-6-cleanup-teardown" class="md-nav__link">
+    <span class="md-ellipsis">
+      🧹 Part 6: Cleanup &amp; Teardown
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BIGQUERY_TESTING_GUIDE/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    BigQuery Testing Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../24-sizing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Sizing & Hardware
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../25-scaling/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Scaling Strategies
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Configuration & Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Configuration & Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../26-production-hardening/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Production Hardening
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../16-security/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Security & Governance
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../15-ci-cd/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CI/CD Automation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../14-troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Interfaces & Tooling
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Interfaces & Tooling
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-cli/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CLI Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-ui/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Web UI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    REST API & Metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-mcp/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MCP Server (AI Agents)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../12-dbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dbt Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Testing & Benchmarks
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Testing & Benchmarks
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../13-scale-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Scale Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../17-e2e-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    End-to-End Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../22-metrics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Metrics Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../23-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-testing-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      🗺️ The Testing Journey
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-1-prerequisites-connection-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      📋 Part 1: Prerequisites &amp; Connection Setup
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="📋 Part 1: Prerequisites & Connection Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-core-connection-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      A. Core Connection Parameters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-zero-retype-credential-auto-discovery-new-in-v061" class="md-nav__link">
+    <span class="md-ellipsis">
+      B. Zero-Retype Credential Auto-Discovery (New in v0.6.1)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-2-ingest-test-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      📦 Part 2: Ingest Test Data
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="📦 Part 2: Ingest Test Data">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-generate-parquet-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Generate Parquet Dataset
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-load-parquet-into-snowflake-via-snowsql-or-internal-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Load Parquet into Snowflake via SnowSQL or Internal Stage
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-3-testing-via-the-interactive-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      🖥️ Part 3: Testing via the Interactive Web UI
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🖥️ Part 3: Testing via the Interactive Web UI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-launch-backend-api-react-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Launch Backend API &amp; React UI
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-step-1-connect-to-snowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Step 1: Connect to Snowflake
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-step-2-select-sources-entity-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Step 2: Select Sources &amp; Entity Keys
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-step-3-map-identifiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Step 3: Map Identifiers
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-step-4-configure-deterministic-match-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Step 4: Configure Deterministic Match Rules
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-step-5-configure-golden-profile-survivorship" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Step 5: Configure Golden Profile Survivorship
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-step-6-execute-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. Step 6: Execute Resolution
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-inspect-the-entity-graph-in-explorer" class="md-nav__link">
+    <span class="md-ellipsis">
+      8. Inspect the Entity Graph in /explorer
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-4-testing-autonomous-ai-mcp-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      🤖 Part 4: Testing Autonomous AI MCP Tools
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🤖 Part 4: Testing Autonomous AI MCP Tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-start-the-fastmcp-server-for-snowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Start the FastMCP Server for Snowflake
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-example-agent-prompts-in-cursor-or-claude-desktop" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Example Agent Prompts (in Cursor or Claude Desktop)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-5-inspect-results-directly-in-snowsight-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      🔍 Part 5: Inspect Results Directly in Snowsight SQL
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-6-cleanup-teardown" class="md-nav__link">
+    <span class="md-ellipsis">
+      🧹 Part 6: Cleanup &amp; Teardown
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="snowflake-free-trial-testing-walkthrough-guide">Snowflake Free Trial Testing &amp; Walkthrough Guide</h1>
+<p>This comprehensive, step-by-step walkthrough is designed for testing <strong>SQL Identity Resolution (<code>v0.6.1</code>)</strong> on <strong>Snowflake</strong> using either a <strong>Snowflake 30-Day Free Trial</strong> ($400 free credit, no credit card required) or an existing enterprise Snowflake account.</p>
+<div class="admonition tip">
+<p class="admonition-title">Quick Start with Snowflake Free Trial</p>
+<p>You can spin up a free trial in 2 minutes at <a href="https://signup.snowflake.com/">signup.snowflake.com</a>. Select <strong>Standard</strong> or <strong>Enterprise</strong> edition in any cloud region (AWS, Azure, or GCP). A default <code>COMPUTE_WH</code> warehouse is automatically provisioned.</p>
+</div>
+<hr />
+<h2 id="the-testing-journey">🗺️ The Testing Journey</h2>
+<div class="grid cards">
+<ul>
+<li>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 13c-2.17 0-4.07 1.16-5.12 2.89-.6.07-1.23.11-1.88.11-4.42 0-8-1.79-8-4V9c0 2.21 3.58 4 8 4s8-1.79 8-4v3c0 .36-.1.71-.28 1.05C19.5 13 19.24 13 19 13m-7-2c4.42 0 8-1.79 8-4s-3.58-4-8-4-8 1.79-8 4 3.58 4 8 4m1.1 6.96c-.36.04-.73.04-1.1.04-4.42 0-8-1.79-8-4v3c0 2.21 3.58 4 8 4 .46 0 .9 0 1.33-.06A6 6 0 0 1 13 19c0-.36.04-.7.1-1.04M19 15l-3 3h2v4h2v-4h2z"/></svg></span> <strong>1. Ingest Test Data</strong></p>
+<hr />
+<p>Choose between real synthetic parquet files from <code>Ecommerce_synthetic</code> or zero-install pure SQL generation in Snowsight.</p>
+<p><a href="#part-2-ingest-test-data"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Ingestion Options</a></p>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 16V4H3v12zm0-14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-7v2h2v2H8v-2h2v-2H3a2 2 0 0 1-2-2V4c0-1.11.89-2 2-2zM5 6h9v5H5zm10 0h4v2h-4zm4 3v5h-4V9zM5 12h4v2H5zm5 0h4v2h-4z"/></svg></span> <strong>2. Interactive Web UI</strong></p>
+<hr />
+<p>Connect via 1-Click Zero-Retype discovery, walk through the 6-Step Setup Wizard (<code>/setup</code>), and visually explore the Golden Profile graph in <code>/explorer</code>.</p>
+<p><a href="#part-3-testing-via-the-interactive-web-ui"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> UI Walkthrough</a></p>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 0 0 5 15.5 2.5 2.5 0 0 0 7.5 18a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0 2.5-2.5 2.5 2.5 0 0 0-2.5-2.5"/></svg></span> <strong>3. Autonomous AI MCP Tools</strong></p>
+<hr />
+<p>Run <code>discover_and_suggest_rules</code>, <code>simulate_rule_impact</code>, and <code>resolve_customer_360</code> from Cursor, Claude Desktop, or Antigravity via FastMCP.</p>
+<p><a href="#part-4-testing-autonomous-ai-mcp-tools"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Agentic Tools</a></p>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 9a3 3 0 0 1 3 3 3 3 0 0 1-3 3 3 3 0 0 1-3-3 3 3 0 0 1 3-3m5.86 10.31C16.23 21.22 14.28 22.45 12 23c-2.56-.61-4.7-2.07-6.42-4.37C3.86 16.34 3 13.8 3 11V5l9-4 9 4v6c0 2.39-.64 4.61-1.92 6.67l-2.91-2.91c.52-.79.83-1.76.83-2.76a5 5 0 0 0-5-5 5 5 0 0 0-5 5 5 5 0 0 0 5 5c1 0 1.97-.31 2.76-.83z"/></svg></span> <strong>4. Snowsight SQL Verification</strong></p>
+<hr />
+<p>Inspect final Golden Customer Profiles, Spanning Tree confidence scores, and cluster memberships directly in Snowflake SQL.</p>
+<p><a href="#part-5-inspect-results-directly-in-snowsight-sql"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> SQL Queries</a></p>
+</li>
+</ul>
+</div>
+<hr />
+<h2 id="part-1-prerequisites-connection-setup">📋 Part 1: Prerequisites &amp; Connection Setup</h2>
+<h3 id="a-core-connection-parameters">A. Core Connection Parameters</h3>
+<p>Retrieve your Snowflake connection details from the Snowsight UI or account welcome email:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Where to Find in Snowflake / Snowsight</th>
+<th style="text-align: left;">Example Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong><code>SNOWFLAKE_ACCOUNT</code></strong></td>
+<td style="text-align: left;">Locator/Org</td>
+<td style="text-align: left;">Lower-left user profile $\rightarrow$ <strong>Account</strong> $\rightarrow$ <strong>Copy Account Identifier</strong> (format: <code>orgname-accountname</code> or <code>xy12345.us-east-1</code>)</td>
+<td style="text-align: left;"><code>xy12345.us-east-1</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><code>SNOWFLAKE_USER</code></strong></td>
+<td style="text-align: left;">Username</td>
+<td style="text-align: left;">Your Snowflake login name</td>
+<td style="text-align: left;"><code>DEMO_USER</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><code>SNOWFLAKE_PASSWORD</code></strong></td>
+<td style="text-align: left;">Secret</td>
+<td style="text-align: left;">Your Snowflake login password</td>
+<td style="text-align: left;"><code>YourStrongPassword123!</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><code>SNOWFLAKE_WAREHOUSE</code></strong></td>
+<td style="text-align: left;">Compute</td>
+<td style="text-align: left;"><strong>Admin</strong> $\rightarrow$ <strong>Warehouses</strong></td>
+<td style="text-align: left;"><code>COMPUTE_WH</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><code>SNOWFLAKE_DATABASE</code></strong></td>
+<td style="text-align: left;">Database</td>
+<td style="text-align: left;"><strong>Data</strong> $\rightarrow$ <strong>Databases</strong></td>
+<td style="text-align: left;"><code>DEMO_DB</code> (or <code>CUSTOMER_IDR</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><code>SNOWFLAKE_SCHEMA</code></strong></td>
+<td style="text-align: left;">Schema</td>
+<td style="text-align: left;">Target schema under the database</td>
+<td style="text-align: left;"><code>PUBLIC</code> (or <code>ECOMMERCE_DEMO</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><code>SNOWFLAKE_ROLE</code></strong></td>
+<td style="text-align: left;">Role</td>
+<td style="text-align: left;">Default role (optional, defaults to primary role)</td>
+<td style="text-align: left;"><code>ACCOUNTADMIN</code> or <code>SYSADMIN</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="b-zero-retype-credential-auto-discovery-new-in-v061">B. Zero-Retype Credential Auto-Discovery (New in v0.6.1)</h3>
+<p>SQL Identity Resolution automatically detects existing Snowflake credentials on your local machine:
+- <strong>Snowflake CLI</strong>: <code>~/.snowflake/connections.toml</code> or <code>~/.snowflake/config.toml</code>
+- <strong>dbt Profiles</strong>: <code>~/.dbt/profiles.yml</code> or <code>./profiles.yml</code>
+- <strong>Environment Variables</strong>: <code>SNOWFLAKE_ACCOUNT</code>, <code>SNOWFLAKE_USER</code>, <code>SNOWFLAKE_PASSWORD</code>, <code>SNOWFLAKE_WAREHOUSE</code>, <code>SNOWFLAKE_DATABASE</code></p>
+<p>If you use <code>~/.snowflake/connections.toml</code>, ensure an entry exists:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[demo]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">account</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"xy12345.us-east-1"</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"DEMO_USER"</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">password</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"YourStrongPassword123!"</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">warehouse</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"COMPUTE_WH"</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">database</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"DEMO_DB"</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"PUBLIC"</span>
+</code></pre></div>
+The IDR Setup Wizard (<code>http://localhost:5173/setup</code>) will display a <strong>"Discovered Local Credentials"</strong> card with a <strong>1-Click Connect</strong> button.</p>
+<hr />
+<h2 id="part-2-ingest-test-data">📦 Part 2: Ingest Test Data</h2>
+<p>You have two convenient options for loading sample retail data into Snowflake:</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Option A: Zero-Install Pure SQL Generation (Recommended for Quick Testing)</label><label for="__tabbed_1_2">Option B: Upload Synthetic Parquet (<code>Ecommerce_synthetic</code>)</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>No local files or uploads required! Paste this SQL script directly into a <strong>Snowsight Worksheet</strong> (<code>Projects</code> $\rightarrow$ <code>Worksheets</code> $\rightarrow$ <code>+ SQL Worksheet</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">-- 1. Setup Context</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">USE</span><span class="w"> </span><span class="n">WAREHOUSE</span><span class="w"> </span><span class="n">COMPUTE_WH</span><span class="p">;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">DATABASE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">USE</span><span class="w"> </span><span class="k">DATABASE</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">ECOMMERCE_DEMO</span><span class="p">;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">USE</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="n">ECOMMERCE_DEMO</span><span class="p">;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1">-- 2. CRM Customers (Primary CRM record)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="p">.</span><span class="n">CUSTOMERS</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="n">customer_id</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="n">first_name</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">100</span><span class="p">),</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="n">last_name</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">100</span><span class="p">),</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="n">email</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">255</span><span class="p">),</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="n">phone</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="n">created_at</span><span class="w"> </span><span class="n">TIMESTAMP_NTZ</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="k">CURRENT_TIMESTAMP</span><span class="p">()</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="p">);</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="p">.</span><span class="n">CUSTOMERS</span><span class="w"> </span><span class="p">(</span><span class="n">customer_id</span><span class="p">,</span><span class="w"> </span><span class="n">first_name</span><span class="p">,</span><span class="w"> </span><span class="n">last_name</span><span class="p">,</span><span class="w"> </span><span class="n">email</span><span class="p">,</span><span class="w"> </span><span class="n">phone</span><span class="p">)</span><span class="w"> </span><span class="k">VALUES</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">    </span><span class="p">(</span><span class="s1">'CRM_001'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Alice'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Smith'</span><span class="p">,</span><span class="w"> </span><span class="s1">'alice.smith@example.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0101'</span><span class="p">),</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">    </span><span class="p">(</span><span class="s1">'CRM_002'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Robert'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Taylor'</span><span class="p">,</span><span class="w"> </span><span class="s1">'bob.taylor@work.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0102'</span><span class="p">),</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="w">    </span><span class="p">(</span><span class="s1">'CRM_003'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Charlie'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Davis'</span><span class="p">,</span><span class="w"> </span><span class="s1">'charlie.d@gmail.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0103'</span><span class="p">),</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="w">    </span><span class="p">(</span><span class="s1">'CRM_004'</span><span class="p">,</span><span class="w"> </span><span class="s1">'David'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Miller'</span><span class="p">,</span><span class="w"> </span><span class="s1">'david.miller@example.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0104'</span><span class="p">),</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">    </span><span class="p">(</span><span class="s1">'CRM_005'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Eva'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Wilson'</span><span class="p">,</span><span class="w"> </span><span class="s1">'eva.wilson@corp.org'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0105'</span><span class="p">);</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1">-- 3. In-Store Point of Sale (POS Accounts - shares phone &amp; alternate emails)</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="p">.</span><span class="n">INSTORE_ACCOUNTS</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="w">    </span><span class="n">instore_account_id</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="w">    </span><span class="n">phone_number</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="w">    </span><span class="n">alt_email</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">255</span><span class="p">),</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="w">    </span><span class="n">registered_store</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="w">    </span><span class="n">created_at</span><span class="w"> </span><span class="n">TIMESTAMP_NTZ</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="k">CURRENT_TIMESTAMP</span><span class="p">()</span>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="p">);</span>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="p">.</span><span class="n">INSTORE_ACCOUNTS</span><span class="w"> </span><span class="p">(</span><span class="n">instore_account_id</span><span class="p">,</span><span class="w"> </span><span class="n">phone_number</span><span class="p">,</span><span class="w"> </span><span class="n">alt_email</span><span class="p">,</span><span class="w"> </span><span class="n">registered_store</span><span class="p">)</span><span class="w"> </span><span class="k">VALUES</span>
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a><span class="w">    </span><span class="p">(</span><span class="s1">'POS_901'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0101'</span><span class="p">,</span><span class="w"> </span><span class="s1">'asmith_home@gmail.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Store_Chicago_01'</span><span class="p">),</span><span class="w">  </span><span class="c1">-- Matches Alice via phone</span>
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a><span class="w">    </span><span class="p">(</span><span class="s1">'POS_902'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0102'</span><span class="p">,</span><span class="w"> </span><span class="s1">'bob.personal@gmail.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Store_Austin_02'</span><span class="p">),</span><span class="w">   </span><span class="c1">-- Matches Bob via phone</span>
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a><span class="w">    </span><span class="p">(</span><span class="s1">'POS_903'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-9999'</span><span class="p">,</span><span class="w"> </span><span class="s1">'unknown.shopper@retail.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Store_NYC_01'</span><span class="p">);</span>
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a><span class="c1">-- 4. Loyalty Rewards Program (Shares alternate email &amp; loyalty ID)</span>
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="p">.</span><span class="n">LOYALTY_MEMBERS</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a><span class="w">    </span><span class="n">loyalty_id</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a><span class="w">    </span><span class="n">contact_email</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">255</span><span class="p">),</span>
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a><span class="w">    </span><span class="n">tier</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a><span class="w">    </span><span class="n">points_balance</span><span class="w"> </span><span class="nb">NUMBER</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">),</span>
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a><span class="w">    </span><span class="n">created_at</span><span class="w"> </span><span class="n">TIMESTAMP_NTZ</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="k">CURRENT_TIMESTAMP</span><span class="p">()</span>
+<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a><span class="p">);</span>
+<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a>
+<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="p">.</span><span class="n">LOYALTY_MEMBERS</span><span class="w"> </span><span class="p">(</span><span class="n">loyalty_id</span><span class="p">,</span><span class="w"> </span><span class="n">contact_email</span><span class="p">,</span><span class="w"> </span><span class="n">tier</span><span class="p">,</span><span class="w"> </span><span class="n">points_balance</span><span class="p">)</span><span class="w"> </span><span class="k">VALUES</span>
+<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a><span class="w">    </span><span class="p">(</span><span class="s1">'LOYALTY_A1'</span><span class="p">,</span><span class="w"> </span><span class="s1">'asmith_home@gmail.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Platinum'</span><span class="p">,</span><span class="w"> </span><span class="mi">12450</span><span class="p">),</span><span class="w">  </span><span class="c1">-- Bridges Alice's in-store account via email</span>
+<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a><span class="w">    </span><span class="p">(</span><span class="s1">'LOYALTY_B2'</span><span class="p">,</span><span class="w"> </span><span class="s1">'bob.taylor@work.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Gold'</span><span class="p">,</span><span class="w"> </span><span class="mi">8200</span><span class="p">),</span><span class="w">         </span><span class="c1">-- Bridges Bob's CRM account via email</span>
+<a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a><span class="w">    </span><span class="p">(</span><span class="s1">'LOYALTY_C3'</span><span class="p">,</span><span class="w"> </span><span class="s1">'charlie.d@gmail.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Silver'</span><span class="p">,</span><span class="w"> </span><span class="mi">3100</span><span class="p">);</span><span class="w">       </span><span class="c1">-- Bridges Charlie's CRM account via email</span>
+<a id="__codelineno-1-52" name="__codelineno-1-52" href="#__codelineno-1-52"></a>
+<a id="__codelineno-1-53" name="__codelineno-1-53" href="#__codelineno-1-53"></a><span class="c1">-- 5. E-Commerce Orders</span>
+<a id="__codelineno-1-54" name="__codelineno-1-54" href="#__codelineno-1-54"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="p">.</span><span class="n">ORDERS_ONLINE</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-1-55" name="__codelineno-1-55" href="#__codelineno-1-55"></a><span class="w">    </span><span class="n">order_id</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-56" name="__codelineno-1-56" href="#__codelineno-1-56"></a><span class="w">    </span><span class="n">customer_email</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">255</span><span class="p">),</span>
+<a id="__codelineno-1-57" name="__codelineno-1-57" href="#__codelineno-1-57"></a><span class="w">    </span><span class="n">customer_phone</span><span class="w"> </span><span class="nb">VARCHAR</span><span class="p">(</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-58" name="__codelineno-1-58" href="#__codelineno-1-58"></a><span class="w">    </span><span class="n">order_total</span><span class="w"> </span><span class="nb">NUMBER</span><span class="p">(</span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">),</span>
+<a id="__codelineno-1-59" name="__codelineno-1-59" href="#__codelineno-1-59"></a><span class="w">    </span><span class="n">order_date</span><span class="w"> </span><span class="n">TIMESTAMP_NTZ</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="k">CURRENT_TIMESTAMP</span><span class="p">()</span>
+<a id="__codelineno-1-60" name="__codelineno-1-60" href="#__codelineno-1-60"></a><span class="p">);</span>
+<a id="__codelineno-1-61" name="__codelineno-1-61" href="#__codelineno-1-61"></a>
+<a id="__codelineno-1-62" name="__codelineno-1-62" href="#__codelineno-1-62"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="p">.</span><span class="n">ORDERS_ONLINE</span><span class="w"> </span><span class="p">(</span><span class="n">order_id</span><span class="p">,</span><span class="w"> </span><span class="n">customer_email</span><span class="p">,</span><span class="w"> </span><span class="n">customer_phone</span><span class="p">,</span><span class="w"> </span><span class="n">order_total</span><span class="p">)</span><span class="w"> </span><span class="k">VALUES</span>
+<a id="__codelineno-1-63" name="__codelineno-1-63" href="#__codelineno-1-63"></a><span class="w">    </span><span class="p">(</span><span class="s1">'ORD_8801'</span><span class="p">,</span><span class="w"> </span><span class="s1">'alice.smith@example.com'</span><span class="p">,</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">189</span><span class="p">.</span><span class="mi">50</span><span class="p">),</span>
+<a id="__codelineno-1-64" name="__codelineno-1-64" href="#__codelineno-1-64"></a><span class="w">    </span><span class="p">(</span><span class="s1">'ORD_8802'</span><span class="p">,</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0102'</span><span class="p">,</span><span class="w"> </span><span class="mi">450</span><span class="p">.</span><span class="mi">00</span><span class="p">),</span>
+<a id="__codelineno-1-65" name="__codelineno-1-65" href="#__codelineno-1-65"></a><span class="w">    </span><span class="p">(</span><span class="s1">'ORD_8803'</span><span class="p">,</span><span class="w"> </span><span class="s1">'charlie.d@gmail.com'</span><span class="p">,</span><span class="w"> </span><span class="s1">'+1-555-0103'</span><span class="p">,</span><span class="w"> </span><span class="mi">75</span><span class="p">.</span><span class="mi">25</span><span class="p">);</span>
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<p>If you have the sibling repository <a href="https://github.com/anilkulkarni87/ecommerce_synthetic"><code>Ecommerce_synthetic</code></a> cloned locally:</p>
+<h4 id="1-generate-parquet-dataset">1. Generate Parquet Dataset</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">cd</span><span class="w"> </span>/path/to/Ecommerce_synthetic
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ecommerce-synth<span class="w"> </span>generate<span class="w"> </span>--tier<span class="w"> </span>small<span class="w"> </span>--output<span class="w"> </span>./output/demo_small<span class="w"> </span>--seed<span class="w"> </span><span class="m">42</span>
+</code></pre></div>
+<h4 id="2-load-parquet-into-snowflake-via-snowsql-or-internal-stage">2. Load Parquet into Snowflake via SnowSQL or Internal Stage</h4>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">USE</span><span class="w"> </span><span class="k">DATABASE</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">;</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">USE</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="n">ECOMMERCE_DEMO</span><span class="p">;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1">-- Create file format for Parquet</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="n">FILE</span><span class="w"> </span><span class="n">FORMAT</span><span class="w"> </span><span class="n">PARQUET_FORMAT</span><span class="w"> </span><span class="k">TYPE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'PARQUET'</span><span class="p">;</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1">-- Create temporary stage</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="n">STAGE</span><span class="w"> </span><span class="n">IDR_DATA_STAGE</span><span class="w"> </span><span class="n">FILE_FORMAT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">PARQUET_FORMAT</span><span class="p">;</span>
+</code></pre></div>
+Upload files using SnowSQL CLI:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>snowsql<span class="w"> </span>-a<span class="w"> </span>xy12345.us-east-1<span class="w"> </span>-u<span class="w"> </span>DEMO_USER<span class="w"> </span>-d<span class="w"> </span>DEMO_DB<span class="w"> </span>-s<span class="w"> </span>ECOMMERCE_DEMO<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-q<span class="w"> </span><span class="s2">"PUT file://./output/demo_small/customers.parquet @IDR_DATA_STAGE AUTO_COMPRESS=TRUE;"</span>
+</code></pre></div>
+And create table directly via <code>INFER_SCHEMA</code>:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">CUSTOMERS</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="k">USING</span><span class="w"> </span><span class="k">TEMPLATE</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="n">ARRAY_AGG</span><span class="p">(</span><span class="n">OBJECT_CONSTRUCT</span><span class="p">(</span><span class="o">*</span><span class="p">))</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="k">FROM</span><span class="w"> </span><span class="k">TABLE</span><span class="p">(</span><span class="n">INFER_SCHEMA</span><span class="p">(</span><span class="k">LOCATION</span><span class="o">=&gt;</span><span class="s1">'@IDR_DATA_STAGE/customers.parquet'</span><span class="p">,</span><span class="w"> </span><span class="n">FILE_FORMAT</span><span class="o">=&gt;</span><span class="s1">'PARQUET_FORMAT'</span><span class="p">)));</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="k">COPY</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">CUSTOMERS</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="o">@</span><span class="n">IDR_DATA_STAGE</span><span class="o">/</span><span class="n">customers</span><span class="p">.</span><span class="n">parquet</span><span class="w"> </span><span class="n">FILE_FORMAT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="k">TYPE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'PARQUET'</span><span class="p">)</span><span class="w"> </span><span class="n">MATCH_BY_COLUMN_NAME</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CASE_INSENSITIVE</span><span class="p">;</span>
+</code></pre></div></p>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="part-3-testing-via-the-interactive-web-ui">🖥️ Part 3: Testing via the Interactive Web UI</h2>
+<h3 id="1-launch-backend-api-react-ui">1. Launch Backend API &amp; React UI</h3>
+<p>In your terminal, launch the IDR API server and frontend:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Terminal 1: Start IDR API</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>python<span class="w"> </span>-m<span class="w"> </span>idr_api.main
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Terminal 2: Start IDR React UI</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nb">cd</span><span class="w"> </span>idr_ui<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev
+</code></pre></div>
+<p>Navigate your browser to: <strong><code>http://localhost:5173/setup</code></strong></p>
+<hr />
+<h3 id="2-step-1-connect-to-snowflake">2. Step 1: Connect to Snowflake</h3>
+<ul>
+<li>Select <strong>Snowflake</strong> as the Platform.</li>
+<li>If you have <code>~/.snowflake/connections.toml</code> or <code>~/.dbt/profiles.yml</code>, the <strong>Discovered Local Credentials</strong> card will show your detected connection. Click <strong>1-Click Connect</strong>.</li>
+<li>Alternatively, enter your parameters manually:</li>
+<li><strong>Account</strong>: <code>xy12345.us-east-1</code></li>
+<li><strong>User</strong>: <code>DEMO_USER</code></li>
+<li><strong>Password</strong>: <code>YourStrongPassword123!</code></li>
+<li><strong>Warehouse</strong>: <code>COMPUTE_WH</code></li>
+<li><strong>Database</strong>: <code>DEMO_DB</code></li>
+<li><strong>Schema</strong>: <code>ECOMMERCE_DEMO</code></li>
+<li>Click <strong>Test &amp; Continue</strong>.</li>
+</ul>
+<hr />
+<h3 id="3-step-2-select-sources-entity-keys">3. Step 2: Select Sources &amp; Entity Keys</h3>
+<p>IDR profiles your tables in Snowflake. Select your 4 source tables and primary entity keys:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Table Name</th>
+<th style="text-align: left;">Entity Key Column</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>CUSTOMERS</code></td>
+<td style="text-align: left;"><code>CUSTOMER_ID</code></td>
+<td style="text-align: left;">CRM Account Records</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>INSTORE_ACCOUNTS</code></td>
+<td style="text-align: left;"><code>INSTORE_ACCOUNT_ID</code></td>
+<td style="text-align: left;">In-Store POS Accounts</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>LOYALTY_MEMBERS</code></td>
+<td style="text-align: left;"><code>LOYALTY_ID</code></td>
+<td style="text-align: left;">Rewards Members</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ORDERS_ONLINE</code></td>
+<td style="text-align: left;"><code>ORDER_ID</code></td>
+<td style="text-align: left;">Web E-Commerce Transactions</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="4-step-3-map-identifiers">4. Step 3: Map Identifiers</h3>
+<p>Map columns that share identity linkages across systems:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Table</th>
+<th style="text-align: left;">Identifier Type</th>
+<th style="text-align: left;">Source Column</th>
+<th style="text-align: left;">Normalization</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>CUSTOMERS</code></td>
+<td style="text-align: left;"><code>EMAIL</code></td>
+<td style="text-align: left;"><code>EMAIL</code></td>
+<td style="text-align: left;">Lowercase + Trim</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>CUSTOMERS</code></td>
+<td style="text-align: left;"><code>PHONE</code></td>
+<td style="text-align: left;"><code>PHONE</code></td>
+<td style="text-align: left;">E.164 Clean</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>INSTORE_ACCOUNTS</code></td>
+<td style="text-align: left;"><code>PHONE</code></td>
+<td style="text-align: left;"><code>PHONE_NUMBER</code></td>
+<td style="text-align: left;">E.164 Clean</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>INSTORE_ACCOUNTS</code></td>
+<td style="text-align: left;"><code>EMAIL</code></td>
+<td style="text-align: left;"><code>ALT_EMAIL</code></td>
+<td style="text-align: left;">Lowercase + Trim</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>LOYALTY_MEMBERS</code></td>
+<td style="text-align: left;"><code>EMAIL</code></td>
+<td style="text-align: left;"><code>CONTACT_EMAIL</code></td>
+<td style="text-align: left;">Lowercase + Trim</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ORDERS_ONLINE</code></td>
+<td style="text-align: left;"><code>EMAIL</code></td>
+<td style="text-align: left;"><code>CUSTOMER_EMAIL</code></td>
+<td style="text-align: left;">Lowercase + Trim</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ORDERS_ONLINE</code></td>
+<td style="text-align: left;"><code>PHONE</code></td>
+<td style="text-align: left;"><code>CUSTOMER_PHONE</code></td>
+<td style="text-align: left;">E.164 Clean</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="5-step-4-configure-deterministic-match-rules">5. Step 4: Configure Deterministic Match Rules</h3>
+<p>Define match rules in priority order:</p>
+<ol>
+<li><strong>Rule 1 (<code>EXACT_EMAIL</code>)</strong>:</li>
+<li>Priority: <code>1</code></li>
+<li>Identifier: <code>EMAIL</code></li>
+<li>Weight: <code>1.0</code></li>
+<li><strong>Rule 2 (<code>EXACT_PHONE</code>)</strong>:</li>
+<li>Priority: <code>2</code></li>
+<li>Identifier: <code>PHONE</code></li>
+<li>Weight: <code>0.9</code></li>
+</ol>
+<hr />
+<h3 id="6-step-5-configure-golden-profile-survivorship">6. Step 5: Configure Golden Profile Survivorship</h3>
+<p>Define how customer attributes survive into the 360 view:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Attribute</th>
+<th style="text-align: left;">Survivorship Strategy</th>
+<th style="text-align: left;">Watermark / Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>first_name</code></td>
+<td style="text-align: left;"><code>RECENCY</code></td>
+<td style="text-align: left;"><code>created_at</code> DESC</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>last_name</code></td>
+<td style="text-align: left;"><code>RECENCY</code></td>
+<td style="text-align: left;"><code>created_at</code> DESC</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>email</code></td>
+<td style="text-align: left;"><code>SOURCE_PRIORITY</code></td>
+<td style="text-align: left;"><code>CUSTOMERS</code> $\rightarrow$ <code>LOYALTY_MEMBERS</code> $\rightarrow$ <code>INSTORE_ACCOUNTS</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>phone</code></td>
+<td style="text-align: left;"><code>RECENCY</code></td>
+<td style="text-align: left;"><code>created_at</code> DESC</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="7-step-6-execute-resolution">7. Step 6: Execute Resolution</h3>
+<ul>
+<li>Click <strong>Run Identity Resolution</strong>.</li>
+<li>Execution runs natively inside your Snowflake Virtual Warehouse (<code>COMPUTE_WH</code>).</li>
+<li>Watch live stage progress: <code>Preflight</code> $\rightarrow$ <code>Extraction</code> $\rightarrow$ <code>Graph &amp; Clustering</code> $\rightarrow$ <code>Golden Profiles</code> $\rightarrow$ <code>Complete</code>.</li>
+</ul>
+<hr />
+<h3 id="8-inspect-the-entity-graph-in-explorer">8. Inspect the Entity Graph in <code>/explorer</code></h3>
+<p>Click <strong>Explore Graph</strong> or navigate to <code>http://localhost:5173/explorer</code>:
+- Search for <code>Alice</code> or <code>alice.smith@example.com</code>.
+- Inspect the <strong>Resolved Customer 360 Cluster</strong>:
+  - Notice that <code>CRM_001</code> (CRM), <code>POS_901</code> (In-Store), <code>LOYALTY_A1</code> (Loyalty), and <code>ORD_8801</code> (Online Order) are unified into a single Golden Profile!
+  - <strong>Spanning Tree Confidence Score</strong>: Displays <code>1.0</code> (deterministic match with full edge audit).
+  - Inspect the interactive Node-Link visualization and survivorship decision tree.</p>
+<hr />
+<h2 id="part-4-testing-autonomous-ai-mcp-tools">🤖 Part 4: Testing Autonomous AI MCP Tools</h2>
+<p>With the <code>.cursor/mcp.json</code> configuration or FastMCP CLI, AI agents can inspect schemas, suggest rules, and query Customer 360 records in Snowflake without manual SQL:</p>
+<h3 id="1-start-the-fastmcp-server-for-snowflake">1. Start the FastMCP Server for Snowflake</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">IDR_PLATFORM</span><span class="o">=</span><span class="s2">"snowflake"</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_ACCOUNT</span><span class="o">=</span><span class="s2">"xy12345.us-east-1"</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_USER</span><span class="o">=</span><span class="s2">"DEMO_USER"</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_PASSWORD</span><span class="o">=</span><span class="s2">"YourStrongPassword123!"</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_WAREHOUSE</span><span class="o">=</span><span class="s2">"COMPUTE_WH"</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_DATABASE</span><span class="o">=</span><span class="s2">"DEMO_DB"</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_SCHEMA</span><span class="o">=</span><span class="s2">"ECOMMERCE_DEMO"</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>python<span class="w"> </span>-m<span class="w"> </span>idr_mcp
+</code></pre></div>
+<h3 id="2-example-agent-prompts-in-cursor-or-claude-desktop">2. Example Agent Prompts (in Cursor or Claude Desktop)</h3>
+<ul>
+<li><em>"Profile the tables in DEMO_DB.ECOMMERCE_DEMO and suggest deterministic identity resolution match rules."</em></li>
+<li><em>"Simulate what happens if we add an exact phone match rule with weight 0.9."</em></li>
+<li><em>"Look up the Customer 360 profile for alice.smith@example.com including all linked accounts and confidence score."</em></li>
+</ul>
+<hr />
+<h2 id="part-5-inspect-results-directly-in-snowsight-sql">🔍 Part 5: Inspect Results Directly in Snowsight SQL</h2>
+<p>Open a Snowsight Worksheet and verify that IDR created all output tables and golden profiles:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">USE</span><span class="w"> </span><span class="n">WAREHOUSE</span><span class="w"> </span><span class="n">COMPUTE_WH</span><span class="p">;</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">USE</span><span class="w"> </span><span class="k">DATABASE</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">;</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1">-- 1. Inspect Resolved Customer Clusters</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="k">SELECT</span><span class="w"> </span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">    </span><span class="n">resolved_id</span><span class="p">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="n">cluster_size</span><span class="p">,</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="n">confidence_score</span><span class="p">,</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="n">created_at</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="k">FROM</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">IDR_OUT</span><span class="p">.</span><span class="n">IDENTITY_CLUSTERS_CURRENT</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">cluster_size</span><span class="w"> </span><span class="k">DESC</span><span class="p">;</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1">-- 2. Inspect Entity Membership (Cross-System Linkage)</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="k">SELECT</span><span class="w"> </span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">    </span><span class="n">m</span><span class="p">.</span><span class="n">resolved_id</span><span class="p">,</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">    </span><span class="n">m</span><span class="p">.</span><span class="n">source_id</span><span class="p">,</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">    </span><span class="n">m</span><span class="p">.</span><span class="n">source_key</span><span class="p">,</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">    </span><span class="n">m</span><span class="p">.</span><span class="n">entity_key</span><span class="p">,</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">    </span><span class="n">m</span><span class="p">.</span><span class="n">created_at</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="k">FROM</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">IDR_OUT</span><span class="p">.</span><span class="n">IDENTITY_RESOLVED_MEMBERSHIP_CURRENT</span><span class="w"> </span><span class="n">m</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">resolved_id</span><span class="p">,</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">source_id</span><span class="p">;</span>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="c1">-- 3. Inspect Golden Customer Profiles (Merged 360 Records)</span>
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="k">SELECT</span><span class="w"> </span>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a><span class="w">    </span><span class="n">resolved_id</span><span class="p">,</span>
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a><span class="w">    </span><span class="n">cluster_size</span><span class="p">,</span>
+<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a><span class="w">    </span><span class="n">first_name</span><span class="p">,</span>
+<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a><span class="w">    </span><span class="n">last_name</span><span class="p">,</span>
+<a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a><span class="w">    </span><span class="n">email</span><span class="p">,</span>
+<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a><span class="w">    </span><span class="n">phone</span>
+<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a><span class="k">FROM</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">IDR_OUT</span><span class="p">.</span><span class="n">GOLDEN_PROFILES_CURRENT</span><span class="p">;</span>
+<a id="__codelineno-8-32" name="__codelineno-8-32" href="#__codelineno-8-32"></a>
+<a id="__codelineno-8-33" name="__codelineno-8-33" href="#__codelineno-8-33"></a><span class="c1">-- 4. Inspect Match Audit &amp; Edge Lineage (Zero Hallucination Proof)</span>
+<a id="__codelineno-8-34" name="__codelineno-8-34" href="#__codelineno-8-34"></a><span class="k">SELECT</span><span class="w"> </span>
+<a id="__codelineno-8-35" name="__codelineno-8-35" href="#__codelineno-8-35"></a><span class="w">    </span><span class="n">e</span><span class="p">.</span><span class="n">left_entity_key</span><span class="p">,</span>
+<a id="__codelineno-8-36" name="__codelineno-8-36" href="#__codelineno-8-36"></a><span class="w">    </span><span class="n">e</span><span class="p">.</span><span class="n">right_entity_key</span><span class="p">,</span>
+<a id="__codelineno-8-37" name="__codelineno-8-37" href="#__codelineno-8-37"></a><span class="w">    </span><span class="n">e</span><span class="p">.</span><span class="n">identifier_type</span><span class="p">,</span>
+<a id="__codelineno-8-38" name="__codelineno-8-38" href="#__codelineno-8-38"></a><span class="w">    </span><span class="n">e</span><span class="p">.</span><span class="n">identifier_value</span><span class="p">,</span>
+<a id="__codelineno-8-39" name="__codelineno-8-39" href="#__codelineno-8-39"></a><span class="w">    </span><span class="n">e</span><span class="p">.</span><span class="n">rule_id</span><span class="p">,</span>
+<a id="__codelineno-8-40" name="__codelineno-8-40" href="#__codelineno-8-40"></a><span class="w">    </span><span class="n">e</span><span class="p">.</span><span class="n">confidence_score</span>
+<a id="__codelineno-8-41" name="__codelineno-8-41" href="#__codelineno-8-41"></a><span class="k">FROM</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">IDR_OUT</span><span class="p">.</span><span class="n">IDENTITY_EDGES_CURRENT</span><span class="w"> </span><span class="n">e</span><span class="p">;</span>
+<a id="__codelineno-8-42" name="__codelineno-8-42" href="#__codelineno-8-42"></a>
+<a id="__codelineno-8-43" name="__codelineno-8-43" href="#__codelineno-8-43"></a><span class="c1">-- 5. Check High-Cardinality Safeguards (Skipped Groups)</span>
+<a id="__codelineno-8-44" name="__codelineno-8-44" href="#__codelineno-8-44"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">IDR_OUT</span><span class="p">.</span><span class="n">SKIPPED_IDENTIFIER_GROUPS</span><span class="p">;</span>
+</code></pre></div>
+<hr />
+<h2 id="part-6-cleanup-teardown">🧹 Part 6: Cleanup &amp; Teardown</h2>
+<p>To tear down all test objects when you finish testing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">USE</span><span class="w"> </span><span class="n">WAREHOUSE</span><span class="w"> </span><span class="n">COMPUTE_WH</span><span class="p">;</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1">-- Drop demo tables and schemas</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">DROP</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">IDR_META</span><span class="w"> </span><span class="k">CASCADE</span><span class="p">;</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="k">DROP</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">IDR_WORK</span><span class="w"> </span><span class="k">CASCADE</span><span class="p">;</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">DROP</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">IDR_OUT</span><span class="w"> </span><span class="k">CASCADE</span><span class="p">;</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="k">DROP</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">DEMO_DB</span><span class="p">.</span><span class="n">ECOMMERCE_DEMO</span><span class="w"> </span><span class="k">CASCADE</span><span class="p">;</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1">-- Optional: Drop database entirely</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1">-- DROP DATABASE IF EXISTS DEMO_DB;</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["content.code.copy", "content.code.annotate", "content.tabs.link", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+      
+    
+  </body>
+</html>
