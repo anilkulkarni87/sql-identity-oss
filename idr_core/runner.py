@@ -17,7 +17,8 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Optional
+from enum import Enum
+from typing import List, Optional, Union
 
 from .adapters.base import IDRAdapter, get_dialect_config
 from .logger_utils import get_logger
@@ -26,6 +27,31 @@ from .stages.extraction import ExtractionStage
 from .stages.graph import GraphStage
 from .stages.output import OutputStage
 from .stages.preflight import PreflightStage
+
+
+class RunStatus(str, Enum):
+    """Execution status for an IDR run."""
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    SUCCESS_NO_CHANGES = "SUCCESS_NO_CHANGES"
+    DRY_RUN_COMPLETE = "DRY_RUN_COMPLETE"
+    FAILED = "FAILED"
+
+
+class PipelineStage(str, Enum):
+    """Stages of the identity resolution execution pipeline."""
+
+    PREFLIGHT = "preflight"
+    ENTITY_EXTRACTION = "entity_extraction"
+    IDENTIFIER_EXTRACTION = "identifier_extraction"
+    ATTRIBUTE_EXTRACTION = "attribute_extraction"
+    EDGE_BUILDING = "edge_building"
+    LABEL_PROPAGATION = "label_propagation"
+    FUZZY_MATCHING = "fuzzy_matching"
+    OUTPUT_GENERATION = "output_generation"
+    DRY_RUN_ANALYSIS = "dry_run_analysis"
 
 
 @dataclass
@@ -54,7 +80,7 @@ class RunResult:
     """Result of an IDR run."""
 
     run_id: str
-    status: str
+    status: Union[RunStatus, str]
     entities_processed: int = 0
     identifiers_extracted: int = 0
     edges_created: int = 0
@@ -284,26 +310,28 @@ class IDRRunner:
 
     # ===== Run Tracking =====
 
-    def _start_stage(self, stage_name: str) -> None:
+    def _start_stage(self, stage_name: Union[PipelineStage, str]) -> None:
         """Record start of a processing stage."""
+        name = stage_name.value if isinstance(stage_name, PipelineStage) else str(stage_name)
         self.logger.info(
-            f"Starting stage: {stage_name}",
-            extra={"run_id": self.run_id, "stage": stage_name, "event": "stage_start"},
+            f"Starting stage: {name}",
+            extra={"run_id": self.run_id, "stage": name, "event": "stage_start"},
         )
-        self._stage_metrics.append(StageMetric(stage_name=stage_name, started_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+        self._stage_metrics.append(StageMetric(stage_name=name, started_at=datetime.now(timezone.utc).replace(tzinfo=None)))
 
-    def _end_stage(self, stage_name: str, rows_affected: int = 0) -> None:
+    def _end_stage(self, stage_name: Union[PipelineStage, str], rows_affected: int = 0) -> None:
         """Record end of a processing stage."""
+        name = stage_name.value if isinstance(stage_name, PipelineStage) else str(stage_name)
         for metric in reversed(self._stage_metrics):
-            if metric.stage_name == stage_name and metric.ended_at is None:
+            if metric.stage_name == name and metric.ended_at is None:
                 metric.ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 metric.rows_affected = rows_affected
 
                 self.logger.info(
-                    f"Completed stage: {stage_name}",
+                    f"Completed stage: {name}",
                     extra={
                         "run_id": self.run_id,
-                        "stage": stage_name,
+                        "stage": name,
                         "event": "stage_end",
                         "rows_affected": rows_affected,
                         "duration_seconds": metric.duration_seconds,

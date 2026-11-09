@@ -119,26 +119,65 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
 
 @router.get("/status")
 async def get_status(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """Check connection and configuration status."""
+    """Check connection and configuration lifecycle status."""
     user_key = get_user_key(current_user)
     connected = manager.is_connected(user_key)
     configured = False
     platform = None
+    has_runs = False
+    state = "DISCONNECTED"
+    suggested_action = "connect_warehouse"
 
     if connected:
         adapter = manager.get_adapter_for_user(user_key)
         platform = manager.get_config_for_user(user_key).get("platform")
-        # Lightweight check: does idr_meta.source_table exist and have rows?
-        try:
-            # Basic check if metadata tables exist
-            if adapter.table_exists("idr_meta.source_table"):
-                # Count rows
-                count = adapter.query_one("SELECT COUNT(*) FROM idr_meta.source_table")
-                configured = count > 0
-        except Exception:
-            configured = False
 
-    return {"connected": connected, "configured": configured, "platform": platform}
+        # Check aliveness
+        is_alive = True
+        try:
+            adapter.query_one("SELECT 1")
+        except Exception:
+            is_alive = False
+
+        if not is_alive:
+            state = "STALE"
+            suggested_action = "reconnect_warehouse"
+        else:
+            try:
+                if adapter.table_exists("idr_meta.source_table"):
+                    count = adapter.query_one("SELECT COUNT(*) FROM idr_meta.source_table")
+                    configured = (count or 0) > 0
+                    if configured:
+                        # Check if runs have been executed
+                        if adapter.table_exists("idr_out.identity_clusters_current"):
+                            clusters = adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current")
+                            has_runs = (clusters or 0) > 0
+
+                        if has_runs:
+                            state = "RESOLVED"
+                            suggested_action = "explore_identity_graph"
+                        else:
+                            state = "CONFIGURED_READY"
+                            suggested_action = "trigger_resolution_run"
+                    else:
+                        state = "CONNECTED_UNCONFIGURED"
+                        suggested_action = "discover_and_map_sources"
+                else:
+                    state = "CONNECTED_UNINITIALIZED"
+                    suggested_action = "initialize_metadata"
+            except Exception:
+                configured = False
+                state = "CONNECTED_UNCONFIGURED"
+                suggested_action = "discover_and_map_sources"
+
+    return {
+        "connected": connected,
+        "configured": configured,
+        "platform": platform,
+        "state": state,
+        "has_runs": has_runs,
+        "suggested_action": suggested_action,
+    }
 
 
 @router.get("/discovered-connections")

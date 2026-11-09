@@ -1,6 +1,17 @@
+from enum import Enum
 from typing import Any, Dict, Optional
 
 from idr_core.adapters.base import IDRAdapter
+
+
+class ConnectionState(str, Enum):
+    """Explicit lifecycle states for database connectivity."""
+
+    DISCONNECTED = "DISCONNECTED"
+    CONNECTING = "CONNECTING"
+    CONNECTED_UNINITIALIZED = "CONNECTED_UNINITIALIZED"
+    CONNECTED_READY = "CONNECTED_READY"
+    STALE = "STALE"
 
 
 class ConnectionManager:
@@ -12,6 +23,7 @@ class ConnectionManager:
     _instance = None
     _adapter: Optional[IDRAdapter] = None
     _connection_params: Dict[str, Any] = {}
+    _state: ConnectionState = ConnectionState.DISCONNECTED
 
     def __new__(cls):
         if cls._instance is None:
@@ -38,9 +50,31 @@ class ConnectionManager:
 
         self._adapter = adapter
         self._connection_params = params
+        self._state = ConnectionState.CONNECTED_READY
 
     def is_connected(self) -> bool:
         return self._adapter is not None
+
+    def get_state(self) -> ConnectionState:
+        """Inspect and return the current connection lifecycle state."""
+        if self._adapter is None:
+            return ConnectionState.DISCONNECTED
+
+        try:
+            # Heartbeat / basic query to test aliveness
+            self._adapter.query_one("SELECT 1")
+        except Exception:
+            return ConnectionState.STALE
+
+        try:
+            if hasattr(self._adapter, "table_exists"):
+                if self._adapter.table_exists("idr_meta.source_table"):
+                    return ConnectionState.CONNECTED_READY
+                return ConnectionState.CONNECTED_UNINITIALIZED
+        except Exception:
+            pass
+
+        return ConnectionState.CONNECTED_READY
 
     def disconnect(self):
         if self._adapter:
@@ -50,6 +84,7 @@ class ConnectionManager:
                 pass
             self._adapter = None
             self._connection_params = {}
+            self._state = ConnectionState.DISCONNECTED
 
     # Helper to get singleton instance easily
     @classmethod

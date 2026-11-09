@@ -5,10 +5,9 @@ import { api } from '../../api/client';
 
 
 export default function StepReview({ config, onBack, onComplete, initialSaved = false, readOnly = false, warningMessage = null }: { config: IDRConfig, onBack: () => void, onComplete: () => void, initialSaved?: boolean, readOnly?: boolean, warningMessage?: string | null }) {
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
+    type ReviewPhase = 'idle' | 'saving' | 'running' | 'success';
+    const [phase, setPhase] = useState<ReviewPhase>('idle');
     const [error, setError] = useState<string | null>(null);
-    const [success, setSuccess] = useState(false);
     const [configSaved, setConfigSaved] = useState(initialSaved);
 
     // Run Configuration State
@@ -18,22 +17,26 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
     const [dryRun, setDryRun] = useState(false);
     const [runResult, setRunResult] = useState<any>(null);
 
+    const saving = phase === 'saving';
+    const loading = phase === 'running';
+    const success = phase === 'success';
+
     const handleSave = async () => {
         if (readOnly) return;
-        setSaving(true);
+        setPhase('saving');
         setError(null);
         try {
             await api.saveSetupConfig(config);
             setConfigSaved(true);
+            setPhase('idle');
         } catch (err: any) {
             setError(err.message || String(err));
-        } finally {
-            setSaving(false);
+            setPhase('idle');
         }
     };
 
     const handleRun = async () => {
-        setLoading(true);
+        setPhase('running');
         setError(null);
         try {
             const result = await api.runSetup({
@@ -43,11 +46,10 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
                 dry_run: dryRun,
             });
             setRunResult(result);
-            setSuccess(true);
+            setPhase('success');
         } catch (err: any) {
             setError(err.message || String(err));
-        } finally {
-            setLoading(false);
+            setPhase('idle');
         }
     };
 
@@ -98,8 +100,8 @@ export default function StepReview({ config, onBack, onComplete, initialSaved = 
                     </div>
 
                     <div className="flex gap-4">
-                        <button className={btnOutlineClass} onClick={() => { setSuccess(false); setRunResult(null); }}>Back to Config</button>
-                        <button className={btnClass} onClick={() => { setSuccess(false); setRunResult(null); setDryRun(false); }}>Run for Real</button>
+                        <button className={btnOutlineClass} onClick={() => { setPhase('idle'); setRunResult(null); }}>Back to Config</button>
+                        <button className={btnClass} onClick={() => { setPhase('idle'); setRunResult(null); setDryRun(false); }}>Run for Real</button>
                     </div>
                 </div>
             );

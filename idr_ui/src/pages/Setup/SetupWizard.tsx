@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { Database, Search, GitGraph, Play, Layers, Shield } from "lucide-react";
 import { IDRConfig } from '../../types';
 import { api } from '../../api/client';
+import { useWizardMachine, WizardStage, WIZARD_STAGES } from './useWizardMachine';
 
 import StepConnect from './StepConnect';
 import StepDiscover from './StepDiscover';
@@ -11,38 +12,19 @@ import StepSurvivorship from './StepSurvivorship';
 import StepReview from './StepReview';
 
 export default function SetupWizard() {
-    const [step, setStep] = useState(1);
-    const [connectionData, setConnectionData] = useState<any>(null);
-    const [initWarning, setInitWarning] = useState<string | null>(null);
-    const [selectedTables, setSelectedTables] = useState<string[]>([]);
-    const [mappingConfig, setMappingConfig] = useState<IDRConfig>({ sources: [] }); // Initialize with empty sources
-    const [isConfigured, setIsConfigured] = useState(false);
-
-    const [isConnected, setIsConnected] = useState(false);
+    const machine = useWizardMachine();
 
     const checkConfigAndNavigate = async () => {
         try {
-            // Check status first to see if we are connected/have meta
             const status = await api.getSetupStatus();
-
             if (status.connected) {
-                setIsConnected(true);
+                machine.setIsConnected(true);
             }
 
             if (status.configured) {
-                setIsConfigured(true);
-
-                // Fetch existing config
                 const config = await api.getSetupConfig();
                 if (config && config.sources && config.sources.length > 0) {
-                    const typedConfig = config as unknown as IDRConfig;
-                    setMappingConfig(typedConfig);
-                    setSelectedTables(
-                        typedConfig.sources
-                            .map(s => s.table)
-                            .filter((t): t is string => Boolean(t))
-                    );
-                    setStep(6); // Jump to Run
+                    machine.hydrateFromSavedConfig(config as unknown as IDRConfig);
                     return true;
                 }
             }
@@ -53,123 +35,123 @@ export default function SetupWizard() {
     };
 
     useEffect(() => {
-        // Check on mount (in case already connected/configured from previous session)
         checkConfigAndNavigate();
     }, []);
 
-    const nextStep = () => setStep(s => s + 1);
-    const prevStep = () => setStep(s => s - 1);
+    const getStageIcon = (sId: WizardStage) => {
+        switch (sId) {
+            case 'connect': return <Database className="w-6 h-6" />;
+            case 'discover': return <Search className="w-6 h-6" />;
+            case 'map': return <GitGraph className="w-6 h-6" />;
+            case 'rules': return <Shield className="w-6 h-6" />;
+            case 'survivorship': return <Layers className="w-6 h-6" />;
+            case 'review': return <Play className="w-6 h-6" />;
+        }
+    };
 
-    const renderStepIcon = (s: number, icon: React.ReactNode, label: string) => {
-        const isActive = step === s;
-        const isCompleted = step > s;
-        // Allow clicking any step if already configured or already completed
-        const isClickable = isConfigured || isCompleted;
+    const renderStepIcon = (s: typeof WIZARD_STAGES[number]) => {
+        const isActive = machine.stage === s.id;
+        const isCompleted = machine.currentStepNumber > s.stepNumber;
+        const isClickable = machine.canNavigateTo(s.id);
 
         let className = "flex flex-col items-center gap-2 px-6 py-2 border-b-2 transition-colors ";
-        if (isActive) className += "border-blue-500 text-blue-400";
+        if (isActive) className += "border-blue-500 text-blue-400 font-bold";
         else if (isCompleted) className += "border-green-500 text-green-400";
         else className += "border-transparent text-gray-500";
 
         if (isClickable) className += " cursor-pointer hover:bg-gray-800 rounded-t";
+        else className += " opacity-50 cursor-not-allowed";
 
         return (
-            <div key={s} className={className} onClick={() => isClickable && setStep(s)}>
-                {icon}
-                <span className="text-xs font-semibold uppercase">{label}</span>
+            <div
+                key={s.id}
+                className={className}
+                onClick={() => isClickable && machine.goToStage(s.id)}
+                title={isClickable ? `Go to ${s.label}` : `Complete previous steps to unlock ${s.label}`}
+            >
+                {getStageIcon(s.id)}
+                <span className="text-xs font-semibold uppercase">{s.label}</span>
             </div>
         );
     };
 
     return (
         <div className="container mx-auto max-w-5xl py-10 space-y-8 text-gray-100">
-
             <header className="text-center space-y-2">
                 <h1 className="text-3xl font-extrabold tracking-tight">Setup IDR</h1>
                 <p className="text-gray-400">Connect your data warehouse and configure identity resolution in minutes.</p>
             </header>
 
-            {/* Stepper */}
+            {/* Stepper with explicit State Machine transitions */}
             <div className="flex justify-center w-full mb-8 overflow-x-auto">
-                {renderStepIcon(1, <Database className="w-6 h-6" />, "Connect")}
-                {renderStepIcon(2, <Search className="w-6 h-6" />, "Discover")}
-                {renderStepIcon(3, <GitGraph className="w-6 h-6" />, "Map")}
-                {renderStepIcon(4, <Shield className="w-6 h-6" />, "Rules")}
-                {renderStepIcon(5, <Layers className="w-6 h-6" />, "Survivorship")}
-                {renderStepIcon(6, <Play className="w-6 h-6" />, "Run")}
+                {WIZARD_STAGES.map(renderStepIcon)}
             </div>
 
             <div className="bg-gray-800 rounded-xl border border-gray-700 min-h-[500px] flex flex-col">
                 <div className="p-6 flex-1">
-                    {step === 1 && (
+                    {machine.stage === 'connect' && (
                         <StepConnect
-                            isConnected={isConnected}
+                            isConnected={machine.isConnected}
                             onNext={async (data: any) => {
-                                setConnectionData(data);
-                                if (data.warning) {
-                                    setInitWarning(data.warning);
-                                } else {
-                                    setInitWarning(null);
-                                }
-                                // Check if we have an existing config to jump to
+                                machine.handleConnectionSuccess(data);
                                 const skipped = await checkConfigAndNavigate();
                                 if (!skipped) {
-                                    nextStep();
+                                    machine.nextStage();
                                 }
                             }}
                         />
                     )}
-                    {step === 2 && (
+                    {machine.stage === 'discover' && (
                         <StepDiscover
-                            connectionData={connectionData}
+                            connectionData={machine.connectionData}
                             onNext={(tables: string[]) => {
-                                setSelectedTables(tables);
-                                nextStep();
+                                machine.setSelectedTables(tables);
+                                machine.nextStage();
                             }}
-                            onBack={prevStep}
+                            onBack={machine.prevStage}
                         />
                     )}
-                    {step === 3 && (
+                    {machine.stage === 'map' && (
                         <StepMap
-                            tables={selectedTables}
-                            initialConfig={mappingConfig}
+                            tables={machine.selectedTables}
+                            initialConfig={machine.mappingConfig}
                             onNext={(config: IDRConfig) => {
-                                setMappingConfig(config);
-                                nextStep();
+                                machine.setMappingConfig(config);
+                                machine.nextStage();
                             }}
-                            onBack={prevStep}
+                            onBack={machine.prevStage}
                         />
                     )}
-                    {step === 4 && (
+                    {machine.stage === 'rules' && (
                         <StepRules
-                            config={mappingConfig}
+                            config={machine.mappingConfig}
                             onNext={(config: IDRConfig) => {
-                                setMappingConfig(config);
-                                nextStep();
+                                machine.setMappingConfig(config);
+                                machine.nextStage();
                             }}
-                            onBack={prevStep}
+                            onBack={machine.prevStage}
                         />
                     )}
-                    {step === 5 && (
+                    {machine.stage === 'survivorship' && (
                         <StepSurvivorship
-                            config={mappingConfig}
+                            config={machine.mappingConfig}
                             onNext={(config: IDRConfig) => {
-                                setMappingConfig(config);
-                                nextStep();
+                                machine.setMappingConfig(config);
+                                machine.nextStage();
                             }}
-                            onBack={prevStep}
+                            onBack={machine.prevStage}
                         />
                     )}
-                    {step === 6 && (
+                    {machine.stage === 'review' && (
                         <StepReview
-                            config={mappingConfig}
-                            onBack={prevStep}
+                            config={machine.mappingConfig}
+                            onBack={machine.prevStage}
                             onComplete={() => {
-                                window.location.href = "/"; // Navigate to dashboard
+                                window.location.href = "/";
                             }}
-                            initialSaved={isConfigured}
-                            readOnly={!!initWarning}
-                            warningMessage={initWarning}
+                            initialSaved={machine.isConfigured}
+                            readOnly={!!machine.initWarning}
+                            warningMessage={machine.initWarning}
                         />
                     )}
                 </div>

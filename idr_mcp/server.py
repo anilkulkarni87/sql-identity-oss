@@ -21,7 +21,7 @@ except ImportError:
         def run(self):
             raise RuntimeError("The 'mcp' package is required to run the MCP server.")
 
-from idr_core.connection_manager import ConnectionManager
+from idr_core.connection_manager import ConnectionManager, ConnectionState
 
 # Initialize FastMCP Server
 mcp = FastMCP("idr-mcp")
@@ -30,12 +30,18 @@ mcp = FastMCP("idr-mcp")
 
 
 def get_adapter():
-    """Get the active database adapter from IDR Core."""
+    """Get the active database adapter from IDR Core, auto-recovering if possible."""
     manager = ConnectionManager.instance()
     adapter = manager.get_adapter()
     if not adapter:
+        connect_from_env()
+        adapter = manager.get_adapter()
+
+    if not adapter:
         raise RuntimeError(
-            "Database not connected. Please ensure IDR is connected via the host application or environment variables."
+            "IDR Database not connected (state: DISCONNECTED). "
+            "Please configure warehouse environment variables (e.g. IDR_PLATFORM, IDR_DB_PATH) "
+            "or connect via the IDR Web UI."
         )
     return adapter
 
@@ -58,6 +64,58 @@ def mask_value(value: Any) -> Any:
 
 
 # --- Tools ---
+
+
+@mcp.tool()
+def get_system_status() -> Dict[str, Any]:
+    """
+    Get current IDR lifecycle state, warehouse connectivity, and recommended next action.
+    Lifecycle states: DISCONNECTED, CONNECTED_UNINITIALIZED, CONNECTED_UNCONFIGURED, CONFIGURED_READY, RESOLVED.
+    """
+    manager = ConnectionManager.instance()
+    state = manager.get_state()
+    adapter = manager.get_adapter()
+    platform = manager._connection_params.get("platform")
+
+    is_configured = False
+    has_runs = False
+    cluster_count = 0
+    suggested_action = "connect_warehouse"
+
+    if state in (ConnectionState.CONNECTED_READY, ConnectionState.CONNECTED_UNINITIALIZED):
+        try:
+            if adapter and adapter.table_exists("idr_meta.source_table"):
+                cnt = adapter.query_one("SELECT COUNT(*) FROM idr_meta.source_table")
+                is_configured = (cnt or 0) > 0
+
+            if adapter and adapter.table_exists("idr_out.identity_clusters_current"):
+                cluster_count = adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current") or 0
+                has_runs = cluster_count > 0
+
+            if has_runs:
+                state_str = "RESOLVED"
+                suggested_action = "resolve_customer_360"
+            elif is_configured:
+                state_str = "CONFIGURED_READY"
+                suggested_action = "run_identity_resolution"
+            else:
+                state_str = "CONNECTED_UNCONFIGURED"
+                suggested_action = "discover_and_suggest_rules"
+        except Exception:
+            state_str = state.value
+    else:
+        state_str = state.value
+
+    return {
+        "status": "ok",
+        "lifecycle_state": state_str,
+        "platform": platform,
+        "is_configured": is_configured,
+        "has_runs": has_runs,
+        "cluster_count": cluster_count,
+        "suggested_next_action": suggested_action,
+        "pii_access_level": "masked" if should_mask_pii() else "full",
+    }
 
 
 @mcp.tool()
