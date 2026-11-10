@@ -8,7 +8,7 @@
 <meta content="Production-grade deterministic &amp; probabilistic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks" name="description"/>
 <link href="https://anilkulkarni87.github.io/sql-identity-oss/concepts-and-architecture/" rel="canonical"/>
 <link href="../getting-started/" rel="prev"/>
-<link href="../configuration-and-governance/" rel="next"/>
+<link href="../algorithm-and-graph-engine/" rel="next"/>
 <link href="../assets/images/favicon.png" rel="icon"/>
 <meta content="mkdocs-1.6.1, mkdocs-material-9.5.47" name="generator"/>
 <title>Concepts &amp; 8-Stage Pipeline Architecture - SQL Identity Resolution</title>
@@ -140,6 +140,16 @@
     
   
   Concepts &amp; Architecture
+
+      </a>
+</li>
+<li class="md-tabs__item">
+<a class="md-tabs__link" href="../algorithm-and-graph-engine/">
+        
+  
+    
+  
+  Algorithm &amp; Graph Engine
 
       </a>
 </li>
@@ -328,6 +338,13 @@
 </nav>
 </li>
 <li class="md-nav__item">
+<a class="md-nav__link" href="../algorithm-and-graph-engine/">
+<span class="md-ellipsis">
+    Algorithm &amp; Graph Engine
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
 <a class="md-nav__link" href="../configuration-and-governance/">
 <span class="md-ellipsis">
     Configuration &amp; Governance
@@ -463,6 +480,11 @@
 <article class="md-content__inner md-typeset">
 <h1 id="core-concepts-8-stage-pipeline-architecture">Core Concepts &amp; 8-Stage Pipeline Architecture<a class="headerlink" href="#core-concepts-8-stage-pipeline-architecture" title="Permanent link">¶</a></h1>
 <p>This guide explains the foundational data model and the 8-stage execution engine that powers <code>sql-identity-resolution</code>.</p>
+<blockquote>
+<p>[!TIP]
+<strong>Mathematical Proofs &amp; Graph Theory</strong>:
+For a rigorous mathematical breakdown of the bipartite projection, $O(N)$ star graph reduction theorem, pure SQL connected components convergence proofs, and <code>max_group_size</code> anti-megacluster guardrails, see the dedicated <a href="../algorithm-and-graph-engine/">Underlying Identity Resolution Algorithm</a> guide.</p>
+</blockquote>
 <hr/>
 <h2 id="1-core-building-blocks">1. Core Building Blocks<a class="headerlink" href="#1-core-building-blocks" title="Permanent link">¶</a></h2>
 <p>Every source table registered in <code>idr_meta.source_table</code> defines four distinct concepts:</p>
@@ -613,13 +635,13 @@
               </div>
 </div>
 </a>
-<a aria-label="Next: Configuration &amp; Governance" class="md-footer__link md-footer__link--next" href="../configuration-and-governance/">
+<a aria-label="Next: Algorithm &amp; Graph Engine" class="md-footer__link md-footer__link--next" href="../algorithm-and-graph-engine/">
 <div class="md-footer__title">
 <span class="md-footer__direction">
                 Next
               </span>
 <div class="md-ellipsis">
-                Configuration &amp; Governance
+                Algorithm &amp; Graph Engine
               </div>
 </div>
 <div class="md-footer__button md-icon">
