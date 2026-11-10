@@ -19,6 +19,14 @@
 <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
 <link href="../stylesheets/extra.css" rel="stylesheet"/>
 <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<!-- Google Tag Manager -->
+<script async="" src="https://www.googletagmanager.com/gtm.js?id=GTM-T3ZZKQZ4"></script>
+<script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  </script>
+<!-- End Google Tag Manager -->
 </head>
 <body data-md-color-accent="cyan" data-md-color-primary="custom" data-md-color-scheme="slate" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
@@ -480,11 +488,10 @@
 <article class="md-content__inner md-typeset">
 <h1 id="core-concepts-8-stage-pipeline-architecture">Core Concepts &amp; 8-Stage Pipeline Architecture<a class="headerlink" href="#core-concepts-8-stage-pipeline-architecture" title="Permanent link">¶</a></h1>
 <p>This guide explains the foundational data model and the 8-stage execution engine that powers <code>sql-identity-resolution</code>.</p>
-<blockquote>
-<p>[!TIP]
-<strong>Mathematical Proofs &amp; Graph Theory</strong>:
-For a rigorous mathematical breakdown of the bipartite projection, $O(N)$ star graph reduction theorem, pure SQL connected components convergence proofs, and <code>max_group_size</code> anti-megacluster guardrails, see the dedicated <a href="../algorithm-and-graph-engine/">Underlying Identity Resolution Algorithm</a> guide.</p>
-</blockquote>
+<div class="admonition tip">
+<p class="admonition-title">Mathematical Proofs &amp; Graph Theory</p>
+<p>For a rigorous mathematical breakdown of the bipartite projection, <span class="arithmatex">\(\mathcal{O}(N)\)</span> star graph reduction theorem, pure SQL connected components convergence proofs, and <code>max_group_size</code> anti-megacluster guardrails, see the dedicated <a href="../algorithm-and-graph-engine/">Underlying Identity Resolution Algorithm</a> guide.</p>
+</div>
 <hr/>
 <h2 id="1-core-building-blocks">1. Core Building Blocks<a class="headerlink" href="#1-core-building-blocks" title="Permanent link">¶</a></h2>
 <p>Every source table registered in <code>idr_meta.source_table</code> defines four distinct concepts:</p>
@@ -519,24 +526,33 @@ For a rigorous mathematical breakdown of the bipartite projection, $O(N)$ star g
 </tr>
 </tbody>
 </table>
-<blockquote>
-<p>[!IMPORTANT]
-<strong>Identifiers vs. Attributes</strong>:
-- <strong>Identifiers</strong> decide <em>which records belong to the same person</em> (Graph Connectivity).
-- <strong>Attributes</strong> decide <em>which profile values win for that person</em> (Golden Record Survivorship).</p>
-</blockquote>
+<div class="admonition important">
+<p class="admonition-title">Identifiers vs. Attributes</p>
+<ul>
+<li><strong>Identifiers</strong> decide <em>which records belong to the same person</em> (Graph Connectivity).</li>
+<li><strong>Attributes</strong> decide <em>which profile values win for that person</em> (Golden Record Survivorship).</li>
+</ul>
+</div>
 <hr/>
 <h2 id="2-the-8-stage-execution-pipeline">2. The 8-Stage Execution Pipeline<a class="headerlink" href="#2-the-8-stage-execution-pipeline" title="Permanent link">¶</a></h2>
 <p>Whether triggered via <code>idr run</code>, the Web UI (<code>POST /api/setup/run</code>), MCP (<code>run_pipeline</code>), or <code>IDRRunner.run()</code>, the engine executes 8 deterministic stages in sequence and emits real-time telemetry via <code>progress_callback</code>:</p>
 <pre class="mermaid"><code>flowchart TD
-    S1["Stage 1: preflight\nAuto-upgrade SYSTEM_TABLES &amp; validate source columns"] --&gt; S2
-    S2["Stage 2: entity_extraction\nExtract delta rows + candidate expansion (or FULL scan)"] --&gt; S3
-    S3["Stage 3: identifier_extraction\nApply Domain Canonicalizers, Exclusions &amp; No-Watermark State-Diff"] --&gt; S4
-    S4["Stage 4: attribute_extraction\nMaterialize entity_attributes (skipped automatically if 0 fuzzy rules)"] --&gt; S5
-    S5["Stage 5: edge_building\nApply ISOLATE, build N-1 Anchor Edges, apply DO_NOT_LINK &amp; FORCE_LINK"] --&gt; S6
-    S6["Stage 6: label_propagation\nIterative connected components + Persistent resolved_id stabilization"] --&gt; S7
-    S7["Stage 7: fuzzy_matching\nBlocking-key similarity super-clustering (when fuzzy_rules active)"] --&gt; S8
-    S8["Stage 8: output_generation\nUpdate membership, confidence scores, golden profiles, crosswalk &amp; watermarks"]</code></pre>
+    S1["Stage 1: preflight — Auto-upgrade schemas and validate source columns"]
+    S2["Stage 2: entity_extraction — Extract delta rows and candidate expansion"]
+    S3["Stage 3: identifier_extraction — Canonicalizers, exclusions, and state-diff"]
+    S4["Stage 4: attribute_extraction — Materialize attributes when fuzzy rules active"]
+    S5["Stage 5: edge_building — Apply ISOLATE, build N-1 star edges, apply overrides"]
+    S6["Stage 6: label_propagation — Connected components and resolved_id stabilization"]
+    S7["Stage 7: fuzzy_matching — Blocking-key similarity super-clustering"]
+    S8["Stage 8: output_generation — Update membership, golden profiles, and crosswalk"]
+
+    S1 --&gt; S2
+    S2 --&gt; S3
+    S3 --&gt; S4
+    S4 --&gt; S5
+    S5 --&gt; S6
+    S6 --&gt; S7
+    S7 --&gt; S8</code></pre>
 <h3 id="stage-by-stage-breakdown">Stage-by-Stage Breakdown<a class="headerlink" href="#stage-by-stage-breakdown" title="Permanent link">¶</a></h3>
 <h4 id="stage-1-preflight-preflightstage">Stage 1: <code>preflight</code> (<code>PreflightStage</code>)<a class="headerlink" href="#stage-1-preflight-preflightstage" title="Permanent link">¶</a></h4>
 <ul>
@@ -570,10 +586,10 @@ For a rigorous mathematical breakdown of the bipartite projection, $O(N)$ star g
 <h4 id="stage-5-edge_building-graphstagebuild_edges">Stage 5: <code>edge_building</code> (<code>GraphStage.build_edges</code>)<a class="headerlink" href="#stage-5-edge_building-graphstagebuild_edges" title="Permanent link">¶</a></h4>
 <ol>
 <li><strong>Pre-Edge Overrides (<code>ISOLATE</code>)</strong>: Removes any entity listed as <code>ISOLATE</code> in <code>idr_meta.identity_override</code> from <code>idr_work.identifiers_all</code> so it never forms edges.</li>
-<li><strong>Anchor-Based Star Edges ($N-1$ Edges)</strong>:</li>
+<li><strong>Anchor-Based Star Edges (<span class="arithmatex">\(N-1\)</span> Edges)</strong>:</li>
 <li>Groups <code>idr_work.identifiers_all</code> by <code>(identifier_type, identifier_value_norm)</code>.</li>
 <li>Filters out groups where <code>COUNT(*) &gt; max_group_size</code> (logging oversized groups to <code>idr_out.skipped_identifier_groups</code>).</li>
-<li>Connects every member of a valid group to <code>MIN(entity_key)</code> (<code>anchor_key</code>), producing $N-1$ edges instead of $\frac{N(N-1)}{2}$ edges.</li>
+<li>Connects every member of a valid group to <code>MIN(entity_key)</code> (<code>anchor_key</code>), producing <span class="arithmatex">\(N-1\)</span> edges instead of <span class="arithmatex">\(\frac{N(N-1)}{2}\)</span> edges.</li>
 <li><strong>Post-Edge Overrides (<code>DO_NOT_LINK</code> &amp; <code>FORCE_LINK</code>)</strong>:</li>
 <li><code>DO_NOT_LINK</code>: Deletes direct edges between <code>(entity_key_a, entity_key_b)</code> and detaches <code>MAX(entity_key_a, entity_key_b)</code> from any shared identifier anchor group containing <code>MIN(entity_key_a, entity_key_b)</code>.</li>
 <li><code>FORCE_LINK</code>: Injects an explicit <code>MANUAL_OVERRIDE</code> edge between <code>(entity_key_a, entity_key_b)</code> and ensures both entities are registered in <code>idr_work.entities_delta</code>.</li>
@@ -604,7 +620,7 @@ For a rigorous mathematical breakdown of the bipartite projection, $O(N)$ star g
 <li><strong>New Entities Joining an Existing Cluster</strong>:</li>
 <li>When new entities connect to an existing cluster from <code>idr_out.identity_resolved_membership_current</code>, the cluster <strong>retains its existing <code>resolved_id</code></strong> regardless of whether the new entity key is lexicographically smaller.</li>
 <li><strong>Two Existing Clusters Merging ("Largest Cluster Wins")</strong>:</li>
-<li>When a new bridge identifier merges two previously separate clusters ($C_1$ and $C_2$), the <strong>largest previous cluster's <code>resolved_id</code> wins</strong> (<code>ORDER BY prev_size DESC, prev_created_at ASC, prev_resolved_id ASC</code>).</li>
+<li>When a new bridge identifier merges two previously separate clusters (<span class="arithmatex">\(C_1\)</span> and <span class="arithmatex">\(C_2\)</span>), the <strong>largest previous cluster's <code>resolved_id</code> wins</strong> (<code>ORDER BY prev_size DESC, prev_created_at ASC, prev_resolved_id ASC</code>).</li>
 <li><strong>Cluster Splits</strong>:</li>
 <li>If an override (<code>DO_NOT_LINK</code> or <code>ISOLATE</code>) splits an existing cluster into two components, only one component may claim the historical <code>resolved_id</code> (preferring the component containing the anchor entity key), while the split-off component receives a fresh canonical ID.</li>
 <li><strong>Audit Crosswalk (<code>idr_out.resolved_id_crosswalk</code>)</strong>:</li>
@@ -669,5 +685,7 @@ For a rigorous mathematical breakdown of the bipartite projection, $O(N)$ star g
 <div class="md-progress" data-md-component="progress" role="progressbar"></div>
 <script id="__config" type="application/json">{"base": "..", "features": ["content.code.copy", "content.code.annotate", "content.tabs.link", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
 <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+<script src="../javascripts/mathjax.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </body>
 </html>

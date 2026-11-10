@@ -19,6 +19,14 @@
 <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
 <link href="../stylesheets/extra.css" rel="stylesheet"/>
 <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<!-- Google Tag Manager -->
+<script async="" src="https://www.googletagmanager.com/gtm.js?id=GTM-T3ZZKQZ4"></script>
+<script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  </script>
+<!-- End Google Tag Manager -->
 </head>
 <body data-md-color-accent="cyan" data-md-color-primary="custom" data-md-color-scheme="slate" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
@@ -703,12 +711,20 @@
 </span></code></pre></div>
 <h3 id="dbt_idr-model-dag"><code>dbt_idr</code> Model DAG<a class="headerlink" href="#dbt_idr-model-dag" title="Permanent link">¶</a></h3>
 <pre class="mermaid"><code>flowchart LR
-    Seeds["7 Seed CSVs\n(idr_meta.*)"] --&gt; M1["stg_identifiers\nCanonicalizers + Exclusions"]
-    M1 --&gt; M2["int_edges\nISOLATE + Anchor Edges +\nDO_NOT_LINK + FORCE_LINK"]
-    M2 --&gt; M3["int_labels\nIterative Label Propagation"]
-    M3 --&gt; M4["identity_membership\nFull Entity -&gt; resolved_id Map"]
-    M4 --&gt; M5["identity_clusters\nConfidence Scoring"]
-    M4 --&gt; M6["golden_profiles\nDynamic Survivorship"]</code></pre>
+    Seeds["7 Seed CSVs (idr_meta)"]
+    M1["stg_identifiers (Canonicalizers and Exclusions)"]
+    M2["int_edges (ISOLATE, Star Edges, Overrides)"]
+    M3["int_labels (Iterative Label Propagation)"]
+    M4["identity_membership (Entity to resolved_id Map)"]
+    M5["identity_clusters (Confidence Scoring)"]
+    M6["golden_profiles (Dynamic Survivorship)"]
+
+    Seeds --&gt; M1
+    M1 --&gt; M2
+    M2 --&gt; M3
+    M3 --&gt; M4
+    M4 --&gt; M5
+    M4 --&gt; M6</code></pre>
 </article>
 </div>
 <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
@@ -768,5 +784,7 @@
 <div class="md-progress" data-md-component="progress" role="progressbar"></div>
 <script id="__config" type="application/json">{"base": "..", "features": ["content.code.copy", "content.code.annotate", "content.tabs.link", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
 <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+<script src="../javascripts/mathjax.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </body>
 </html>

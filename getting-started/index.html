@@ -59,6 +59,16 @@
     
     
     
+  <!-- Google Tag Manager -->
+  <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-T3ZZKQZ4"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  </script>
+  <!-- End Google Tag Manager -->
+  
+
   </head>
   
   
@@ -877,10 +887,10 @@
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Subsequent runs: incremental watermark &amp; state-diff resolution</span>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span>duckdb<span class="w"> </span>--db<span class="w"> </span>demo.duckdb<span class="w"> </span>--mode<span class="w"> </span>INCR
 </span></code></pre></div>
-<blockquote>
-<p>[!TIP]
-<strong>Dry Run Preview</strong>: Add <code>--dry-run</code> to preview cluster merges, new entities, and largest cluster changes in <code>idr_out.dry_run_results</code> and <code>idr_out.dry_run_summary</code> without mutating production tables.</p>
-</blockquote>
+<div class="admonition tip">
+<p class="admonition-title">Dry Run Preview</p>
+<p>Add <code>--dry-run</code> to preview cluster merges, new entities, and largest cluster changes in <code>idr_out.dry_run_results</code> and <code>idr_out.dry_run_summary</code> without mutating production tables.</p>
+</div>
 <h3 id="step-4-launch-the-interactive-web-ui">Step 4: Launch the Interactive Web UI<a class="headerlink" href="#step-4-launch-the-interactive-web-ui" title="Permanent link">&para;</a></h3>
 <p>Start the integrated FastAPI + React Web UI server:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>idr<span class="w"> </span>ui<span class="w"> </span>--db<span class="w"> </span>demo.duckdb
@@ -925,10 +935,10 @@
 </tr>
 </tbody>
 </table>
-<blockquote>
-<p>[!NOTE]
-<strong>Automatic <code>--platform</code> Detection</strong>: If you pass <code>--db my_file.duckdb</code>, <code>--project my-gcp-project</code>, or set <code>IDR_PLATFORM</code>, the <code>idr</code> CLI automatically resolves <code>--platform</code> for you.</p>
-</blockquote>
+<div class="admonition note">
+<p class="admonition-title">Automatic <code>--platform</code> Detection</p>
+<p>If you pass <code>--db my_file.duckdb</code>, <code>--project my-gcp-project</code>, or set <code>IDR_PLATFORM</code>, the <code>idr</code> CLI automatically resolves <code>--platform</code> for you.</p>
+</div>
 
 
 
@@ -1032,6 +1042,10 @@
     
     
       <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
       
     
   </body>

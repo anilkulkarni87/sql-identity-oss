@@ -19,6 +19,14 @@
 <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
 <link href="../stylesheets/extra.css" rel="stylesheet"/>
 <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<!-- Google Tag Manager -->
+<script async="" src="https://www.googletagmanager.com/gtm.js?id=GTM-T3ZZKQZ4"></script>
+<script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  </script>
+<!-- End Google Tag Manager -->
 </head>
 <body data-md-color-accent="cyan" data-md-color-primary="custom" data-md-color-scheme="slate" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
@@ -268,12 +276,12 @@
 </nav>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#2-anchor-based-star-graph-reduction-on-vs-on2">
+<a class="md-nav__link" href="#2-anchor-based-star-graph-reduction-mathcalon-vs-mathcalon2">
 <span class="md-ellipsis">
-      2. Anchor-Based Star Graph Reduction ($O(N)$ vs $O(N^2)$)
+      2. Anchor-Based Star Graph Reduction (\(\mathcal{O}(N)\) vs \(\mathcal{O}(N^2)\))
     </span>
 </a>
-<nav aria-label="2. Anchor-Based Star Graph Reduction ($O(N)$ vs $O(N^2)$)" class="md-nav">
+<nav aria-label="2. Anchor-Based Star Graph Reduction (\(\mathcal{O}(N)\) vs \(\mathcal{O}(N^2)\))" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
 <a class="md-nav__link" href="#the-clique-edge-explosion-problem">
@@ -466,12 +474,12 @@
 </nav>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#2-anchor-based-star-graph-reduction-on-vs-on2">
+<a class="md-nav__link" href="#2-anchor-based-star-graph-reduction-mathcalon-vs-mathcalon2">
 <span class="md-ellipsis">
-      2. Anchor-Based Star Graph Reduction ($O(N)$ vs $O(N^2)$)
+      2. Anchor-Based Star Graph Reduction (\(\mathcal{O}(N)\) vs \(\mathcal{O}(N^2)\))
     </span>
 </a>
-<nav aria-label="2. Anchor-Based Star Graph Reduction ($O(N)$ vs $O(N^2)$)" class="md-nav">
+<nav aria-label="2. Anchor-Based Star Graph Reduction (\(\mathcal{O}(N)\) vs \(\mathcal{O}(N^2)\))" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
 <a class="md-nav__link" href="#the-clique-edge-explosion-problem">
@@ -617,49 +625,55 @@
 <h1 id="the-underlying-identity-resolution-algorithm">The Underlying Identity Resolution Algorithm<a class="headerlink" href="#the-underlying-identity-resolution-algorithm" title="Permanent link">¶</a></h1>
 <p>In enterprise identity resolution, <strong>black-box heuristics and unpredictable recomputation are unacceptable</strong>. Data architects, governance officers, and compliance leads require mathematical proof that:</p>
 <ol>
-<li><strong>Resolution is deterministic and transitive</strong>: If record $A$ links to $B$, and $B$ links to $C$, then $A$, $B$, and $C$ resolve to the exact same identity cluster.</li>
-<li><strong>Compute scales linearly without query planner crashes</strong>: The graph does not explode into an $O(N^2)$ pairwise join or crash on recursion depth limits.</li>
+<li><strong>Resolution is deterministic and transitive</strong>: If record <span class="arithmatex">\(A\)</span> links to <span class="arithmatex">\(B\)</span>, and <span class="arithmatex">\(B\)</span> links to <span class="arithmatex">\(C\)</span>, then <span class="arithmatex">\(A\)</span>, <span class="arithmatex">\(B\)</span>, and <span class="arithmatex">\(C\)</span> resolve to the exact same identity cluster.</li>
+<li><strong>Compute scales linearly without query planner crashes</strong>: The graph does not explode into an <span class="arithmatex">\(\mathcal{O}(N^2)\)</span> pairwise join or crash on recursion depth limits.</li>
 <li><strong>Identity IDs are stabilized across time</strong>: A customer's <code>resolved_id</code> does not randomly flip tomorrow when a new transaction arrives.</li>
 <li><strong>Megaclusters and poison-pills are mathematically bounded</strong>: Shared placeholder values cannot collapse disparate identity clusters.</li>
 </ol>
 <p>This document details the underlying graph theory, iterative pure SQL algorithms, and stabilization invariants implemented in <code>sql-identity-resolution</code>.</p>
 <hr/>
 <h2 id="1-mathematical-graph-formulation">1. Mathematical Graph Formulation<a class="headerlink" href="#1-mathematical-graph-formulation" title="Permanent link">¶</a></h2>
-<p>Identity resolution partitions a set of heterogeneous source records $V = {e_1, e_2, \dots, e_N}$ into a set of mutually exclusive, collectively exhaustive equivalence classes (resolved identity clusters):</p>
-<p>$$\mathcal{C} = {C_1, C_2, \dots, C_K} \quad \text{such that} \quad \bigcup_{k=1}^K C_k = V \quad \text{and} \quad C_i \cap C_j = \emptyset \; (\forall i \neq j)$$</p>
+<p>Identity resolution partitions a set of heterogeneous source records <span class="arithmatex">\(V = \{e_1, e_2, \dots, e_N\}\)</span> into a set of mutually exclusive, collectively exhaustive equivalence classes (resolved identity clusters):</p>
+<div class="arithmatex">\[
+\mathcal{C} = \{C_1, C_2, \dots, C_K\} \quad \text{such that} \quad \bigcup_{k=1}^K C_k = V \quad \text{and} \quad C_i \cap C_j = \emptyset \; (\forall i \neq j)
+\]</div>
 <h3 id="bipartite-to-homogeneous-graph-transformation">Bipartite to Homogeneous Graph Transformation<a class="headerlink" href="#bipartite-to-homogeneous-graph-transformation" title="Permanent link">¶</a></h3>
 <p>Source data consists of entities (rows from tables like CRM, Orders, Web Activity) and extracted, canonicalized identifiers (emails, phone numbers, loyalty cards):</p>
 <ul>
-<li>Let $E$ be the set of entity keys (e.g., <code>'crm:101'</code>, <code>'orders:509'</code>).</li>
-<li>Let $I$ be the set of canonicalized identifier values (e.g., <code>'email:alice@example.com'</code>).</li>
-<li>The relationship forms a <strong>bipartite graph</strong> $G_B = (E \cup I, E_B)$, where edges only exist between entities and their identifiers.</li>
+<li>Let <span class="arithmatex">\(E\)</span> be the set of entity keys (e.g., <code>'crm:101'</code>, <code>'orders:509'</code>).</li>
+<li>Let <span class="arithmatex">\(I\)</span> be the set of canonicalized identifier values (e.g., <code>'email:alice@example.com'</code>).</li>
+<li>The relationship forms a <strong>bipartite graph</strong> <span class="arithmatex">\(G_B = (E \cup I, E_B)\)</span>, where edges only exist between entities and their identifiers.</li>
 </ul>
-<p>To resolve identities, the engine projects $G_B$ onto the entity domain $E$, producing a homogeneous undirected graph $G = (E, \mathcal{E})$:</p>
-<p>$$(u, v) \in \mathcal{E} \iff \exists \, i \in I \quad \text{such that} \quad (u, i) \in E_B \land (v, i) \in E_B$$</p>
+<p>To resolve identities, the engine projects <span class="arithmatex">\(G_B\)</span> onto the entity domain <span class="arithmatex">\(E\)</span>, producing a homogeneous undirected graph <span class="arithmatex">\(G = (E, \mathcal{E})\)</span>:</p>
+<div class="arithmatex">\[
+(u, v) \in \mathcal{E} \iff \exists \, i \in I \quad \text{such that} \quad (u, i) \in E_B \land (v, i) \in E_B
+\]</div>
 <pre class="mermaid"><code>flowchart LR
     subgraph Bipartite["Bipartite Extraction (Raw Data)"]
-        E1["Entity: crm:101"] --- ID1["email:alice@domain.com"]
-        E2["Entity: orders:502"] --- ID1
-        E2 --- ID2["phone:5550199"]
-        E3["Entity: pos:980"] --- ID2
+        E1["Entity crm:101"] --- ID1["EMAIL: alice"]
+        E2["Entity orders:502"] --- ID1
+        E2 --- ID2["PHONE: 5550199"]
+        E3["Entity pos:980"] --- ID2
     end
 
     subgraph Homogeneous["Projected Entity Graph"]
-        H1["crm:101"] &lt;---&gt; H2["orders:502"]
-        H2 &lt;---&gt; H3["pos:980"]
+        H1["crm:101"] --- H2["orders:502"]
+        H2 --- H3["pos:980"]
     end</code></pre>
-<p>Any connected component in $G$ constitutes a single resolved identity.</p>
+<p>Any connected component in <span class="arithmatex">\(G\)</span> constitutes a single resolved identity.</p>
 <hr/>
-<h2 id="2-anchor-based-star-graph-reduction-on-vs-on2">2. Anchor-Based Star Graph Reduction ($O(N)$ vs $O(N^2)$)<a class="headerlink" href="#2-anchor-based-star-graph-reduction-on-vs-on2" title="Permanent link">¶</a></h2>
+<h2 id="2-anchor-based-star-graph-reduction-mathcalon-vs-mathcalon2">2. Anchor-Based Star Graph Reduction (<span class="arithmatex">\(\mathcal{O}(N)\)</span> vs <span class="arithmatex">\(\mathcal{O}(N^2)\)</span>)<a class="headerlink" href="#2-anchor-based-star-graph-reduction-mathcalon-vs-mathcalon2" title="Permanent link">¶</a></h2>
 <h3 id="the-clique-edge-explosion-problem">The Clique Edge Explosion Problem<a class="headerlink" href="#the-clique-edge-explosion-problem" title="Permanent link">¶</a></h3>
-<p>In a naive identity resolution implementation, if an identifier (e.g., a shared household phone or corporate domain) matches $N$ records, generating all pairwise edges creates a complete graph (clique) $K_N$:</p>
-<p>$$|\mathcal{E}_{\text{clique}}| = \frac{N(N - 1)}{2} = \mathcal{O}(N^2)$$</p>
+<p>In a naive identity resolution implementation, if an identifier (e.g., a shared household phone or corporate domain) matches <span class="arithmatex">\(N\)</span> records, generating all pairwise edges creates a complete graph (clique) <span class="arithmatex">\(K_N\)</span>:</p>
+<div class="arithmatex">\[
+\lvert \mathcal{E}_{\text{clique}} \rvert = \frac{N(N - 1)}{2} = \mathcal{O}(N^2)
+\]</div>
 <table>
 <thead>
 <tr>
-<th style="text-align: left;">Identifier Group Size ($N$)</th>
-<th style="text-align: left;">Pairwise Clique Edges ($O(N^2)$)</th>
-<th style="text-align: left;">Star Reduction Edges ($O(N)$)</th>
+<th style="text-align: left;">Identifier Group Size (<span class="arithmatex">\(N\)</span>)</th>
+<th style="text-align: left;">Pairwise Clique Edges (<span class="arithmatex">\(\mathcal{O}(N^2)\)</span>)</th>
+<th style="text-align: left;">Star Reduction Edges (<span class="arithmatex">\(\mathcal{O}(N)\)</span>)</th>
 <th style="text-align: left;">Storage &amp; Join Reduction</th>
 </tr>
 </thead>
@@ -693,38 +707,45 @@
 <p>A single frequent identifier with 10,000 records will generate <strong>50 million rows</strong> in an edge table, causing query planner OOMs, disk spillage, and massive warehouse credit burns.</p>
 <h3 id="the-anchor-reduction-theorem">The Anchor Reduction Theorem<a class="headerlink" href="#the-anchor-reduction-theorem" title="Permanent link">¶</a></h3>
 <p><code>sql-identity-resolution</code> solves this by designating a single deterministic <strong>Anchor Node</strong> for every identifier group:</p>
-<p>$$a(i) = \min {e \in E \mid (e, i) \in E_B}$$</p>
+<div class="arithmatex">\[
+a(i) = \min \{e \in E \mid (e, i) \in E_B\}
+\]</div>
 <p>Instead of generating all pairwise combinations, the engine emits only <strong>star edges</strong> connecting each non-anchor node directly to the anchor:</p>
-<p>$$\mathcal{E}_{\text{star}}(i) = {(e, a(i)) \mid e \in E, (e, i) \in E_B, e \neq a(i)}$$</p>
-<pre class="mermaid"><code>flowchart TD
-    subgraph Pairwise["Naive Clique: O(N²) Edges"]
-        direction LR
-        P1((e1)) --- P2((e2))
-        P1 --- P3((e3))
-        P1 --- P4((e4))
+<div class="arithmatex">\[
+\mathcal{E}_{\text{star}}(i) = \{(e, a(i)) \mid e \in E, (e, i) \in E_B, e \neq a(i)\}
+\]</div>
+<pre class="mermaid"><code>flowchart LR
+    subgraph Pairwise["Naive Clique (6 Pairwise Edges)"]
+        P1(("e1")) --- P2(("e2"))
+        P1 --- P3(("e3"))
+        P1 --- P4(("e4"))
         P2 --- P3
         P2 --- P4
         P3 --- P4
     end
 
-    subgraph Star["Engine Star Graph: O(N) Edges"]
-        direction LR
-        S2((e2)) --&gt; S1(["Anchor e1: min(e)"])
-        S3((e3)) --&gt; S1
-        S4((e4)) --&gt; S1
+    subgraph Star["Engine Star Graph (3 Star Edges)"]
+        S2(("e2")) --&gt; S1(["Anchor e1 = min(e)"])
+        S3(("e3")) --&gt; S1
+        S4(("e4")) --&gt; S1
     end</code></pre>
 <p><strong>Theorem (Connected Component Equivalence)</strong>:</p>
 <blockquote>
-<p><em>For any graph $G$, substituting all pairwise cliques with anchor-based star trees preserves exact connected component connectivity while reducing edge complexity from $\mathcal{O}(N^2)$ to $\mathcal{O}(N)$.</em></p>
+<p><em>For any graph <span class="arithmatex">\(G\)</span>, substituting all pairwise cliques with anchor-based star trees preserves exact connected component connectivity while reducing edge complexity from <span class="arithmatex">\(\mathcal{O}(N^2)\)</span> to <span class="arithmatex">\(\mathcal{O}(N)\)</span>.</em></p>
 </blockquote>
 <p><strong>Proof</strong>:
-If $u, v \in \text{group}(i)$, then in the star graph, $u$ is connected to $a(i)$ and $v$ is connected to $a(i)$. Thus, the path $u \leftrightarrow a(i) \leftrightarrow v$ exists. By transitivity, $u$ and $v$ remain in the same connected component. The total edges produced across the entire dataset is bounded by $\sum_{i} (|V_i| - 1) &lt; \sum_i |V_i| \in \mathcal{O}(|E_B|)$. $\blacksquare$</p>
+If <span class="arithmatex">\(u, v \in \text{group}(i)\)</span>, then in the star graph, <span class="arithmatex">\(u\)</span> is connected to <span class="arithmatex">\(a(i)\)</span> and <span class="arithmatex">\(v\)</span> is connected to <span class="arithmatex">\(a(i)\)</span>. Thus, the path <span class="arithmatex">\(u \leftrightarrow a(i) \leftrightarrow v\)</span> exists. By transitivity, <span class="arithmatex">\(u\)</span> and <span class="arithmatex">\(v\)</span> remain in the same connected component. The total edges produced across the entire dataset is bounded by <span class="arithmatex">\(\sum_{i} (\lvert V_i \rvert - 1) &lt; \sum_i \lvert V_i \rvert \in \mathcal{O}(\lvert E_B \rvert)\)</span>. <span class="arithmatex">\(\blacksquare\)</span></p>
 <hr/>
 <h2 id="3-the-anti-megacluster-guardrail-max_group_size">3. The Anti-Megacluster Guardrail (<code>max_group_size</code>)<a class="headerlink" href="#3-the-anti-megacluster-guardrail-max_group_size" title="Permanent link">¶</a></h2>
 <p>Even with star graph reduction, a dirty placeholder identifier (e.g., <code>test@example.com</code>, <code>000-000-0000</code>, <code>N/A</code>) can link tens of thousands of unrelated entities together into a <strong>poison-pill mega-cluster</strong>.</p>
-<p>To guarantee graph integrity, the engine enforces a strict mathematical circuit breaker during <code>Stage 5: edge_building</code>:</p>
-<p>$$\text{group_size}(i) = \sum_{e \in E} \mathbb{I}[(e, i) \in E_B]$$</p>
-<p>$$\text{max_allowed}(i) = \min \Big( \text{rule.max_group_size}(i), \, \text{config.max_group_size} \Big)$$</p>
+<p>To guarantee graph integrity, the engine enforces a strict mathematical circuit breaker during <code>Stage 5: edge_building</code>, comparing each identifier's group size <span class="arithmatex">\(S(i)\)</span> against the effective threshold <span class="arithmatex">\(M_{\text{allowed}}(i)\)</span>:</p>
+<div class="arithmatex">\[
+S(i) = \sum_{e \in E} \mathbb{I}[(e, i) \in E_B]
+\]</div>
+<div class="arithmatex">\[
+M_{\text{allowed}}(i) = \min \big( M_{\text{rule}}(i), \, M_{\text{global}} \big)
+\]</div>
+<p>where <span class="arithmatex">\(M_{\text{rule}}(i)\)</span> is the rule-specific <code>max_group_size</code> and <span class="arithmatex">\(M_{\text{global}}\)</span> is the global <code>max_group_size</code> ceiling.</p>
 <div class="language-sql highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="k">WITH</span><span class="w"> </span><span class="n">identifier_groups</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="p">(</span>
 </span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a><span class="w">    </span><span class="k">SELECT</span>
 </span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a><span class="w">        </span><span class="n">identifier_type</span><span class="p">,</span>
@@ -746,8 +767,8 @@ If $u, v \in \text{group}(i)$, then in the star graph, $u$ is connected to $a(i)
 </span><span id="__span-0-19"><a href="#__codelineno-0-19" id="__codelineno-0-19" name="__codelineno-0-19"></a><span class="p">)</span>
 </span></code></pre></div>
 <ol>
-<li><strong>Edge Filter</strong>: Groups with $\text{group_size} \le \text{max_allowed}$ generate valid star edges.</li>
-<li><strong>Quarantine Audit</strong>: Groups with $\text{group_size} &gt; \text{max_allowed}$ are discarded from edge creation and logged into <code>idr_out.skipped_identifier_groups</code> with the reason <code>'EXCEEDED_MAX_GROUP_SIZE'</code>.</li>
+<li><strong>Edge Filter</strong>: Groups with <span class="arithmatex">\(S(i) \le M_{\text{allowed}}(i)\)</span> generate valid star edges.</li>
+<li><strong>Quarantine Audit</strong>: Groups with <span class="arithmatex">\(S(i) &gt; M_{\text{allowed}}(i)\)</span> are discarded from edge creation and logged into <code>idr_out.skipped_identifier_groups</code> with the reason <code>'EXCEEDED_MAX_GROUP_SIZE'</code>.</li>
 <li><strong>Zero Contamination</strong>: The rest of the graph resolves normally without being polluted by the discarded identifier.</li>
 </ol>
 <hr/>
@@ -756,23 +777,25 @@ If $u, v \in \text{group}(i)$, then in the star graph, $u$ is connected to $a(i)
 <p>Most AI-generated SQL and textbook graph solutions rely on <code>WITH RECURSIVE</code>:
 - <strong>Snowflake</strong>: Recursion depth is strictly capped (default limit: 100 iterations), throwing: <code>Recursion limit reached in recursive query</code>.
 - <strong>BigQuery</strong>: Strict memory limits on recursive terms; recursive CTEs cannot be used inside materialized views or dynamic pipelines.
-- <strong>Cycle Failures</strong>: Any cycle in the graph ($A \to B \to C \to A$) causes infinite recursion unless tracked with expensive visited path arrays.</p>
+- <strong>Cycle Failures</strong>: Any cycle in the graph (<span class="arithmatex">\(A \to B \to C \to A\)</span>) causes infinite recursion unless tracked with expensive visited path arrays.</p>
 <h3 id="the-min-label-propagation-algorithm">The Min-Label Propagation Algorithm<a class="headerlink" href="#the-min-label-propagation-algorithm" title="Permanent link">¶</a></h3>
 <p><code>sql-identity-resolution</code> implements a pure set-based, parallelizable <strong>Iterative Min-Label Propagation</strong> algorithm that runs natively in any standard SQL dialect:</p>
 <ol>
 <li>
-<p><strong>Initialization ($k = 0$)</strong>:
-   Every entity node $u \in V$ is assigned its own key as its initial cluster label:
-   $$L_0(u) = u$$</p>
+<p><strong>Initialization (<span class="arithmatex">\(k = 0\)</span>)</strong>:
+    Every entity node <span class="arithmatex">\(u \in V\)</span> is assigned its own key as its initial cluster label:</p>
+<div class="arithmatex">\[
+L_0(u) = u
+\]</div>
 </li>
 <li>
-<p><strong>Propagation Step ($k \to k + 1$)</strong>:
-   In each iteration, every node queries the current labels of all its adjacent neighbors and adopts the minimum label:
-   $$L_{k+1}(u) = \min \left( L_k(u), \min_{v \in \mathcal{N}(u)} L_k(v) \right)$$</p>
-</li>
-</ol>
-<p>In SQL, this is performed by joining the symmetric edge graph against the current state table:
-   <div class="language-sql highlight"><pre><span></span><code><span id="__span-1-1"><a href="#__codelineno-1-1" id="__codelineno-1-1" name="__codelineno-1-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">idr_work</span><span class="p">.</span><span class="n">lp_state_next</span><span class="w"> </span><span class="k">AS</span>
+<p><strong>Propagation Step (<span class="arithmatex">\(k \to k + 1\)</span>)</strong>:
+    In each iteration, every node queries the current labels of all its adjacent neighbors and adopts the minimum label:</p>
+<div class="arithmatex">\[
+L_{k+1}(u) = \min \left( L_k(u), \min_{v \in \mathcal{N}(u)} L_k(v) \right)
+\]</div>
+<p>In SQL, this is performed by joining the symmetric edge graph against the current state table:</p>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-1-1"><a href="#__codelineno-1-1" id="__codelineno-1-1" name="__codelineno-1-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="k">REPLACE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">idr_work</span><span class="p">.</span><span class="n">lp_state_next</span><span class="w"> </span><span class="k">AS</span>
 </span><span id="__span-1-2"><a href="#__codelineno-1-2" id="__codelineno-1-2" name="__codelineno-1-2"></a><span class="k">WITH</span><span class="w"> </span><span class="n">neighbor_labels</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="p">(</span>
 </span><span id="__span-1-3"><a href="#__codelineno-1-3" id="__codelineno-1-3" name="__codelineno-1-3"></a><span class="w">    </span><span class="k">SELECT</span>
 </span><span id="__span-1-4"><a href="#__codelineno-1-4" id="__codelineno-1-4" name="__codelineno-1-4"></a><span class="w">        </span><span class="n">e</span><span class="p">.</span><span class="n">left_entity_key</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">entity_key</span><span class="p">,</span>
@@ -787,49 +810,55 @@ If $u, v \in \text{group}(i)$, then in the star graph, $u$ is connected to $a(i)
 </span><span id="__span-1-13"><a href="#__codelineno-1-13" id="__codelineno-1-13" name="__codelineno-1-13"></a><span class="w">    </span><span class="k">MIN</span><span class="p">(</span><span class="n">candidate_label</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">label</span>
 </span><span id="__span-1-14"><a href="#__codelineno-1-14" id="__codelineno-1-14" name="__codelineno-1-14"></a><span class="k">FROM</span><span class="w"> </span><span class="n">neighbor_labels</span>
 </span><span id="__span-1-15"><a href="#__codelineno-1-15" id="__codelineno-1-15" name="__codelineno-1-15"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">entity_key</span><span class="p">;</span>
-</span></code></pre></div></p>
-<ol>
+</span></code></pre></div>
+</li>
 <li>
 <p><strong>Convergence Metric</strong>:
-   The engine evaluates the number of nodes whose label changed during iteration $k$:
-   $$\Delta_k = \sum_{u \in V} \mathbb{I}[L_{k+1}(u) \neq L_k(u)]$$</p>
+    The engine evaluates the number of nodes whose label changed during iteration <span class="arithmatex">\(k\)</span>:</p>
+<div class="arithmatex">\[
+\Delta_k = \sum_{u \in V} \mathbb{I}[L_{k+1}(u) \neq L_k(u)]
+\]</div>
+<ul>
+<li>If <span class="arithmatex">\(\Delta_k = 0\)</span>: <strong>Graph convergence reached</strong>. The loop terminates immediately.</li>
+<li>If <span class="arithmatex">\(k \ge k_{\max}\)</span>: Guardrail safety exit (<code>max_iters</code>, default: 30 iterations).</li>
+</ul>
 </li>
-<li>
-<p>If $\Delta_k = 0$: <strong>Graph convergence reached</strong>. The loop terminates immediately.</p>
-</li>
-<li>If $k \ge \text{max_iters}$: Guardrail safety exit (default: 30 iterations).</li>
 </ol>
 <h3 id="proof-of-convergence-complexity">Proof of Convergence &amp; Complexity<a class="headerlink" href="#proof-of-convergence-complexity" title="Permanent link">¶</a></h3>
 <ul>
-<li><strong>Monotonicity</strong>: Because $L_{k+1}(u) = \min(L_k(u), \dots)$, labels are monotonically non-increasing ($L_{k+1}(u) \le L_k(u)$).</li>
-<li><strong>Lower Bound</strong>: Labels are bounded from below by $\min_{v \in C} (v)$, the minimum entity key in the connected component.</li>
-<li><strong>Termination</strong>: In a finite graph, a monotonically decreasing sequence bounded from below must reach a fixed point where $L_{k+1}(u) = L_k(u)$ for all $u$.</li>
-<li><strong>Runtime Complexity</strong>: The number of iterations required is bounded by the <strong>diameter</strong> of the component:
-  $$k_{\text{converge}} \le \text{diameter}(C)$$
-  Because star graph reduction collapses bipartite clusters into radius-2 stars, real-world customer graphs exhibit very small diameters (typically $2 \le \text{diameter} \le 6$). As a result, the engine <strong>converges in 3 to 7 iterations</strong> across millions of rows.</li>
+<li><strong>Monotonicity</strong>: Because <span class="arithmatex">\(L_{k+1}(u) = \min(L_k(u), \dots)\)</span>, labels are monotonically non-increasing (<span class="arithmatex">\(L_{k+1}(u) \le L_k(u)\)</span>).</li>
+<li><strong>Lower Bound</strong>: Labels are bounded from below by <span class="arithmatex">\(\min_{v \in C} (v)\)</span>, the minimum entity key in the connected component.</li>
+<li><strong>Termination</strong>: In a finite graph, a monotonically decreasing sequence bounded from below must reach a fixed point where <span class="arithmatex">\(L_{k+1}(u) = L_k(u)\)</span> for all <span class="arithmatex">\(u\)</span>.</li>
+<li><strong>Runtime Complexity</strong>: The number of iterations required is bounded by the <strong>diameter</strong> of the component:</li>
 </ul>
+<div class="arithmatex">\[
+k_{\text{converge}} \le \text{diameter}(C)
+\]</div>
+<p>Because star graph reduction collapses bipartite clusters into radius-2 stars, real-world customer graphs exhibit very small diameters (typically <span class="arithmatex">\(2 \le \text{diameter} \le 6\)</span>). As a result, the engine <strong>converges in 3 to 7 iterations</strong> across millions of rows.</p>
 <pre class="mermaid"><code>sequenceDiagram
     autonumber
-    actor Engine as IDR Runner
-    participant Work as idr_work.lp_state
+    participant Engine as IDR Runner
     participant Edges as idr_work.lp_edges
+    participant Work as idr_work.lp_state
 
-    Engine-&gt;&gt;Work: Init: L0(u) = u for all nodes
-    loop Until Delta = 0 or Max Iterations Reached
-        Engine-&gt;&gt;Work: Compute L_{k+1} = min(L_k, neighbor_labels)
-        Engine-&gt;&gt;Work: Count delta = rows where L_{k+1} != L_k
-        Note over Engine,Work: Delta = 0 =&gt; Convergence Achieved
+    Engine-&gt;&gt;Work: Initialize label L(u) = u for all nodes
+    loop Until delta = 0 or max_iters reached
+        Edges-&gt;&gt;Work: Join edges with current neighbor labels
+        Engine-&gt;&gt;Work: Update L(u) = MIN(candidate_label)
+        Work--&gt;&gt;Engine: Return delta (count of changed labels)
     end
-    Engine-&gt;&gt;Work: Final Component Labels Stabilized</code></pre>
+    Engine-&gt;&gt;Work: Persist converged component labels</code></pre>
 <hr/>
 <h2 id="5-deterministic-cross-run-id-stabilization">5. Deterministic Cross-Run ID Stabilization<a class="headerlink" href="#5-deterministic-cross-run-id-stabilization" title="Permanent link">¶</a></h2>
 <h3 id="the-cluster-churn-problem-in-production">The "Cluster Churn" Problem in Production<a class="headerlink" href="#the-cluster-churn-problem-in-production" title="Permanent link">¶</a></h3>
-<p>In raw connected components, the canonical cluster ID is simply the minimum node key:
-$$\text{resolved_id} = \min_{u \in C} (u)$$</p>
+<p>In raw connected components, the canonical cluster ID is simply the minimum node key:</p>
+<div class="arithmatex">\[
+\text{id}_{\text{resolved}}(C) = \min_{u \in C} (u)
+\]</div>
 <p>Consider what happens in production across two consecutive runs:
 * <strong>Day 1</strong>: Records <code>crm:500</code> and <code>orders:600</code> link together. The cluster ID is <code>crm:500</code>.
 * <strong>Day 2</strong>: A new transaction arrives: <code>pos:100</code>. It links to <code>orders:600</code>.
-* <strong>The Failure</strong>: Naive connected components now computes $\min(\text{crm:500}, \text{orders:600}, \text{pos:100}) = \mathbf{pos:100}$.</p>
+* <strong>The Failure</strong>: Naive connected components now computes <span class="arithmatex">\(\min(\text{crm:500}, \text{orders:600}, \text{pos:100}) = \mathbf{pos:100}\)</span>.</p>
 <p><strong>The entire cluster ID flipped from <code>crm:500</code> to <code>pos:100</code>!</strong>
 Downstream implications:
 - Data warehouse foreign keys pointing to <code>crm:500</code> become orphaned.
@@ -839,25 +868,28 @@ Downstream implications:
 <p><code>sql-identity-resolution</code> implements <strong>Cross-Run <code>resolved_id</code> Stabilization</strong> (<code>GraphStage._stabilize_resolved_ids</code>):</p>
 <pre class="mermaid"><code>flowchart TD
     subgraph Merge["Merge Event: Largest Cluster Wins"]
-        C1["Cluster A (Legacy ID: 'res_100')\nSize = 8 members"] 
-        C2["Cluster B (Legacy ID: 'res_200')\nSize = 2 members"]
-        Bridge["New Bridge Record\n(shares email &amp; phone)"]
+        C1["Cluster A: res_100 (8 members)"]
+        C2["Cluster B: res_200 (2 members)"]
+        Bridge["New Bridge Entity (links Cluster A and Cluster B)"]
+        Outcome["Winning Identity: res_100 (Largest Size: 8 vs 2)"]
+        Crosswalk["Crosswalk Audit: res_200 mapped to res_100"]
 
-        C1 --- Bridge
-        C2 --- Bridge
-
-        Outcome["Combined Cluster Wins ID: 'res_100'\n(Largest Size = 8 &gt; 2)\n'res_200' logged to Crosswalk"]
+        C1 --&gt; Bridge
+        C2 --&gt; Bridge
         Bridge --&gt; Outcome
+        Bridge --&gt; Crosswalk
     end</code></pre>
 <h4 id="invariant-1-monotonic-preservation-single-cluster-addition">Invariant 1: Monotonic Preservation (Single Cluster Addition)<a class="headerlink" href="#invariant-1-monotonic-preservation-single-cluster-addition" title="Permanent link">¶</a></h4>
 <p>When new records join an existing cluster, the cluster <strong>retains its established <code>resolved_id</code></strong> from <code>idr_out.identity_resolved_membership_current</code>, regardless of whether the incoming record key is lexicographically smaller.</p>
 <h4 id="invariant-2-largest-cluster-wins-merge-resolution">Invariant 2: "Largest Cluster Wins" (Merge Resolution)<a class="headerlink" href="#invariant-2-largest-cluster-wins-merge-resolution" title="Permanent link">¶</a></h4>
-<p>When a bridge identifier links two or more previously independent clusters ${C_1, C_2, \dots, C_m}$, the winning identity is selected by strict deterministic precedence:</p>
-<p>$$\text{winner} = \operatorname*{argmax}_{C_j} \Big( |C_j|, \; -\text{created_at}(C_j), \; -\text{resolved_id}(C_j) \Big)$$</p>
+<p>When a bridge identifier links two or more previously independent clusters <span class="arithmatex">\(\{C_1, C_2, \dots, C_m\}\)</span>, the winning identity is selected by strict deterministic precedence:</p>
+<div class="arithmatex">\[
+C_{\text{winner}} = \operatorname*{argmax}_{C_j} \Big( \lvert C_j \rvert, \; -t_{\text{created}}(C_j), \; -\text{id}_{\text{resolved}}(C_j) \Big)
+\]</div>
 <ol>
-<li><strong>Size Priority</strong>: The cluster with the largest historical member count wins.</li>
-<li><strong>Longevity Priority (Tie-Break 1)</strong>: If sizes are equal, the oldest cluster (earliest <code>created_at</code>) wins.</li>
-<li><strong>Lexicographical Tie-Break (Tie-Break 2)</strong>: Deterministic string comparison guarantees zero non-deterministic randomness.</li>
+<li><strong>Size Priority</strong>: The cluster with the largest historical member count <span class="arithmatex">\(\lvert C_j \rvert\)</span> wins.</li>
+<li><strong>Longevity Priority (Tie-Break 1)</strong>: If sizes are equal, the oldest cluster (earliest timestamp <span class="arithmatex">\(t_{\text{created}}(C_j)\)</span>) wins.</li>
+<li><strong>Lexicographical Tie-Break (Tie-Break 2)</strong>: Deterministic string comparison on <span class="arithmatex">\(\text{id}_{\text{resolved}}(C_j)\)</span> guarantees zero non-deterministic randomness.</li>
 </ol>
 <h4 id="invariant-3-split-determinism">Invariant 3: Split Determinism<a class="headerlink" href="#invariant-3-split-determinism" title="Permanent link">¶</a></h4>
 <p>When an override (<code>DO_NOT_LINK</code> or <code>ISOLATE</code>) severs an existing cluster into two pieces, the sub-component that contains the historical anchor preserves the original <code>resolved_id</code>. The separated sub-component is designated as a split cluster and receives a fresh canonical ID.</p>
@@ -877,11 +909,16 @@ Downstream consumers can query this crosswalk as an <strong>immutable SCD Type 2
 <h2 id="6-deterministic-blocking-key-fuzzy-matching-bridge">6. Deterministic Blocking Key + Fuzzy Matching Bridge<a class="headerlink" href="#6-deterministic-blocking-key-fuzzy-matching-bridge" title="Permanent link">¶</a></h2>
 <p>For datasets with phonetic typos, OCR scanning errors, or nickname variations (<code>"Robert"</code> vs <code>"Bob"</code>), deterministic matching can be augmented with probabilistic fuzzy rules without causing cartesian explosion:</p>
 <pre class="mermaid"><code>flowchart TD
-    D1["Deterministic Pass (Stage 1-6)\nResolves exact clusters with 100% precision"] --&gt; B1
-    B1["Blocking Key Extraction (Stage 7)\nE.g. soundex(last_name) + zip_code"] --&gt; C1
-    C1["Candidate Pruning (Stage 7)\nCompares only entities sharing the blocking key"] --&gt; S1
-    S1["Similarity Scoring (Stage 7)\nEvaluates score_expr &gt;= threshold\n(Jaro-Winkler, Levenshtein)"] --&gt; M1
-    M1["Second-Pass Label Propagation\nMerges candidate deterministic clusters"]</code></pre>
+    D1["Stage 1-6: Deterministic Pass (Exact Match Clusters)"]
+    B1["Stage 7a: Blocking Key Extraction (Soundex + Postal Prefix)"]
+    C1["Stage 7b: Candidate Pruning (Same Blocking Key Only)"]
+    S1["Stage 7c: Similarity Scoring (Jaro-Winkler / Levenshtein Threshold)"]
+    M1["Stage 7d: Second-Pass Label Propagation (Merge Candidate Clusters)"]
+
+    D1 --&gt; B1
+    B1 --&gt; C1
+    C1 --&gt; S1
+    S1 --&gt; M1</code></pre>
 <ol>
 <li><strong>Deterministic Core First</strong>: Stages 1 through 6 resolve exact deterministic links with 100% precision.</li>
 <li><strong>Blocking Key Bounding</strong>: Stage 7 extracts blocking keys (e.g. Soundex of surname + first 3 digits of Postal Code). Only entities that match on the blocking key are evaluated.</li>
@@ -893,16 +930,20 @@ Downstream consumers can query this crosswalk as an <strong>immutable SCD Type 2
 <p>When invoked with <code>--dry-run</code> or via the <strong>Dry Run Preview</strong> checkbox in the Web UI:</p>
 <ol>
 <li><strong>Parallel Execution</strong>: Stages 1 through 7 execute identically, running full canonicalization, star graph reduction, and label propagation in staging schema <code>idr_work</code>.</li>
-<li><strong>Impact Calculation</strong>: Instead of executing <code>Stage 8: output_generation</code> to overwrite <code>idr_out</code>, the engine runs <code>OutputStage.generate_dry_run_output()</code>, computing an <strong>Impact Delta</strong>:
-   <div class="language-sql highlight"><pre><span></span><code><span id="__span-3-1"><a href="#__codelineno-3-1" id="__codelineno-3-1" name="__codelineno-3-1"></a><span class="k">SELECT</span>
+<li>
+<p><strong>Impact Calculation</strong>: Instead of executing <code>Stage 8: output_generation</code> to overwrite <code>idr_out</code>, the engine runs <code>OutputStage.generate_dry_run_output()</code>, computing an <strong>Impact Delta</strong>:</p>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-3-1"><a href="#__codelineno-3-1" id="__codelineno-3-1" name="__codelineno-3-1"></a><span class="k">SELECT</span>
 </span><span id="__span-3-2"><a href="#__codelineno-3-2" id="__codelineno-3-2" name="__codelineno-3-2"></a><span class="w">    </span><span class="k">COUNT</span><span class="p">(</span><span class="k">CASE</span><span class="w"> </span><span class="k">WHEN</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">resolved_id</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">THEN</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">END</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">new_entities</span><span class="p">,</span>
 </span><span id="__span-3-3"><a href="#__codelineno-3-3" id="__codelineno-3-3" name="__codelineno-3-3"></a><span class="w">    </span><span class="k">COUNT</span><span class="p">(</span><span class="k">CASE</span><span class="w"> </span><span class="k">WHEN</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">resolved_id</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">resolved_id</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">w</span><span class="p">.</span><span class="n">resolved_id</span><span class="w"> </span><span class="k">THEN</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">END</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">moved_entities</span><span class="p">,</span>
 </span><span id="__span-3-4"><a href="#__codelineno-3-4" id="__codelineno-3-4" name="__codelineno-3-4"></a><span class="w">    </span><span class="k">COUNT</span><span class="p">(</span><span class="k">CASE</span><span class="w"> </span><span class="k">WHEN</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">resolved_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">w</span><span class="p">.</span><span class="n">resolved_id</span><span class="w"> </span><span class="k">THEN</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">END</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">unchanged_entities</span>
 </span><span id="__span-3-5"><a href="#__codelineno-3-5" id="__codelineno-3-5" name="__codelineno-3-5"></a><span class="k">FROM</span><span class="w"> </span><span class="n">idr_work</span><span class="p">.</span><span class="n">entities_delta</span><span class="w"> </span><span class="n">e</span>
 </span><span id="__span-3-6"><a href="#__codelineno-3-6" id="__codelineno-3-6" name="__codelineno-3-6"></a><span class="k">JOIN</span><span class="w"> </span><span class="n">idr_work</span><span class="p">.</span><span class="n">resolved_labels</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">entity_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">w</span><span class="p">.</span><span class="n">entity_key</span>
 </span><span id="__span-3-7"><a href="#__codelineno-3-7" id="__codelineno-3-7" name="__codelineno-3-7"></a><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">idr_out</span><span class="p">.</span><span class="n">identity_resolved_membership_current</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">entity_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">entity_key</span><span class="p">;</span>
-</span></code></pre></div></li>
-<li><strong>Zero Production Mutation</strong>: The dry run writes zero records to <code>idr_out</code>, saves execution telemetry with run prefix <code>dry_run_*</code> in <code>idr_meta.run_history</code>, and presents the impact summary directly in the UI.</li>
+</span></code></pre></div>
+</li>
+<li>
+<p><strong>Zero Production Mutation</strong>: The dry run writes zero records to <code>idr_out</code>, saves execution telemetry with run prefix <code>dry_run_*</code> in <code>idr_meta.run_history</code>, and presents the impact summary directly in the UI.</p>
+</li>
 </ol>
 <hr/>
 <h2 id="8-warehouse-complexity-performance-summary">8. Warehouse Complexity &amp; Performance Summary<a class="headerlink" href="#8-warehouse-complexity-performance-summary" title="Permanent link">¶</a></h2>
@@ -918,31 +959,31 @@ Downstream consumers can query this crosswalk as an <strong>immutable SCD Type 2
 <tbody>
 <tr>
 <td style="text-align: left;"><strong>Edge Generation</strong></td>
-<td style="text-align: left;">$\mathcal{O}(N)$</td>
+<td style="text-align: left;"><span class="arithmatex">\(\mathcal{O}(N)\)</span></td>
 <td style="text-align: left;">Star graph with <code>MIN(entity_key)</code> anchor</td>
 <td style="text-align: left;">Eliminates self-joins; uses single <code>GROUP BY</code> + star join</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Circuit Breaker</strong></td>
-<td style="text-align: left;">$\mathcal{O}(1)$ per group</td>
+<td style="text-align: left;"><span class="arithmatex">\(\mathcal{O}(1)\)</span> per group</td>
 <td style="text-align: left;"><code>HAVING COUNT(*) &lt;= max_allowed</code></td>
 <td style="text-align: left;">Prevents supernode edge creation before edge table write</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Connected Components</strong></td>
-<td style="text-align: left;">$\mathcal{O}(\text{diameter} \cdot</td>
-<td style="text-align: left;">E</td>
-<td style="text-align: left;">)$</td>
+<td style="text-align: left;"><span class="arithmatex">\(\mathcal{O}(\text{diameter} \cdot \lvert E \rvert)\)</span></td>
+<td style="text-align: left;">Iterative <code>MIN(candidate_label)</code> join</td>
+<td style="text-align: left;">Zero recursive CTEs; runs in 3–7 set-based batch iterations</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>ID Stabilization</strong></td>
-<td style="text-align: left;">$\mathcal{O}(K \log K)$</td>
+<td style="text-align: left;"><span class="arithmatex">\(\mathcal{O}(K \log K)\)</span></td>
 <td style="text-align: left;">Window rank <code>ROW_NUMBER() OVER (PARTITION BY ... ORDER BY size DESC)</code></td>
 <td style="text-align: left;">Deterministic tie-breaking; zero UUID drift on batch updates</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Incremental Delta</strong></td>
-<td style="text-align: left;">$\mathcal{O}(\Delta N)$</td>
+<td style="text-align: left;"><span class="arithmatex">\(\mathcal{O}(\Delta N)\)</span></td>
 <td style="text-align: left;">Watermark preservation + candidate expansion</td>
 <td style="text-align: left;">Short-circuits 0-delta runs without full graph recompute</td>
 </tr>
@@ -1007,5 +1048,7 @@ Downstream consumers can query this crosswalk as an <strong>immutable SCD Type 2
 <div class="md-progress" data-md-component="progress" role="progressbar"></div>
 <script id="__config" type="application/json">{"base": "..", "features": ["content.code.copy", "content.code.annotate", "content.tabs.link", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
 <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+<script src="../javascripts/mathjax.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </body>
 </html>

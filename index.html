@@ -18,6 +18,14 @@
 <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
 <link href="stylesheets/extra.css" rel="stylesheet"/>
 <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<!-- Google Tag Manager -->
+<script async="" src="https://www.googletagmanager.com/gtm.js?id=GTM-T3ZZKQZ4"></script>
+<script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  </script>
+<!-- End Google Tag Manager -->
 </head>
 <body data-md-color-accent="cyan" data-md-color-primary="custom" data-md-color-scheme="slate" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
@@ -425,7 +433,7 @@
 <div class="idr-cards-grid">
 <div class="idr-card">
 <h3>🔗 Deterministic + Fuzzy Graph Engine</h3>
-<p>Anchor-based star edges ($N-1$ edges per group) prevent $O(N^2)$ clique explosion, paired with iterative Label Propagation and optional blocking-key fuzzy super-clustering.</p>
+<p>Anchor-based star edges (<code>N-1</code> edges per group) prevent <code>O(N²)</code> clique explosion, paired with iterative Label Propagation and optional blocking-key fuzzy super-clustering.</p>
 </div>
 <div class="idr-card">
 <h3>🧼 Domain Canonicalizers &amp; Custom SQL</h3>
@@ -454,16 +462,18 @@
     subgraph Sources["Warehouse Source Tables"]
         S1["CRM Customers"]
         S2["E-Commerce Orders"]
-        S3["POS &amp; Loyalty"]
-        S4["Clickstream / Events"]
+        S3["POS and Loyalty"]
+        S4["Clickstream Events"]
     end
 
-    subgraph Engine["8-Stage SQL Identity Resolution Engine (idr_core / dbt_idr)"]
-        E1["1-3. Delta + State-Diff Extraction\n&amp; Canonicalization"]
-        E2["4-5. Anchor Edge Builder\n&amp; Stewardship Overrides"]
-        E3["6-7. Label Propagation +\nPersistent ID Stabilization"]
-        E4["8. Golden Profile Survivorship\n&amp; Crosswalk Ledger"]
-        E1 --&gt; E2 --&gt; E3 --&gt; E4
+    subgraph Engine["8-Stage SQL Identity Resolution Engine"]
+        E1["Stages 1-3: Delta Extraction and Canonicalization"]
+        E2["Stages 4-5: Star Edge Builder and Overrides"]
+        E3["Stages 6-7: Label Propagation and ID Stabilization"]
+        E4["Stage 8: Golden Profile Survivorship and Crosswalk"]
+        E1 --&gt; E2
+        E2 --&gt; E3
+        E3 --&gt; E4
     end
 
     subgraph Outputs["Warehouse Output Tables (idr_out)"]
@@ -473,15 +483,23 @@
         O4["resolved_id_crosswalk"]
     end
 
-    subgraph Tooling["Interfaces &amp; Integrations"]
-        T1["React Web UI &amp; Explorer"]
-        T2["CLI &amp; FastAPI"]
+    subgraph Tooling["Interfaces and Integrations"]
+        T1["React Web UI and Explorer"]
+        T2["CLI and FastAPI"]
         T3["FastMCP Server (AI Agents)"]
     end
 
-    Sources --&gt; E1
-    E4 --&gt; Outputs
-    Outputs --&gt; Tooling</code></pre>
+    S1 --&gt; E1
+    S2 --&gt; E1
+    S3 --&gt; E1
+    S4 --&gt; E1
+    E4 --&gt; O1
+    E4 --&gt; O2
+    E4 --&gt; O3
+    E4 --&gt; O4
+    O1 --&gt; T1
+    O2 --&gt; T2
+    O3 --&gt; T3</code></pre>
 <hr/>
 <h2 id="documentation-map">📚 Documentation Map<a class="headerlink" href="#documentation-map" title="Permanent link">¶</a></h2>
 <table>
@@ -499,6 +517,10 @@
 <tr>
 <td style="text-align: left;"><strong><a href="concepts-and-architecture/">Concepts &amp; Architecture</a></strong></td>
 <td style="text-align: left;">Identifiers vs. attributes, the 8 pipeline stages, incremental watermark + no-watermark state-diffing, and persistent <code>resolved_id</code> stabilization.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><a href="algorithm-and-graph-engine/">Algorithm &amp; Graph Engine</a></strong></td>
+<td style="text-align: left;">Mathematical graph formulation, <span class="arithmatex">\(\mathcal{O}(N)\)</span> anchor star reduction theorem, pure SQL iterative label propagation, and ID stabilization invariants.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong><a href="configuration-and-governance/">Configuration &amp; Governance</a></strong></td>
@@ -560,5 +582,7 @@
 <div class="md-progress" data-md-component="progress" role="progressbar"></div>
 <script id="__config" type="application/json">{"base": ".", "features": ["content.code.copy", "content.code.annotate", "content.tabs.link", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight"], "search": "assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
 <script src="assets/javascripts/bundle.83f73b43.min.js"></script>
+<script src="javascripts/mathjax.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </body>
 </html>
