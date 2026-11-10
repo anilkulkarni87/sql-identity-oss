@@ -17,3 +17,5 @@ sources:
         description: "Maps source columns to profile attributes"
       - name: idr_survivorship_rules
         description: "Defines how to pick winning values for golden profiles"
+      - name: idr_overrides
+        description: "Manual stewardship overrides (FORCE_LINK, DO_NOT_LINK, ISOLATE)"
