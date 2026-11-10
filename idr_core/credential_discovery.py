@@ -38,17 +38,75 @@ def _mask(val: Optional[str], show_last: int = 4) -> str:
     return "*" * (len(val) - show_last) + val[-show_last:]
 
 
+def _clean_str(val: Optional[Any]) -> str:
+    """Trim whitespace and surrounding quotes from configuration values."""
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+        s = s[1:-1].strip()
+    return s
+
+
+def _sanitize_host(raw_host: Optional[str]) -> str:
+    """Sanitize warehouse hostname to domain/host only (no protocol, port, or path)."""
+    cleaned = _clean_str(raw_host)
+    if not cleaned:
+        return ""
+    if cleaned.startswith("https://"):
+        cleaned = cleaned[len("https://"):]
+    elif cleaned.startswith("http://"):
+        cleaned = cleaned[len("http://"):]
+    # Strip any path or query parameters (e.g. /sql/1.0/... or ?o=...)
+    cleaned = cleaned.split("/")[0].split("?")[0].strip()
+    return cleaned
+
+
 def discover_from_env() -> List[Dict[str, Any]]:
-    """Discover credentials defined in active environment variables."""
+    """Discover credentials defined in active environment variables or local .env files."""
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        home_env = Path.home() / ".env"
+        if home_env.exists():
+            load_dotenv(dotenv_path=home_env)
+    except Exception:
+        pass
+
     results: List[Dict[str, Any]] = []
 
     # 1. Databricks
-    db_host = os.environ.get("DATABRICKS_HOST") or os.environ.get("DATABRICKS_SERVER_HOSTNAME")
+    db_host = (
+        os.environ.get("DATABRICKS_HOST")
+        or os.environ.get("DATABRICKS_SERVER_HOSTNAME")
+        or os.environ.get("DATABRICKS_URL")
+        or os.environ.get("DATABRICKS_WORKSPACE_URL")
+    )
     if db_host:
-        clean_host = db_host.replace("https://", "").rstrip("/")
-        token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_ACCESS_TOKEN", "")
-        http_path = os.environ.get("DATABRICKS_HTTP_PATH", "")
-        catalog = os.environ.get("DATABRICKS_CATALOG", "")
+        clean_host = _sanitize_host(db_host)
+        token = _clean_str(
+            os.environ.get("DATABRICKS_TOKEN")
+            or os.environ.get("DATABRICKS_ACCESS_TOKEN")
+            or os.environ.get("DATABRICKS_PAT")
+            or os.environ.get("DATABRICKS_API_KEY")
+        )
+        http_path = _clean_str(
+            os.environ.get("DATABRICKS_HTTP_PATH")
+            or os.environ.get("DATABRICKS_SQL_HTTP_PATH")
+        )
+        if not http_path:
+            wh_id = _clean_str(os.environ.get("DATABRICKS_WAREHOUSE_ID") or os.environ.get("DATABRICKS_CLUSTER_ID"))
+            if wh_id:
+                http_path = f"/sql/1.0/warehouses/{wh_id}"
+
+        catalog = _clean_str(
+            os.environ.get("DATABRICKS_CATALOG")
+            or os.environ.get("DATABRICKS_DATABASE")
+            or "main"
+        )
+        schema = _clean_str(os.environ.get("DATABRICKS_SCHEMA") or "default")
+
         results.append({
             "id": "env_databricks",
             "source": "env",
@@ -59,7 +117,8 @@ def discover_from_env() -> List[Dict[str, Any]]:
                 "server_hostname": clean_host,
                 "http_path": http_path,
                 "access_token": token,
-                "catalog": catalog,
+                "catalog": catalog or "main",
+                "schema": schema or "default",
             },
             "masked_summary": f"Host: {clean_host} | Token: {_mask(token)}",
         })
@@ -129,33 +188,83 @@ def discover_from_env() -> List[Dict[str, Any]]:
 
 
 def discover_from_databrickscfg(config_path: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """Discover credentials from ~/.databrickscfg."""
+    """Discover credentials from ~/.databrickscfg with support for headless INI, profiles, and tokens."""
     results: List[Dict[str, Any]] = []
     cfg_file = config_path or (Path.home() / ".databrickscfg")
     if not cfg_file.exists():
         return results
 
     try:
-        parser = configparser.ConfigParser(default_section=None)
-        parser.read(str(cfg_file))
-        for section in parser.sections():
-            host = parser.get(section, "host", fallback="")
-            if not host:
+        content = cfg_file.read_text(encoding="utf-8")
+        lines = content.splitlines()
+
+        # Check if file has standard INI section headers [SECTION]
+        has_section = any(
+            line.strip().startswith("[") and line.strip().endswith("]")
+            for line in lines
+            if line.strip() and not line.strip().startswith(("#", ";"))
+        )
+        if not has_section:
+            # Headless configuration: wrap content in a default section
+            content = "[DEFAULT]\n" + content
+
+        # Use RawConfigParser to prevent interpolation errors on tokens containing '%'
+        parser = configparser.RawConfigParser()
+        parser.read_string(content)
+
+        sections: List[str] = list(parser.sections())
+        # RawConfigParser default section handling
+        if "DEFAULT" in parser and "DEFAULT" not in sections:
+            sections.insert(0, "DEFAULT")
+
+        for section in sections:
+            sec_name = str(section).strip("'\" ")
+            sec_dict = dict(parser[section])
+            raw_host = (
+                sec_dict.get("host")
+                or sec_dict.get("server_hostname")
+                or sec_dict.get("server-hostname")
+                or sec_dict.get("workspace_url")
+                or sec_dict.get("workspace-url")
+                or ""
+            )
+            clean_host = _sanitize_host(raw_host)
+            if not clean_host:
                 continue
-            clean_host = host.replace("https://", "").rstrip("/")
-            token = parser.get(section, "token", fallback="")
-            http_path = parser.get(section, "http_path", fallback="")
+
+            token = _clean_str(
+                sec_dict.get("token")
+                or sec_dict.get("access_token")
+                or sec_dict.get("access-token")
+                or sec_dict.get("personal_access_token")
+                or sec_dict.get("password")
+                or sec_dict.get("pwd")
+            )
+            http_path = _clean_str(
+                sec_dict.get("http_path")
+                or sec_dict.get("http-path")
+                or sec_dict.get("sql_endpoint_path")
+            )
+            if not http_path:
+                wh_id = _clean_str(sec_dict.get("warehouse_id") or sec_dict.get("cluster_id"))
+                if wh_id:
+                    http_path = f"/sql/1.0/warehouses/{wh_id}"
+
+            catalog = _clean_str(sec_dict.get("catalog") or sec_dict.get("database") or "main")
+            schema = _clean_str(sec_dict.get("schema") or "default")
+
             results.append({
-                "id": f"cli_databricks_{section.lower()}",
+                "id": f"cli_databricks_{sec_name.lower()}",
                 "source": "cli_config",
                 "platform": "databricks",
-                "name": f"Databricks CLI Profile [{section}]",
-                "description": f"Host: {clean_host}",
+                "name": f"Databricks CLI Profile [{sec_name}]",
+                "description": f"Host: {clean_host}" + (f" | Warehouse: {http_path.split('/')[-1]}" if http_path else ""),
                 "params": {
                     "server_hostname": clean_host,
                     "http_path": http_path,
                     "access_token": token,
-                    "catalog": "main",
+                    "catalog": catalog or "main",
+                    "schema": schema or "default",
                 },
                 "masked_summary": f"Host: {clean_host} | Token: {_mask(token)}",
             })
@@ -430,3 +539,8 @@ def discover_all_connections() -> List[Dict[str, Any]]:
         deduped.append(item)
 
     return deduped
+
+
+# Convenience alias for CLI and external consumers
+discover_all = discover_all_connections
+

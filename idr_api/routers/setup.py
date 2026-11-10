@@ -99,14 +99,20 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
 
                 from idr_core.adapters.databricks import DatabricksAdapter
 
+                raw_host = params.get("server_hostname") or ""
+                clean_host = raw_host.strip("'\" \t").replace("https://", "").replace("http://", "").split("/")[0]
+                http_path = (params.get("http_path") or "").strip("'\" \t")
+                token = (params.get("access_token") or "").strip("'\" \t")
+                catalog = (params.get("catalog") or "main").strip("'\" \t")
+
                 conn = sql.connect(
-                    server_hostname=params.get("server_hostname"),
-                    http_path=params.get("http_path"),
-                    access_token=params.get("access_token"),
+                    server_hostname=clean_host,
+                    http_path=http_path,
+                    access_token=token,
                 )
-                adapter = DatabricksAdapter(conn, catalog=params.get("catalog"))
+                adapter = DatabricksAdapter(conn, catalog=catalog)
             except ImportError:
-                raise HTTPException(400, "Databricks connector not installed")
+                raise HTTPException(400, "Databricks connector not installed. Run: pip install databricks-sql-connector")
 
         else:
             raise HTTPException(400, f"Unsupported platform: {request.platform}")
