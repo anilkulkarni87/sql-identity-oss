@@ -14,12 +14,14 @@ idr [--help] <command> [options]
 
 | Command | Description |
 | :--- | :--- |
-| `idr run` | Execute full or incremental identity resolution pipelines |
+| `idr ui` | Launch the interactive IDR Studio UI & API server in one command (opens browser automatically) |
+| `idr run` | Execute full or incremental identity resolution pipelines (`--platform` auto-detected if omitted) |
 | `idr init` | Provision or reset system schemas (`idr_meta`, `idr_work`, `idr_out`) |
-| `idr config` | Validate, generate SQL DDL, or apply declarative YAML configurations |
+| `idr config` | Validate, generate SQL DDL, apply YAML configurations, or export to `dbt_idr` seeds |
+| `idr dbt export` | Export YAML or live warehouse metadata directly into the 6 standard `dbt_idr` seed CSVs |
 | `idr quickstart` | Generate synthetic multi-channel retail data and run an automated local demo |
-| `idr mcp` | Start the Model Context Protocol (MCP) server for AI assistants |
-| `idr serve` | Launch the FastAPI REST service and Prometheus metrics endpoint |
+| `idr mcp` / `idr-mcp` | Start the Model Context Protocol (MCP) server for AI assistants (19 tools) |
+| `idr serve` | Launch the FastAPI REST service, bundled UI, and Prometheus metrics endpoint |
 | `idr version` | Print current package and engine version |
 
 ---
@@ -38,7 +40,7 @@ idr run --platform=<platform> [connection-flags] [options]
 
 | Option | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--platform` | `-p` | String | **Required** | Target warehouse: `duckdb`, `snowflake`, `bigquery`, or `databricks` |
+| `--platform` | `-p` | String | Auto-detected | Target warehouse: `duckdb`, `snowflake`, `bigquery`, or `databricks` (inferred from `--db`, `--project`, `IDR_PLATFORM`, or local credentials if omitted) |
 | `--mode` | `-m` | String | `FULL` | Pipeline execution mode: `FULL` (complete rebuild) or `INCR` (delta watermarks) |
 | `--config` | | Path | None | Path to declarative YAML configuration to apply prior to run |
 | `--max-iters` | | Integer | `30` | Maximum iterations for distributed label propagation |
@@ -122,11 +124,22 @@ Manage, validate, and generate SQL from declarative YAML configurations.
   idr config generate --file=rules.yaml --dialect=snowflake > deploy_rules.sql
   ```
 
-* **`idr config apply --file=<path> --platform=<platform> [connection-flags]`**:
+* **`idr config apply --file=<path> [--platform=<platform>] [connection-flags]`**:
   Executes generated SQL statements directly against your target warehouse to update metadata tables.
 
   ```bash
-  idr config apply --file=rules.yaml --platform=duckdb --db=demo.duckdb
+  idr config apply --file=rules.yaml --db=demo.duckdb
+  ```
+
+* **`idr dbt export` (or `idr config export-dbt`)**:
+  Compiles a YAML configuration file (`--file`) or live warehouse `idr_meta` tables (`--db` / `--platform`) into the 6 standard `dbt_idr` seed CSV files (`idr_sources.csv`, `idr_identifier_mappings.csv`, `idr_attribute_mappings.csv`, `idr_rules.csv`, `idr_exclusions.csv`, `idr_survivorship_rules.csv`).
+
+  ```bash
+  # Export from YAML manifest to your dbt project's seeds directory
+  idr dbt export --file=idr_config.yaml --output-dir=dbt_idr/seeds
+
+  # Export from live DuckDB metadata tables configured via the Web UI
+  idr dbt export --db=demo.duckdb --output-dir=dbt_idr/seeds
   ```
 
 ---
@@ -165,12 +178,19 @@ idr mcp [--transport=stdio|sse]
 
 ---
 
-### 6. `idr serve`
+### 6. `idr ui` & `idr serve`
 
-Starts the FastAPI REST server with Swagger UI documentation (`/docs`) and Prometheus metrics scraper (`/metrics`).
+Starts the FastAPI REST server, serves the embedded React Studio SPA, and exposes Swagger UI documentation (`/docs`) and Prometheus metrics (`/metrics`).
 
 ```bash
-idr serve [--host=0.0.0.0] [--port=8000] [--reload]
+# Launch UI + API and automatically open http://localhost:8000 in your browser:
+idr ui [--host=127.0.0.1] [--port=8000] [--no-browser]
+
+# Zero-install execution via uvx:
+uvx --from "sql-identity-resolution[all]" idr ui
+
+# Headless API / UI server mode:
+idr serve [--host=0.0.0.0] [--port=8000] [--reload] [--open]
 ```
 
 #### Options

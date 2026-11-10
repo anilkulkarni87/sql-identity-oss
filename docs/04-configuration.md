@@ -1,27 +1,156 @@
-# Configuration Guide
+# Configuration Guide: Mental Model, Core Fields & Runtime Lifecycle
 
-IDR configurations are managed through declarative YAML manifests or through the interactive Web Setup Wizard.
+IDR configurations can be authored as a declarative YAML manifest (`idr_config.yaml`), configured visually through the **6-Step Web UI Setup Wizard** (`idr ui`), or generated automatically by an AI agent via FastMCP (`discover_and_suggest_rules`).
+
+Regardless of how you create it, the configuration defines **four core concepts**:
+
+1. **Primary Keys (`entity_key`)** — How to uniquely identify each raw row.
+2. **Watermark Columns (`watermark_column`)** — How to track incremental changes and recency.
+3. **Identifiers (`identifiers`)** — Which columns link records together into identity clusters.
+4. **Attributes (`attributes` & `survivorship`)** — Which columns populate the unified Golden Profile.
 
 ---
 
-## 📄 Complete Example Manifest
+## 🧠 Core Concepts Explained
+
+### 1. Primary Key (`entity_key`) & Source ID (`id`)
+
+Every source table must specify a short `id` (e.g., `"crm"`, `"orders"`, `"pos"`) and an `entity_key` column or SQL expression (e.g., `"customer_id"`, `"order_id"`).
+
+* **Why it is required:** Different source systems frequently use auto-incrementing integers (`1, 2, 3...`) that would collide if pooled together.
+* **How the app uses it:** During extraction, IDR combines `id` and `entity_key` into a globally unique composite node key formatted as `<source_id>:<entity_key>`:
+  * Row `1042` in `raw.crm_customers` (`id: "crm"`) becomes **`crm:1042`**
+  * Row `1042` in `raw.web_orders` (`id: "orders"`) becomes **`orders:1042`**
+* **Deterministic Cluster ID (`resolved_id`):** When multiple records merge into a cluster, IDR deterministically assigns the lexicographically smallest `entity_key` in that connected component (e.g., `crm:1042`) as the cluster's canonical `resolved_id`.
+
+> [!TIP]
+> **What if my table has a composite primary key?**
+> Because `entity_key` accepts safe SQL expressions, you can pass `CONCAT(store_id, '-', transaction_id)` if a table does not have a single-column primary key.
+
+---
+
+### 2. Identifiers vs. Attributes (What's the Difference?)
+
+New users often ask why a column like `email` or `phone` can appear in both `identifiers` and `attributes`. They serve two completely different stages of the pipeline:
+
+| Concept | Pipeline Stage | Question It Answers | Examples | Output Table Impacted |
+| :--- | :--- | :--- | :--- | :--- |
+| **Identifiers** (`sources[].identifiers`) | **Stage 2 & 3:** Graph Edge Building | *"Do these two records belong to the same real-world person?"* | `email`, `phone`, `loyalty_id`, `ssn`, `account_id` | `idr_out.identity_edges_current`<br/>`idr_out.identity_resolved_membership_current` |
+| **Attributes** (`sources[].attributes`) | **Stage 5 & 6:** Golden Profile & Survivorship | *"Now that these 5 records are merged, what is the customer's best name, email, and city?"* | `first_name`, `last_name`, `email`, `phone`, `billing_city`, `vip_tier` | `idr_out.golden_profiles` |
+
+* **Rule of Thumb:**
+  * Put a column in **`identifiers`** ONLY if two records sharing that exact value should be linked together as the same person (never put `first_name` or `city` in `identifiers`, or every "John" will merge into one cluster!).
+  * Put a column in **`attributes`** if you want that field to appear as a consolidated column on the final **Golden Profile** (`idr_out.golden_profiles`) or if a **Fuzzy Rule** needs to compare it within an already-blocked candidate pair.
+  * Put `email` and `phone` in **both** if you want to link records by email/phone *and* want `email_primary` and `phone_primary` on your Golden Profile.
+
+---
+
+### 3. Watermark Column (`watermark_column`) & Why It Is Required
+
+Every source table defines a `watermark_column` (such as `updated_at`, `modified_ts`, `order_date`, or `ingested_at`).
+
+#### Why the App Requires It:
+
+1. **90–99% Lower Warehouse Compute in Incremental Mode (`--mode INCR`):**
+   * After every successful run, IDR records the maximum observed timestamp per source table in `idr_meta.run_state` (`last_watermark_value`).
+   * On the next incremental run, IDR automatically generates a delta filter:
+     ```sql
+     WHERE updated_at > '<last_watermark_value>' - INTERVAL '<watermark_lookback_minutes> minutes'
+     ```
+   * Instead of re-scanning 500 million historical rows, the warehouse only scans rows inserted or updated since the last run, then stitches those delta entities into existing clusters.
+2. **Tie-Breaking in `RECENCY` Survivorship:**
+   * Suppose `crm:1` (updated in `2023`) has phone `555-0100`, and `orders:99` (updated in `2026`) has phone `555-0199`.
+   * When constructing `idr_out.golden_profiles`, the `RECENCY` strategy orders candidate values by each source record's watermark/recency timestamp (`ORDER BY record_updated_at DESC`) so the customer's newest phone number wins.
+
+> [!NOTE]
+> **What if my table doesn't have an `updated_at` timestamp?**
+> * Use a creation/event timestamp column (`created_at`, `order_date`, `signup_date`).
+> * If the table is a static snapshot with no date/timestamp column at all, always run in `--mode FULL` (full refresh) and use `PRIORITY` or `FREQUENCY` survivorship instead of `RECENCY`.
+
+---
+
+## 🔄 How the App Uses Your Configuration Under the Hood
+
+Whether you configure IDR via **YAML (`idr_config.yaml`)**, the **Web UI Setup Wizard**, or **FastMCP Agent tools**, the application compiles your configuration into the **`idr_meta`** schema (or **`dbt_idr` seed CSVs**) and executes a 6-stage SQL pipeline:
+
+```mermaid
+flowchart TD
+    subgraph Input["1. Configuration Surface (Choose Any)"]
+        YAML["YAML Manifest<br/>(idr_config.yaml)"]
+        UI["Web UI Setup Wizard<br/>(idr ui)"]
+        MCP["AI Agent / FastMCP<br/>(discover_and_suggest_rules)"]
+    end
+
+    subgraph Compiler["2. Config Compiler (idr_core/config.py)"]
+        SQL_GEN["config_to_sql()<br/>Dialect-aware MERGE / UPSERT"]
+        DBT_GEN["config_to_dbt_seeds()<br/>(idr dbt export)"]
+    end
+
+    subgraph Meta["3. Warehouse Metadata Tables (idr_meta.*)"]
+        M_SRC["source_table<br/>(table_fqn, entity_key_expr, watermark_column)"]
+        M_ID["identifier_mapping<br/>(identifier_type, identifier_value_expr)"]
+        M_RULE["rule & identifier_exclusion<br/>(canonicalize, max_group_size, blocklist)"]
+        M_ATTR["entity_attribute_mapping & survivorship_rule<br/>(attribute_expr, strategy, source_priority)"]
+    end
+
+    subgraph Pipeline["4. In-Warehouse SQL Execution (idr_work.* -> idr_out.*)"]
+        S1["Stage 1: Entity Extraction<br/>Reads source_table + watermark_column<br/>Builds composite entity_key (source:pk)"]
+        S2["Stage 2: Identifier Extraction<br/>Reads identifier_mapping + exclusions<br/>Normalizes & filters bad PII values"]
+        S3["Stage 3: Anchor Edge Building<br/>Groups by identifier_value_norm<br/>Skips groups > max_group_size"]
+        S4["Stage 4: Label Propagation<br/>Propagates min(entity_key) across edges<br/>Assigns deterministic resolved_id"]
+        S5["Stage 5 & 6: Survivorship & Output<br/>Applies PRIORITY / RECENCY / FREQUENCY<br/>Materializes golden_profiles & clusters"]
+    end
+
+    YAML --> SQL_GEN
+    UI --> SQL_GEN
+    MCP --> SQL_GEN
+    YAML --> DBT_GEN
+    MCP --> DBT_GEN
+
+    SQL_GEN --> M_SRC
+    SQL_GEN --> M_ID
+    SQL_GEN --> M_RULE
+    SQL_GEN --> M_ATTR
+
+    M_SRC --> S1
+    M_ID --> S2
+    M_RULE --> S2
+    M_RULE --> S3
+    S1 --> S2 --> S3 --> S4 --> S5
+    M_ATTR --> S5
+```
+
+### Stage-by-Stage Config Consumption Matrix
+
+| Config Section | Stored In (`idr_meta` / `dbt_idr` Seed) | Consumed By Stage | Exact SQL Behavior |
+| :--- | :--- | :--- | :--- |
+| `sources[].id`<br/>`sources[].table`<br/>`sources[].entity_key`<br/>`sources[].watermark_column` | `idr_meta.source_table`<br/>(`idr_sources.csv`) | **Stage 1: Entity Extraction** | Queries each active `table_fqn`, applies the incremental `watermark_column` filter, and emits `CONCAT('<id>', ':', CAST(<entity_key> AS VARCHAR))` into `idr_work.entities_delta`. |
+| `sources[].identifiers` | `idr_meta.identifier_mapping`<br/>(`idr_identifier_mappings.csv`) | **Stage 2: Identifier Extraction** | Extracts each mapped column (`email`, `phone`, `loyalty_id`), applies `LOWER()` / `UPPER()` from `rules[].canonicalize`, and strips `NULL` or empty strings. |
+| `exclusions[]` | `idr_meta.identifier_exclusion`<br/>(`idr_exclusions.csv`) | **Stage 2: Identifier Extraction** | Filters out known toxic placeholder values (`EXACT` or `LIKE`, e.g. `test@%`, `0000000000`) *before* any graph joins occur. |
+| `rules[]` | `idr_meta.rule`<br/>(`idr_rules.csv`) | **Stage 3: Edge Building** | Groups records sharing the same normalized `identifier_type` + `identifier_value_norm`. If a group has $> \text{max\_group\_size}$ entities, it is quarantined to `idr_out.skipped_identifier_groups`; otherwise, every member links to the group's minimum `anchor_entity_key`. |
+| `fuzzy_rules[]` | `idr_meta.fuzzy_rule` | **Stage 5: Fuzzy Refinement** | Partitions clusters by `blocking_key`, evaluates dialect-specific `score_expr` (e.g., Jaro-Winkler), and links clusters scoring $\ge \text{threshold}$ via `super_cluster_id` (disabled when `--strict` is passed). |
+| `sources[].attributes`<br/>`survivorship[]` | `idr_meta.entity_attribute_mapping`<br/>`idr_meta.survivorship_rule`<br/>(`idr_attribute_mappings.csv`, `idr_survivorship_rules.csv`) | **Stage 6: Golden Profile Generation** | Joins all member records in each cluster and ranks non-null candidate values per attribute using window functions (`ROW_NUMBER() OVER (PARTITION BY resolved_id ORDER BY ...)`), outputting the winning values to `idr_out.golden_profiles`. |
+
+---
+
+## 📄 Complete Annotated Example Manifest
 
 ```yaml
 sources:
-  - id: "crm"
-    table: "raw.crm_customers"
-    entity_key: "customer_id"
+  - id: "crm"                           # Short prefix -> produces entity_keys like "crm:1001"
+    table: "raw.crm_customers"          # Warehouse table FQN (schema.table or catalog.schema.table)
+    entity_key: "customer_id"           # Unique primary key column in raw.crm_customers
     entity_type: "PERSON"
-    watermark_column: "updated_at"
-    watermark_lookback_minutes: 0
-    identifiers:
+    watermark_column: "updated_at"      # Used for incremental (INCR) delta filtering & RECENCY tie-breaking
+    watermark_lookback_minutes: 0       # Optional safety buffer for late-arriving streaming data
+    identifiers:                        # Columns used to LINK records together into clusters
       - type: "email"
         expr: "email"
       - type: "phone"
         expr: "phone"
       - type: "loyalty"
         expr: "loyalty_id"
-    attributes:
+    attributes:                         # Columns carried into the final Golden Profile (Customer 360)
       - name: "first_name"
         expr: "first_name"
       - name: "last_name"
@@ -31,16 +160,16 @@ sources:
       - name: "phone"
         expr: "phone"
 
-  - id: "web"
+  - id: "web"                           # Produces entity_keys like "web:5009"
     table: "raw.web_users"
     entity_key: "user_id"
     entity_type: "PERSON"
     watermark_column: "last_login_ts"
     identifiers:
       - type: "email"
-        expr: "user_email"
+        expr: "user_email"              # Maps source column `user_email` -> semantic identifier `email`
       - type: "phone"
-        expr: "mobile_phone"
+        expr: "mobile_phone"            # Maps source column `mobile_phone` -> semantic identifier `phone`
     attributes:
       - name: "first_name"
         expr: "first_name"
@@ -52,10 +181,10 @@ sources:
 rules:
   - id: "r_email"
     type: "EXACT"
-    match_keys: ["email"]
-    canonicalize: "LOWERCASE"
+    match_keys: ["email"]               # Links any records sharing the `email` identifier type
+    canonicalize: "LOWERCASE"           # Normalizes 'Alice@Example.com' -> 'alice@example.com'
     priority: 1
-    max_group_size: 100
+    max_group_size: 100                 # Guardrail: skips shared emails appearing on >100 records
 
   - id: "r_phone"
     type: "EXACT"
@@ -85,11 +214,11 @@ fuzzy_rules:
 
 survivorship:
   - attribute: "first_name"
-    strategy: "PRIORITY"
+    strategy: "PRIORITY"                # Prefer CRM over Web for first_name (skips NULLs automatically)
     source_priority: ["crm", "web"]
 
   - attribute: "last_name"
-    strategy: "RECENCY"
+    strategy: "RECENCY"                 # Pick the most recently updated non-null last_name
     recency_field: "updated_at"
 
   - attribute: "email"
@@ -97,7 +226,7 @@ survivorship:
     recency_field: "updated_at"
 
   - attribute: "phone"
-    strategy: "FREQUENCY"
+    strategy: "FREQUENCY"               # Pick the most common phone value across the cluster
 
 exclusions:
   - identifier_type: "email"
@@ -113,21 +242,21 @@ exclusions:
 
 ---
 
-## 🛠️ Section Breakdown
+## 🛠️ Field Reference Tables
 
 ### 1. `sources`
 Defines source tables to ingest into the identity graph.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `id` | string | Yes | Unique source identifier (used in lineage and priority survivorship). |
+| `id` | string | Yes | Unique source prefix (used in `entity_key` prefixing, lineage, and `PRIORITY` survivorship). |
 | `table` | string | Yes | Fully-qualified table name (`schema.table` or `catalog.schema.table`). |
-| `entity_key` | string | Yes | Unique primary key column / expression in the source table. |
+| `entity_key` | string | Yes | Unique primary key column or SQL expression in the source table. |
 | `entity_type` | string | No | Entity categorization (default: `"PERSON"`). |
-| `watermark_column` | string | No | Timestamp column used for incremental processing (`INCR` mode). |
+| `watermark_column` | string | No | Timestamp/date column used for incremental delta filtering (`INCR` mode) and `RECENCY` survivorship (default: `"updated_at"`). |
 | `watermark_lookback_minutes` | integer | No | Buffer window (minutes) for late-arriving records (default: `0`). |
-| `identifiers` | list | Yes | List of identifier mapping specs (`type`, `expr`, `is_hashed`). |
-| `attributes` | list | No | List of profile attributes for Golden Profile generation (`name`, `expr`). |
+| `identifiers` | list | Yes | List of identifier mappings (`type`, `expr`, `is_hashed`) used to build matching edges. |
+| `attributes` | list | No | List of profile attributes (`name`, `expr`) used to build `idr_out.golden_profiles`. |
 
 ### 2. `rules` (Deterministic Matching)
 Exact matching rules that form graph edges.
@@ -137,7 +266,7 @@ Exact matching rules that form graph edges.
 | `id` | string | Required | Unique rule ID. |
 | `type` | string | `"EXACT"` | Match type. |
 | `match_keys` | list | Required | Identifier types that must match (e.g. `["email"]`). |
-| `canonicalize` | string | `"LOWERCASE"` | Value normalization: `"LOWERCASE"`, `"UPPERCASE"`, or `"EXACT"`. |
+| `canonicalize` | string | `"LOWERCASE"` | Value normalization: `"LOWERCASE"`, `"UPPERCASE"`, or `"EXACT"` / `"NONE"`. |
 | `priority` | integer | `100` | Rule priority (lower number = higher edge priority in evidence). |
 | `max_group_size` | integer | `10000` | High-cardinality guardrail. Groups larger than this are skipped and logged to `idr_out.skipped_identifier_groups`. |
 
@@ -161,12 +290,12 @@ Controls how attributes from multiple source records within a cluster are consol
 
 | Strategy | Description | Required Parameters |
 |---|---|---|
-| **`RECENCY`** | Selects the non-null value from the record with the most recent timestamp. | `recency_field` (or defaults to source watermark column) |
-| **`PRIORITY`** | Selects the value from the highest-ranked source system. Automatically skips NULL values. | `source_priority` (list of source table `id`s or table names) |
-| **`FREQUENCY`** | Selects the most frequently occurring value across all cluster members. | None |
+| **`RECENCY`** | Selects the non-null value from the record with the most recent timestamp. | `recency_field` (or defaults to source `watermark_column`) |
+| **`PRIORITY`** | Selects the value from the highest-ranked source system. Automatically skips `NULL` values. | `source_priority` (ordered list of source `id`s) |
+| **`FREQUENCY`** | Selects the most frequently occurring non-null value across all cluster members (tie-broken by recency). | None |
 
 ### 5. `exclusions` (Identifier Blocklist)
-Blocks specific values from linking records to prevent hub-and-spoke false clustering.
+Blocks specific placeholder or shared values from linking records to prevent hub-and-spoke false clustering.
 
 | Field | Type | Description |
 |---|---|---|
@@ -177,15 +306,18 @@ Blocks specific values from linking records to prevent hub-and-spoke false clust
 
 ---
 
-## ⚡ CLI Configuration Workflow
+## ⚡ CLI Configuration & Export Workflow
 
 ```bash
 # 1. Validate your YAML configuration syntax
-idr config validate --file config.yaml
+idr config validate --file idr_config.yaml
 
-# 2. Preview the SQL DDL statements generated for your target database
-idr config generate --file config.yaml --dialect [duckdb|snowflake|bigquery|databricks]
+# 2. Preview the dialect-specific SQL MERGE/INSERT statements for idr_meta.*
+idr config generate --file idr_config.yaml --dialect [duckdb|snowflake|bigquery|databricks]
 
-# 3. Apply configuration to your target warehouse
-idr config apply --file config.yaml --platform snowflake
+# 3. Apply configuration directly to your target warehouse
+idr config apply --file idr_config.yaml --db my_warehouse.duckdb
+
+# 4. Export YAML (or live warehouse metadata) into the 6 standard dbt_idr seed CSVs
+idr dbt export --file idr_config.yaml --output-dir dbt_idr/seeds
 ```
