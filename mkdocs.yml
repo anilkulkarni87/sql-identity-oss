@@ -56,19 +56,6 @@ extra_javascript:
 
 plugins:
   - search
-  - mermaid2:
-      arguments:
-        theme: 'base'
-        themeVariables:
-          primaryColor: '#1e293b'
-          primaryTextColor: '#f8fafc'
-          primaryBorderColor: '#38bdf8'
-          lineColor: '#64748b'
-          secondaryColor: '#0f172a'
-          tertiaryColor: '#1e293b'
-        flowchart:
-          useMaxWidth: true
-          htmlLabels: true
 
 markdown_extensions:
   - pymdownx.highlight:
