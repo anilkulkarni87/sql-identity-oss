@@ -86,13 +86,16 @@ The `idr` CLI is the standard way to run on all platforms.
 
 ```bash
 # 1. Initialize DB
-idr init --platform [duckdb|bigquery|snowflake|databricks]
+idr init --platform [duckdb|bigquery|snowflake|databricks] --db demo.duckdb
 
 # 2. Configure (using YAML)
-idr config apply --platform [platform] --file config.yaml
+idr apply-config --platform [platform] --db demo.duckdb --config examples/config_retail.yaml
 
-# 3. Run
-idr run --platform [platform] --mode FULL
+# 3. Run Pipeline (FULL or INCR)
+idr run --platform [platform] --db demo.duckdb --mode FULL
+
+# 4. Launch Interactive Web UI + API
+idr ui --db demo.duckdb
 ```
 
 ### Option 2: AI Agent (MCP)
@@ -155,7 +158,7 @@ pytest tests/test_cloud_dialects_live.py -v
 python tools/scale_test/run_scale_and_mcp_benchmark.py --rows 250000 --incr-rows 10000
 ```
 
-See [Architecture Documentation](docs/18-architecture.md) for detailed pipeline stage and schema design.
+See [Concepts & Architecture](docs/concepts-and-architecture.md) for detailed pipeline stage and schema design.
 
 ## 🤝 Contributing
 

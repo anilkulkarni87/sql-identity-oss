@@ -2,7 +2,7 @@
 # IDR Metadata Configuration - Retail Template
 # ============================================================
 # This file defines the sources, rules, and mappings for Identity Resolution.
-# Use tools/generate_config.py to convert this to SQL.
+# Apply with: idr apply-config --platform duckdb --db demo.duckdb --config examples/config_retail.yaml
 
 # 1. Sources & Mappings
 # ------------------------------------------------------------

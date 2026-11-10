@@ -1,6 +1,6 @@
 services:
   api:
-    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-resolution}/idr-api:${IDR_IMAGE_TAG:-0.5.1}
+    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-oss}/idr-api:${IDR_IMAGE_TAG:-0.6.1}
     pull_policy: always
     container_name: idr-api
     ports:
@@ -32,7 +32,7 @@ services:
       - idr-net
 
   ui:
-    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-resolution}/idr-ui:${IDR_IMAGE_TAG:-0.5.1}
+    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-oss}/idr-ui:${IDR_IMAGE_TAG:-0.6.1}
     pull_policy: always
     container_name: idr-ui
     ports:

@@ -1,27 +1,29 @@
 site_name: SQL Identity Resolution
-site_description: Production-grade deterministic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks
+site_description: Production-grade deterministic & probabilistic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks
 site_url: https://anilkulkarni87.github.io/sql-identity-oss/
 repo_url: https://github.com/anilkulkarni87/sql-identity-oss
-repo_name: sql-identity-oss
+repo_name: anilkulkarni87/sql-identity-oss
 
 exclude_docs: |
   README.md
 
-
 theme:
   name: material
   icon:
-    logo: material/graph-outline
+    logo: material/hub-outline
     repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     - scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: cyan
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
     - scheme: default
-      primary: indigo
+      primary: custom
       accent: indigo
       toggle:
         icon: material/brightness-7
@@ -35,9 +37,10 @@ theme:
     - navigation.tracking
     - navigation.tabs
     - navigation.sections
-    - navigation.expand
     - navigation.path
     - navigation.top
+    - navigation.footer
+    - toc.follow
     - search.suggest
     - search.highlight
 
@@ -48,15 +51,23 @@ plugins:
   - search
   - mermaid2:
       arguments:
-        theme: 'default'
+        theme: 'base'
+        themeVariables:
+          primaryColor: '#1e293b'
+          primaryTextColor: '#f8fafc'
+          primaryBorderColor: '#38bdf8'
+          lineColor: '#64748b'
+          secondaryColor: '#0f172a'
+          tertiaryColor: '#1e293b'
         flowchart:
           useMaxWidth: true
           htmlLabels: true
-  - tags
 
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -71,45 +82,16 @@ markdown_extensions:
   - tables
   - attr_list
   - md_in_html
+  - toc:
+      permalink: true
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 nav:
   - Home: index.md
-  - Getting Started:
-    - Overview: 01-overview.md
-    - Quickstart: 03-quickstart.md
-    - Installation: 02-installation.md
-    - Architecture: 18-architecture.md
-    - How It Works: 21-how-it-works.md
-    - Distribution & Deployment: 27-distribution.md
-  - Core Concepts:
-    - Matching Algorithm: 19-matching-algorithm.md
-    - Data Model: 20-data-model.md
-    - Schema & DDL Reference: 08-schema.md
-    - Pipeline Stages: 07-pipeline.md
-  - Supported Warehouses:
-    - Platforms Overview: 06-platforms.md
-    - Databricks Testing Guide: DATABRICKS_TESTING_GUIDE.md
-    - Snowflake Testing Guide: SNOWFLAKE_TESTING_GUIDE.md
-    - BigQuery Testing Guide: BIGQUERY_TESTING_GUIDE.md
-    - Sizing & Hardware: 24-sizing.md
-    - Scaling Strategies: 25-scaling.md
-  - Configuration & Operations:
-    - Configuration: 04-configuration.md
-    - Production Hardening: 26-production-hardening.md
-    - Security & Governance: 16-security.md
-    - CI/CD Automation: 15-ci-cd.md
-    - Troubleshooting: 14-troubleshooting.md
-  - Interfaces & Tooling:
-    - CLI Reference: 05-cli.md
-    - Web UI: 09-ui.md
-    - REST API & Metrics: 10-api.md
-    - MCP Server (AI Agents): 11-mcp.md
-    - dbt Integration: 12-dbt.md
-  - Testing & Benchmarks:
-    - Scale Testing: 13-scale-testing.md
-    - End-to-End Testing: 17-e2e-testing.md
-    - Metrics Reference: 22-metrics.md
-    - Benchmarks: 23-benchmarks.md
+  - Getting Started: getting-started.md
+  - Concepts & Architecture: concepts-and-architecture.md
+  - Configuration & Governance: configuration-and-governance.md
+  - Interfaces & dbt: interfaces-and-dbt.md
+  - Warehouses & Schema: warehouses-and-schema.md

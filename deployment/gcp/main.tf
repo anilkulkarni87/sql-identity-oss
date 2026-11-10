@@ -1,12 +1,13 @@
 # BigQuery IDR Deployment with Terraform
 #
-# This creates:
-# - Required datasets
-# - Cloud Function for running IDR
-# - Cloud Scheduler for scheduling runs
-# - Service account with minimal permissions
+# Provisions infrastructure for serverless scheduled IDR execution:
+# - BigQuery Datasets: idr_meta, idr_work, idr_out
+# - Service Account with BigQuery JobUser & DataEditor permissions
+# - Cloud Function (2nd Gen) executing IDRRunner / BigQueryAdapter
+# - Cloud Scheduler for hourly incremental runs and weekly full refreshes
 
 terraform {
+  required_version = ">= 1.5.0"
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -16,18 +17,24 @@ terraform {
 }
 
 variable "project_id" {
-  description = "GCP project ID"
+  description = "GCP Project ID"
   type        = string
 }
 
 variable "region" {
-  description = "GCP region"
+  description = "GCP Region for Cloud Function & Scheduler"
   type        = string
   default     = "us-central1"
 }
 
+variable "bq_location" {
+  description = "BigQuery dataset location"
+  type        = string
+  default     = "US"
+}
+
 variable "schedule" {
-  description = "Cron schedule for IDR runs"
+  description = "Cron schedule for incremental IDR runs"
   type        = string
   default     = "0 * * * *"  # Every hour
 }
@@ -38,12 +45,12 @@ provider "google" {
 }
 
 # ============================================
-# SERVICE ACCOUNT
+# 1. SERVICE ACCOUNT & IAM
 # ============================================
 
 resource "google_service_account" "idr_runner" {
   account_id   = "idr-runner"
-  display_name = "IDR Runner Service Account"
+  display_name = "IDR Pipeline Service Account"
 }
 
 resource "google_project_iam_member" "bq_job_user" {
@@ -53,12 +60,12 @@ resource "google_project_iam_member" "bq_job_user" {
 }
 
 # ============================================
-# DATASETS
+# 2. BIGQUERY DATASETS
 # ============================================
 
 resource "google_bigquery_dataset" "idr_meta" {
   dataset_id = "idr_meta"
-  location   = "US"
+  location   = var.bq_location
 
   access {
     role          = "WRITER"
@@ -68,7 +75,7 @@ resource "google_bigquery_dataset" "idr_meta" {
 
 resource "google_bigquery_dataset" "idr_work" {
   dataset_id = "idr_work"
-  location   = "US"
+  location   = var.bq_location
 
   access {
     role          = "WRITER"
@@ -78,7 +85,7 @@ resource "google_bigquery_dataset" "idr_work" {
 
 resource "google_bigquery_dataset" "idr_out" {
   dataset_id = "idr_out"
-  location   = "US"
+  location   = var.bq_location
 
   access {
     role          = "WRITER"
@@ -87,32 +94,27 @@ resource "google_bigquery_dataset" "idr_out" {
 }
 
 # ============================================
-# CLOUD FUNCTION
+# 3. CLOUD FUNCTION (IDR RUNNER)
 # ============================================
 
 resource "google_storage_bucket" "function_bucket" {
-  name     = "${var.project_id}-idr-functions"
-  location = var.region
+  name                        = "${var.project_id}-idr-artifacts"
+  location                    = var.region
+  uniform_bucket_level_access = true
 }
 
-# Note: You need to upload your function code to this bucket
-# data "archive_file" "function_zip" {
-#   type        = "zip"
-#   source_dir  = "${path.module}/../../sql/bigquery"
-#   output_path = "${path.module}/function.zip"
-# }
-
 resource "google_cloudfunctions2_function" "idr_runner" {
-  name     = "idr-runner"
-  location = var.region
+  name        = "idr-runner"
+  location    = var.region
+  description = "Executes sql-identity-resolution against BigQuery datasets"
 
   build_config {
     runtime     = "python311"
-    entry_point = "run_idr"
+    entry_point = "main"
     source {
       storage_source {
         bucket = google_storage_bucket.function_bucket.name
-        object = "idr_function.zip"  # Upload this separately
+        object = "idr_function.zip"
       }
     }
   }
@@ -124,7 +126,9 @@ resource "google_cloudfunctions2_function" "idr_runner" {
     timeout_seconds    = 540
 
     environment_variables = {
-      GCP_PROJECT = var.project_id
+      IDR_PLATFORM = "bigquery"
+      IDR_PROJECT  = var.project_id
+      IDR_LOCATION = var.bq_location
     }
 
     service_account_email = google_service_account.idr_runner.email
@@ -132,17 +136,18 @@ resource "google_cloudfunctions2_function" "idr_runner" {
 }
 
 # ============================================
-# CLOUD SCHEDULER
+# 4. CLOUD SCHEDULER JOBS
 # ============================================
 
-resource "google_cloud_scheduler_job" "idr_hourly" {
-  name      = "idr-hourly"
-  schedule  = var.schedule
-  time_zone = "UTC"
+resource "google_cloud_scheduler_job" "idr_hourly_incremental" {
+  name        = "idr-hourly-incremental"
+  description = "Trigger hourly incremental IDR resolution"
+  schedule    = var.schedule
+  time_zone   = "UTC"
 
   http_target {
-    uri         = google_cloudfunctions2_function.idr_runner.service_config[0].uri
-    http_method = "GET"
+    uri         = "${google_cloudfunctions2_function.idr_runner.service_config[0].uri}?mode=INCR"
+    http_method = "POST"
 
     oidc_token {
       service_account_email = google_service_account.idr_runner.email
@@ -155,32 +160,40 @@ resource "google_cloud_scheduler_job" "idr_hourly" {
 }
 
 resource "google_cloud_scheduler_job" "idr_weekly_full" {
-  name      = "idr-weekly-full"
-  schedule  = "0 2 * * 0"  # Sunday 2am
-  time_zone = "UTC"
+  name        = "idr-weekly-full"
+  description = "Trigger weekly full graph IDR resolution"
+  schedule    = "0 2 * * 0"  # Sunday 02:00 UTC
+  time_zone   = "UTC"
 
   http_target {
     uri         = "${google_cloudfunctions2_function.idr_runner.service_config[0].uri}?mode=FULL"
-    http_method = "GET"
+    http_method = "POST"
 
     oidc_token {
       service_account_email = google_service_account.idr_runner.email
     }
   }
+
+  retry_config {
+    retry_count = 1
+  }
 }
 
 # ============================================
-# OUTPUTS
+# 5. OUTPUTS
 # ============================================
 
 output "service_account_email" {
-  value = google_service_account.idr_runner.email
+  description = "Service account running IDR pipeline"
+  value       = google_service_account.idr_runner.email
 }
 
 output "function_url" {
-  value = google_cloudfunctions2_function.idr_runner.service_config[0].uri
+  description = "Trigger URL for IDR Cloud Function"
+  value       = google_cloudfunctions2_function.idr_runner.service_config[0].uri
 }
 
-output "scheduler_job_name" {
-  value = google_cloud_scheduler_job.idr_hourly.name
+output "hourly_scheduler_job" {
+  description = "Hourly Cloud Scheduler Job name"
+  value       = google_cloud_scheduler_job.idr_hourly_incremental.name
 }

@@ -18,7 +18,7 @@ test:
   image: python:3.11
   script:
     - pip install ".[duckdb,api,dev]"
-    - python -m pytest tests/ --ignore=tests/legacy -v
+    - python -m pytest tests/ -v
 
 lint:
   stage: lint

@@ -14,6 +14,7 @@ COPY pyproject.toml ./
 COPY Readme.md Readme.md
 COPY idr_core/ idr_core/
 COPY idr_api/ idr_api/
+COPY idr_mcp/ idr_mcp/
 COPY idr_enterprise/ idr_enterprise/
 
 RUN pip install --no-cache-dir ".[${IDR_PIP_EXTRAS}]"

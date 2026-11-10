@@ -58,8 +58,8 @@ docs-build:
 
 # Generate scale test data
 generate:
-	@echo "Generating scale test dataset..."
-	python tools/scale_test/generate_global_retail_idr.py --rows=1000000 --output=data/
+	@echo "Generating scale test dataset (Mimesis 5k)..."
+	python tools/scale_test/generate_retail_idr_mimesis.py --config tools/scale_test/configs/retail_idr_5k.yaml
 
 # Clean generated files
 clean:
@@ -72,8 +72,7 @@ clean:
 
 # Quick lint
 lint:
-	pip install flake8
-	flake8 idr_core/ idr_api/ tests/ tools/ --max-line-length=120 --ignore=E501,W503
+	ruff check idr_core/ idr_api/ idr_mcp/ tests/ tools/
 
 # Run benchmark
 benchmark:
