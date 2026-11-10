@@ -489,6 +489,17 @@
       2. rules (Deterministic Matching)
     </span>
 </a>
+<nav aria-label="2. rules (Deterministic Matching)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#built-in-domain-canonicalizers-custom-expressions">
+<span class="md-ellipsis">
+      Built-In Domain Canonicalizers &amp; Custom Expressions
+    </span>
+</a>
+</li>
+</ul>
+</nav>
 </li>
 <li class="md-nav__item">
 <a class="md-nav__link" href="#3-fuzzy_rules-probabilistic-super-clustering">
@@ -505,9 +516,16 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#5-exclusions-identifier-blocklist">
+<a class="md-nav__link" href="#5-exclusions-identifier-blocklist-default-toxic-pack">
 <span class="md-ellipsis">
-      5. exclusions (Identifier Blocklist)
+      5. exclusions (Identifier Blocklist &amp; Default Toxic Pack)
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-overrides-manual-stewardship-overrides">
+<span class="md-ellipsis">
+      6. overrides (Manual Stewardship Overrides)
     </span>
 </a>
 </li>
@@ -755,6 +773,17 @@
       2. rules (Deterministic Matching)
     </span>
 </a>
+<nav aria-label="2. rules (Deterministic Matching)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#built-in-domain-canonicalizers-custom-expressions">
+<span class="md-ellipsis">
+      Built-In Domain Canonicalizers &amp; Custom Expressions
+    </span>
+</a>
+</li>
+</ul>
+</nav>
 </li>
 <li class="md-nav__item">
 <a class="md-nav__link" href="#3-fuzzy_rules-probabilistic-super-clustering">
@@ -771,9 +800,16 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#5-exclusions-identifier-blocklist">
+<a class="md-nav__link" href="#5-exclusions-identifier-blocklist-default-toxic-pack">
 <span class="md-ellipsis">
-      5. exclusions (Identifier Blocklist)
+      5. exclusions (Identifier Blocklist &amp; Default Toxic Pack)
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-overrides-manual-stewardship-overrides">
+<span class="md-ellipsis">
+      6. overrides (Manual Stewardship Overrides)
     </span>
 </a>
 </li>
@@ -812,7 +848,10 @@
 <li><strong>How the app uses it:</strong> During extraction, IDR combines <code>id</code> and <code>entity_key</code> into a globally unique composite node key formatted as <code>&lt;source_id&gt;:&lt;entity_key&gt;</code>:</li>
 <li>Row <code>1042</code> in <code>raw.crm_customers</code> (<code>id: "crm"</code>) becomes <strong><code>crm:1042</code></strong></li>
 <li>Row <code>1042</code> in <code>raw.web_orders</code> (<code>id: "orders"</code>) becomes <strong><code>orders:1042</code></strong></li>
-<li><strong>Deterministic Cluster ID (<code>resolved_id</code>):</strong> When multiple records merge into a cluster, IDR deterministically assigns the lexicographically smallest <code>entity_key</code> in that connected component (e.g., <code>crm:1042</code>) as the cluster's canonical <code>resolved_id</code>.</li>
+<li><strong>Deterministic &amp; Persistent Cluster ID (<code>resolved_id</code>):</strong></li>
+<li>On the initial run, IDR deterministically assigns the lexicographically smallest <code>entity_key</code> in a connected component (e.g., <code>crm:1042</code>) as the cluster's <code>resolved_id</code>.</li>
+<li><strong>Cross-Run Persistence:</strong> On subsequent runs, if new entities join an existing cluster (even if a new entity has a lexicographically smaller key like <code>aaa:001</code>), IDR <strong>locks and preserves</strong> the cluster's existing <code>resolved_id</code> (<code>crm:1042</code>).</li>
+<li><strong>Cluster Merges &amp; Crosswalk (<code>idr_out.resolved_id_crosswalk</code>):</strong> When two existing clusters merge together, the <strong>largest cluster's <code>resolved_id</code> wins</strong> (tie-broken by oldest timestamp, then lexicographical <code>MIN(resolved_id)</code>), and the retired <code>resolved_id</code> is logged in <code>idr_out.resolved_id_crosswalk</code> (<code>previous_resolved_id -&gt; current_resolved_id</code>, <code>change_type: MERGED | SPLIT</code>).</li>
 </ul>
 <blockquote>
 <p>[!TIP]
@@ -1173,9 +1212,9 @@ Because <code>entity_key</code> accepts safe SQL expressions, you can pass <code
 </tr>
 <tr>
 <td><code>canonicalize</code></td>
-<td>string</td>
+<td>string or dict</td>
 <td><code>"LOWERCASE"</code></td>
-<td>Value normalization: <code>"LOWERCASE"</code>, <code>"UPPERCASE"</code>, or <code>"EXACT"</code> / <code>"NONE"</code>.</td>
+<td>Value normalization preset (<code>"EMAIL_STANDARD"</code>, <code>"EMAIL_STRIP_PLUS"</code>, <code>"PHONE_DIGITS"</code>, <code>"PHONE_US_10"</code>, <code>"ALPHANUMERIC_UPPER"</code>, <code>"LOWERCASE"</code>, <code>"UPPERCASE"</code>, <code>"EXACT"</code> / <code>"NONE"</code>), a custom Python canonicalizer registered via <code>register_canonicalizer()</code>, or an inline SQL expression using <code>{val}</code> (can also be a dialect-keyed dict).</td>
 </tr>
 <tr>
 <td><code>priority</code></td>
@@ -1188,6 +1227,58 @@ Because <code>entity_key</code> accepts safe SQL expressions, you can pass <code
 <td>integer</td>
 <td><code>10000</code></td>
 <td>High-cardinality guardrail. Groups larger than this are skipped and logged to <code>idr_out.skipped_identifier_groups</code>.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="built-in-domain-canonicalizers-custom-expressions">Built-In Domain Canonicalizers &amp; Custom Expressions</h4>
+<table>
+<thead>
+<tr>
+<th>Canonicalizer</th>
+<th>Behavior</th>
+<th>Example Input -&gt; Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EMAIL_STANDARD</code></td>
+<td>Trims whitespace and lowercases (preserves <code>+tag</code>)</td>
+<td><code>" Alice+VIP@Example.COM "</code> -&gt; <code>"alice+vip@example.com"</code></td>
+</tr>
+<tr>
+<td><code>EMAIL_STRIP_PLUS</code></td>
+<td>Trims, lowercases, and strips <code>+tag</code> before <code>@</code></td>
+<td><code>" Alice+VIP@Example.COM "</code> -&gt; <code>"alice@example.com"</code></td>
+</tr>
+<tr>
+<td><code>PHONE_DIGITS</code></td>
+<td>Strips all non-digit characters (<code>[^0-9]</code>)</td>
+<td><code>"+1 (555) 234-5678"</code> -&gt; <code>"15552345678"</code></td>
+</tr>
+<tr>
+<td><code>PHONE_US_10</code></td>
+<td>Strips non-digits and removes leading US <code>1</code> country code (11 -&gt; 10 digits)</td>
+<td><code>"+1 (555) 234-5678"</code> -&gt; <code>"5552345678"</code></td>
+</tr>
+<tr>
+<td><code>ALPHANUMERIC_UPPER</code></td>
+<td>Strips spaces/punctuation (<code>[^A-Za-z0-9]</code>) and uppercases</td>
+<td><code>"ab-12 34!"</code> -&gt; <code>"AB1234"</code></td>
+</tr>
+<tr>
+<td><code>LOWERCASE</code> / <code>UPPERCASE</code> / <code>EXACT</code></td>
+<td>Standard case conversion or exact trimmed value</td>
+<td><code>"User_1"</code> -&gt; <code>"user_1"</code></td>
+</tr>
+<tr>
+<td><strong>Inline Warehouse SQL (<code>{val}</code>)</strong></td>
+<td>Any SQL expression referencing <code>{val}</code> (or dialect dict)</td>
+<td><code>"LPAD(LTRIM(TRIM({val}), '0'), 8, '0')"</code></td>
+</tr>
+<tr>
+<td><strong>Python Plugin (<code>register_canonicalizer</code>)</strong></td>
+<td>Custom Python builder <code>register_canonicalizer(name, lambda col, dialect: ...)</code></td>
+<td><code>"MY_CUSTOM_NORM"</code></td>
 </tr>
 </tbody>
 </table>
@@ -1266,8 +1357,12 @@ In the Web UI Setup Wizard, choosing a fuzzy template (Jaro-Winkler, Levenshtein
 </tr>
 </tbody>
 </table>
-<h3 id="5-exclusions-identifier-blocklist">5. <code>exclusions</code> (Identifier Blocklist)</h3>
+<h3 id="5-exclusions-identifier-blocklist-default-toxic-pack">5. <code>exclusions</code> (Identifier Blocklist &amp; Default Toxic Pack)</h3>
 <p>Blocks specific placeholder or shared values from linking records to prevent hub-and-spoke false clustering.</p>
+<ul>
+<li><strong>Curated Default Toxic Pack (<code>DEFAULT_EXCLUSIONS</code>):</strong> Running <code>idr init</code> automatically seeds 33 common placeholder emails (<code>noreply@%</code>, <code>test@%</code>, <code>%@example.com</code>), bogus phones (<code>0000000000</code>, <code>1111111111</code>, <code>1234567890</code>), and universal sentinel strings (<code>null</code>, <code>n/a</code>, <code>unknown</code>, <code>anonymous</code>, <code>guest</code>) into <code>idr_meta.identifier_exclusion</code>. You can also opt in via <code>use_default_exclusions: true</code> in YAML.</li>
+<li><strong>Direct Warehouse Table Management Preserved:</strong> Any rows your data engineering team manually <code>INSERT</code>s directly into <code>idr_meta.identifier_exclusion</code> via SQL are <strong>preserved</strong> across YAML <code>idr config apply</code> runs (upsert-only, never destructive <code>DELETE</code>).</li>
+</ul>
 <table>
 <thead>
 <tr>
@@ -1280,12 +1375,12 @@ In the Web UI Setup Wizard, choosing a fuzzy template (Jaro-Winkler, Levenshtein
 <tr>
 <td><code>identifier_type</code></td>
 <td>string</td>
-<td>Identifier type to filter (e.g. <code>email</code>, <code>phone</code>).</td>
+<td>Identifier type to filter (<code>email</code>, <code>phone</code>, or <code>"ANY"</code> / <code>"*"</code> to block across all identifier types).</td>
 </tr>
 <tr>
 <td><code>value</code></td>
 <td>string</td>
-<td>Value or pattern to block.</td>
+<td>Value or pattern to block (case-insensitive matching).</td>
 </tr>
 <tr>
 <td><code>match_type</code></td>
@@ -1296,6 +1391,34 @@ In the Web UI Setup Wizard, choosing a fuzzy template (Jaro-Winkler, Levenshtein
 <td><code>reason</code></td>
 <td>string</td>
 <td>Optional description for auditing.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="6-overrides-manual-stewardship-overrides">6. <code>overrides</code> (Manual Stewardship Overrides)</h3>
+<p>Allows data stewards to explicitly force-merge, split, or quarantine specific entities via YAML (<code>overrides:</code>) or by inserting directly into <code>idr_meta.identity_override</code>:</p>
+<table>
+<thead>
+<tr>
+<th><code>override_type</code></th>
+<th>Required Keys</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>FORCE_LINK</code></strong></td>
+<td><code>entity_key_a</code>, <code>entity_key_b</code></td>
+<td>Injects an explicit graph edge between <code>entity_key_a</code> and <code>entity_key_b</code> even if they share zero identifiers.</td>
+</tr>
+<tr>
+<td><strong><code>DO_NOT_LINK</code></strong></td>
+<td><code>entity_key_a</code>, <code>entity_key_b</code></td>
+<td>Removes direct and shared-anchor edges between <code>entity_key_a</code> and <code>entity_key_b</code> (splits false merges).</td>
+</tr>
+<tr>
+<td><strong><code>ISOLATE</code></strong></td>
+<td><code>entity_key_a</code></td>
+<td>Quarantines <code>entity_key_a</code> into a singleton cluster so it cannot link to any other record.</td>
 </tr>
 </tbody>
 </table>
