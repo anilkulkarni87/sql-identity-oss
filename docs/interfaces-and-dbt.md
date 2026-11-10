@@ -140,11 +140,19 @@ dbt test
 
 ```mermaid
 flowchart LR
-    Seeds["7 Seed CSVs\n(idr_meta.*)"] --> M1["stg_identifiers\nCanonicalizers + Exclusions"]
-    M1 --> M2["int_edges\nISOLATE + Anchor Edges +\nDO_NOT_LINK + FORCE_LINK"]
-    M2 --> M3["int_labels\nIterative Label Propagation"]
-    M3 --> M4["identity_membership\nFull Entity -> resolved_id Map"]
-    M4 --> M5["identity_clusters\nConfidence Scoring"]
-    M4 --> M6["golden_profiles\nDynamic Survivorship"]
+    Seeds["7 Seed CSVs (idr_meta)"]
+    M1["stg_identifiers (Canonicalizers and Exclusions)"]
+    M2["int_edges (ISOLATE, Star Edges, Overrides)"]
+    M3["int_labels (Iterative Label Propagation)"]
+    M4["identity_membership (Entity to resolved_id Map)"]
+    M5["identity_clusters (Confidence Scoring)"]
+    M6["golden_profiles (Dynamic Survivorship)"]
+
+    Seeds --> M1
+    M1 --> M2
+    M2 --> M3
+    M3 --> M4
+    M4 --> M5
+    M4 --> M6
 ```
 

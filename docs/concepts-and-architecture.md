@@ -6,9 +6,8 @@ title: Concepts & 8-Stage Pipeline Architecture
 
 This guide explains the foundational data model and the 8-stage execution engine that powers `sql-identity-resolution`.
 
-> [!TIP]
-> **Mathematical Proofs & Graph Theory**:
-> For a rigorous mathematical breakdown of the bipartite projection, $O(N)$ star graph reduction theorem, pure SQL connected components convergence proofs, and `max_group_size` anti-megacluster guardrails, see the dedicated [Underlying Identity Resolution Algorithm](algorithm-and-graph-engine.md) guide.
+!!! tip "Mathematical Proofs & Graph Theory"
+    For a rigorous mathematical breakdown of the bipartite projection, $\mathcal{O}(N)$ star graph reduction theorem, pure SQL connected components convergence proofs, and `max_group_size` anti-megacluster guardrails, see the dedicated [Underlying Identity Resolution Algorithm](algorithm-and-graph-engine.md) guide.
 
 ---
 
@@ -23,10 +22,9 @@ Every source table registered in `idr_meta.source_table` defines four distinct c
 | **Identifiers** (`idr_meta.source_identifier`) | Match keys extracted, canonicalized, and filtered against exclusions to build **deterministic graph edges** between entities. | `EMAIL`, `PHONE`, `LOYALTY_ID`, `CUSTOMER_ID` |
 | **Attributes** (`idr_meta.entity_attribute_mapping`) | Descriptive profile columns used after graph resolution to build the **Golden Profile** (`idr_out.golden_profile_current`) via survivorship rules (and optionally evaluated by fuzzy blocking rules). | `first_name`, `last_name`, `lifetime_value`, `country_code` |
 
-> [!IMPORTANT]
-> **Identifiers vs. Attributes**:
-> - **Identifiers** decide *which records belong to the same person* (Graph Connectivity).
-> - **Attributes** decide *which profile values win for that person* (Golden Record Survivorship).
+!!! important "Identifiers vs. Attributes"
+    - **Identifiers** decide *which records belong to the same person* (Graph Connectivity).
+    - **Attributes** decide *which profile values win for that person* (Golden Record Survivorship).
 
 ---
 
@@ -36,14 +34,22 @@ Whether triggered via `idr run`, the Web UI (`POST /api/setup/run`), MCP (`run_p
 
 ```mermaid
 flowchart TD
-    S1["Stage 1: preflight\nAuto-upgrade SYSTEM_TABLES & validate source columns"] --> S2
-    S2["Stage 2: entity_extraction\nExtract delta rows + candidate expansion (or FULL scan)"] --> S3
-    S3["Stage 3: identifier_extraction\nApply Domain Canonicalizers, Exclusions & No-Watermark State-Diff"] --> S4
-    S4["Stage 4: attribute_extraction\nMaterialize entity_attributes (skipped automatically if 0 fuzzy rules)"] --> S5
-    S5["Stage 5: edge_building\nApply ISOLATE, build N-1 Anchor Edges, apply DO_NOT_LINK & FORCE_LINK"] --> S6
-    S6["Stage 6: label_propagation\nIterative connected components + Persistent resolved_id stabilization"] --> S7
-    S7["Stage 7: fuzzy_matching\nBlocking-key similarity super-clustering (when fuzzy_rules active)"] --> S8
-    S8["Stage 8: output_generation\nUpdate membership, confidence scores, golden profiles, crosswalk & watermarks"]
+    S1["Stage 1: preflight — Auto-upgrade schemas and validate source columns"]
+    S2["Stage 2: entity_extraction — Extract delta rows and candidate expansion"]
+    S3["Stage 3: identifier_extraction — Canonicalizers, exclusions, and state-diff"]
+    S4["Stage 4: attribute_extraction — Materialize attributes when fuzzy rules active"]
+    S5["Stage 5: edge_building — Apply ISOLATE, build N-1 star edges, apply overrides"]
+    S6["Stage 6: label_propagation — Connected components and resolved_id stabilization"]
+    S7["Stage 7: fuzzy_matching — Blocking-key similarity super-clustering"]
+    S8["Stage 8: output_generation — Update membership, golden profiles, and crosswalk"]
+
+    S1 --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+    S5 --> S6
+    S6 --> S7
+    S7 --> S8
 ```
 
 ### Stage-by-Stage Breakdown

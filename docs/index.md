@@ -75,7 +75,7 @@ Zero-config credential discovery (`~/.databrickscfg`) and 8-stage execution agai
 <div class="idr-cards-grid">
   <div class="idr-card">
     <h3>🔗 Deterministic + Fuzzy Graph Engine</h3>
-    <p>Anchor-based star edges ($N-1$ edges per group) prevent $O(N^2)$ clique explosion, paired with iterative Label Propagation and optional blocking-key fuzzy super-clustering.</p>
+    <p>Anchor-based star edges (<code>N-1</code> edges per group) prevent <code>O(N²)</code> clique explosion, paired with iterative Label Propagation and optional blocking-key fuzzy super-clustering.</p>
   </div>
   <div class="idr-card">
     <h3>🧼 Domain Canonicalizers & Custom SQL</h3>
@@ -108,16 +108,18 @@ flowchart LR
     subgraph Sources["Warehouse Source Tables"]
         S1["CRM Customers"]
         S2["E-Commerce Orders"]
-        S3["POS & Loyalty"]
-        S4["Clickstream / Events"]
+        S3["POS and Loyalty"]
+        S4["Clickstream Events"]
     end
 
-    subgraph Engine["8-Stage SQL Identity Resolution Engine (idr_core / dbt_idr)"]
-        E1["1-3. Delta + State-Diff Extraction\n& Canonicalization"]
-        E2["4-5. Anchor Edge Builder\n& Stewardship Overrides"]
-        E3["6-7. Label Propagation +\nPersistent ID Stabilization"]
-        E4["8. Golden Profile Survivorship\n& Crosswalk Ledger"]
-        E1 --> E2 --> E3 --> E4
+    subgraph Engine["8-Stage SQL Identity Resolution Engine"]
+        E1["Stages 1-3: Delta Extraction and Canonicalization"]
+        E2["Stages 4-5: Star Edge Builder and Overrides"]
+        E3["Stages 6-7: Label Propagation and ID Stabilization"]
+        E4["Stage 8: Golden Profile Survivorship and Crosswalk"]
+        E1 --> E2
+        E2 --> E3
+        E3 --> E4
     end
 
     subgraph Outputs["Warehouse Output Tables (idr_out)"]
@@ -127,15 +129,23 @@ flowchart LR
         O4["resolved_id_crosswalk"]
     end
 
-    subgraph Tooling["Interfaces & Integrations"]
-        T1["React Web UI & Explorer"]
-        T2["CLI & FastAPI"]
+    subgraph Tooling["Interfaces and Integrations"]
+        T1["React Web UI and Explorer"]
+        T2["CLI and FastAPI"]
         T3["FastMCP Server (AI Agents)"]
     end
 
-    Sources --> E1
-    E4 --> Outputs
-    Outputs --> Tooling
+    S1 --> E1
+    S2 --> E1
+    S3 --> E1
+    S4 --> E1
+    E4 --> O1
+    E4 --> O2
+    E4 --> O3
+    E4 --> O4
+    O1 --> T1
+    O2 --> T2
+    O3 --> T3
 ```
 
 ---
@@ -146,6 +156,7 @@ flowchart LR
 | :--- | :--- |
 | **[Getting Started](getting-started.md)** | Installation extras, 5-minute end-to-end CLI & UI workflow, and zero-config credential discovery. |
 | **[Concepts & Architecture](concepts-and-architecture.md)** | Identifiers vs. attributes, the 8 pipeline stages, incremental watermark + no-watermark state-diffing, and persistent `resolved_id` stabilization. |
+| **[Algorithm & Graph Engine](algorithm-and-graph-engine.md)** | Mathematical graph formulation, $\mathcal{O}(N)$ anchor star reduction theorem, pure SQL iterative label propagation, and ID stabilization invariants. |
 | **[Configuration & Governance](configuration-and-governance.md)** | Full YAML reference, domain canonicalizers, default exclusions, manual overrides (`FORCE_LINK`, `DO_NOT_LINK`, `ISOLATE`), and GDPR erasure. |
 | **[Interfaces & dbt](interfaces-and-dbt.md)** | Complete CLI reference, Web UI Setup Wizard & Cluster Explorer, FastAPI endpoints, FastMCP AI agent tools, and the `dbt_idr` package. |
 | **[Warehouses & Schema](warehouses-and-schema.md)** | DuckDB, Snowflake, BigQuery, and Databricks setup, complete DDL schema tables (`idr_meta`, `idr_work`, `idr_out`), and production operations. |
