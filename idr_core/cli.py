@@ -84,6 +84,12 @@ Examples:
         action="store_true",
         help="Deterministic mode: disable fuzzy matching for exact-match-only resolution",
     )
+    run_parser.add_argument(
+        "--max-group-size",
+        type=int,
+        default=None,
+        help="Global maximum identifier group size safeguard (default: 10000)",
+    )
 
     # === idr config ===
     config_parser = subparsers.add_parser("config", help="Configuration management")
@@ -600,6 +606,7 @@ def handle_run(args) -> int:
             max_iters=args.max_iters,
             dry_run=args.dry_run,
             strict=getattr(args, "strict", False),
+            max_group_size=getattr(args, "max_group_size", None),
         )
         result = runner.run(config)
 

@@ -441,6 +441,7 @@ class RunRequest(BaseModel):
     strict: bool = False
     max_iterations: int = 30
     dry_run: bool = False
+    max_group_size: Optional[int] = None
 
 
 _ACTIVE_RUN_PROGRESS: Dict[str, Dict[str, Any]] = {}
@@ -584,6 +585,7 @@ async def run_pipeline(
             strict=request.strict,
             max_iters=request.max_iterations,
             dry_run=request.dry_run,
+            max_group_size=request.max_group_size,
         )
 
         progress_state = _build_initial_progress(config.run_mode, config.dry_run, config.strict)

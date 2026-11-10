@@ -6,6 +6,10 @@ title: Concepts & 8-Stage Pipeline Architecture
 
 This guide explains the foundational data model and the 8-stage execution engine that powers `sql-identity-resolution`.
 
+> [!TIP]
+> **Mathematical Proofs & Graph Theory**:
+> For a rigorous mathematical breakdown of the bipartite projection, $O(N)$ star graph reduction theorem, pure SQL connected components convergence proofs, and `max_group_size` anti-megacluster guardrails, see the dedicated [Underlying Identity Resolution Algorithm](algorithm-and-graph-engine.md) guide.
+
 ---
 
 ## 1. Core Building Blocks

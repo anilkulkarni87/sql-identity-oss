@@ -35,6 +35,7 @@ export default function StepReview({
     const [runMode, setRunMode] = useState<'FULL' | 'INCREMENTAL'>('INCREMENTAL');
     const [strictMode, setStrictMode] = useState(false);
     const [maxIterations, setMaxIterations] = useState(30);
+    const [maxGroupSize, setMaxGroupSize] = useState(10000);
     const [dryRun, setDryRun] = useState(false);
     const [runResult, setRunResult] = useState<any>(null);
 
@@ -160,6 +161,7 @@ export default function StepReview({
                 mode: runMode === 'INCREMENTAL' ? 'INCR' : 'FULL',
                 strict: strictMode,
                 max_iterations: maxIterations,
+                max_group_size: maxGroupSize,
                 dry_run: dryRun,
             });
             // Fetch final progress snapshot so all completed stages reflect accurate row counts & durations
@@ -507,7 +509,7 @@ export default function StepReview({
                     <h3 className="text-base font-semibold text-white">Run Configuration</h3>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1.5">
                         <label className="text-xs font-medium text-gray-300">Run Mode</label>
                         <select
@@ -525,6 +527,8 @@ export default function StepReview({
                         <label className="text-xs font-medium text-gray-300">Max Graph Iterations</label>
                         <input
                             type="number"
+                            min="1"
+                            max="100"
                             value={maxIterations}
                             disabled={loading}
                             onChange={(e) => setMaxIterations(parseInt(e.target.value) || 1)}
@@ -532,7 +536,23 @@ export default function StepReview({
                         />
                     </div>
 
-                    <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                            <span>Max Group Size Guardrail</span>
+                            <span className="text-[10px] text-amber-400 font-mono">Anti-Megacluster</span>
+                        </label>
+                        <input
+                            type="number"
+                            min="2"
+                            value={maxGroupSize}
+                            disabled={loading}
+                            onChange={(e) => setMaxGroupSize(parseInt(e.target.value) || 10000)}
+                            className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="10000"
+                        />
+                    </div>
+
+                    <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                         <label className="flex items-center gap-2.5 cursor-pointer bg-gray-800/80 p-3 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors">
                             <input
                                 type="checkbox"
@@ -681,11 +701,12 @@ export default function StepReview({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {config.rules?.map((rule, i) => (
                             <div key={`exact-${i}`} className="p-2.5 border border-gray-700 rounded-lg bg-gray-800/70 text-xs flex justify-between items-center">
-                                <div>
+                                <div className="flex items-center flex-wrap gap-1">
                                     <span className="font-medium text-gray-200">
                                         Exact: {(rule.match_keys || []).join(', ')}
                                     </span>
-                                    <span className="ml-2 text-gray-400">({rule.canonicalize || 'LOWERCASE'})</span>
+                                    <span className="text-gray-400">({rule.canonicalize || 'LOWERCASE'})</span>
+                                    <span className="text-[10px] text-amber-300 font-mono px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40">max {rule.max_group_size || 10000}</span>
                                 </div>
                                 <span className="bg-gray-700 px-2 py-0.5 rounded text-gray-300">Priority {rule.priority}</span>
                             </div>
