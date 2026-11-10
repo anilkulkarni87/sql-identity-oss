@@ -1324,13 +1324,13 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-idr-serve" class="md-nav__link">
+  <a href="#6-idr-ui-idr-serve" class="md-nav__link">
     <span class="md-ellipsis">
-      6. idr serve
+      6. idr ui &amp; idr serve
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="6. idr serve">
+    <nav class="md-nav" aria-label="6. idr ui & idr serve">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1802,13 +1802,13 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-idr-serve" class="md-nav__link">
+  <a href="#6-idr-ui-idr-serve" class="md-nav__link">
     <span class="md-ellipsis">
-      6. idr serve
+      6. idr ui &amp; idr serve
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="6. idr serve">
+    <nav class="md-nav" aria-label="6. idr ui & idr serve">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1873,8 +1873,12 @@
 </thead>
 <tbody>
 <tr>
+<td style="text-align: left;"><code>idr ui</code></td>
+<td style="text-align: left;">Launch the interactive IDR Studio UI &amp; API server in one command (opens browser automatically)</td>
+</tr>
+<tr>
 <td style="text-align: left;"><code>idr run</code></td>
-<td style="text-align: left;">Execute full or incremental identity resolution pipelines</td>
+<td style="text-align: left;">Execute full or incremental identity resolution pipelines (<code>--platform</code> auto-detected if omitted)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>idr init</code></td>
@@ -1882,19 +1886,23 @@
 </tr>
 <tr>
 <td style="text-align: left;"><code>idr config</code></td>
-<td style="text-align: left;">Validate, generate SQL DDL, or apply declarative YAML configurations</td>
+<td style="text-align: left;">Validate, generate SQL DDL, apply YAML configurations, or export to <code>dbt_idr</code> seeds</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr dbt export</code></td>
+<td style="text-align: left;">Export YAML or live warehouse metadata directly into the 6 standard <code>dbt_idr</code> seed CSVs</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>idr quickstart</code></td>
 <td style="text-align: left;">Generate synthetic multi-channel retail data and run an automated local demo</td>
 </tr>
 <tr>
-<td style="text-align: left;"><code>idr mcp</code></td>
-<td style="text-align: left;">Start the Model Context Protocol (MCP) server for AI assistants</td>
+<td style="text-align: left;"><code>idr mcp</code> / <code>idr-mcp</code></td>
+<td style="text-align: left;">Start the Model Context Protocol (MCP) server for AI assistants (19 tools)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>idr serve</code></td>
-<td style="text-align: left;">Launch the FastAPI REST service and Prometheus metrics endpoint</td>
+<td style="text-align: left;">Launch the FastAPI REST service, bundled UI, and Prometheus metrics endpoint</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>idr version</code></td>
@@ -1924,8 +1932,8 @@
 <td style="text-align: left;"><code>--platform</code></td>
 <td style="text-align: left;"><code>-p</code></td>
 <td style="text-align: left;">String</td>
-<td style="text-align: left;"><strong>Required</strong></td>
-<td style="text-align: left;">Target warehouse: <code>duckdb</code>, <code>snowflake</code>, <code>bigquery</code>, or <code>databricks</code></td>
+<td style="text-align: left;">Auto-detected</td>
+<td style="text-align: left;">Target warehouse: <code>duckdb</code>, <code>snowflake</code>, <code>bigquery</code>, or <code>databricks</code> (inferred from <code>--db</code>, <code>--project</code>, <code>IDR_PLATFORM</code>, or local credentials if omitted)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>--mode</code></td>
@@ -2043,15 +2051,25 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>idr<span class="w"> </span>config<span class="w"> </span>generate<span class="w"> </span>--file<span class="o">=</span>rules.yaml<span class="w"> </span>--dialect<span class="o">=</span>snowflake<span class="w"> </span>&gt;<span class="w"> </span>deploy_rules.sql
 </code></pre></div>
 <ul>
-<li><strong><code>idr config apply --file=&lt;path&gt; --platform=&lt;platform&gt; [connection-flags]</code></strong>:
+<li><strong><code>idr config apply --file=&lt;path&gt; [--platform=&lt;platform&gt;] [connection-flags]</code></strong>:
   Executes generated SQL statements directly against your target warehouse to update metadata tables.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>idr<span class="w"> </span>config<span class="w"> </span>apply<span class="w"> </span>--file<span class="o">=</span>rules.yaml<span class="w"> </span>--platform<span class="o">=</span>duckdb<span class="w"> </span>--db<span class="o">=</span>demo.duckdb
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>idr<span class="w"> </span>config<span class="w"> </span>apply<span class="w"> </span>--file<span class="o">=</span>rules.yaml<span class="w"> </span>--db<span class="o">=</span>demo.duckdb
+</code></pre></div>
+<ul>
+<li><strong><code>idr dbt export</code> (or <code>idr config export-dbt</code>)</strong>:
+  Compiles a YAML configuration file (<code>--file</code>) or live warehouse <code>idr_meta</code> tables (<code>--db</code> / <code>--platform</code>) into the 6 standard <code>dbt_idr</code> seed CSV files (<code>idr_sources.csv</code>, <code>idr_identifier_mappings.csv</code>, <code>idr_attribute_mappings.csv</code>, <code>idr_rules.csv</code>, <code>idr_exclusions.csv</code>, <code>idr_survivorship_rules.csv</code>).</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Export from YAML manifest to your dbt project's seeds directory</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>idr<span class="w"> </span>dbt<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--file<span class="o">=</span>idr_config.yaml<span class="w"> </span>--output-dir<span class="o">=</span>dbt_idr/seeds
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Export from live DuckDB metadata tables configured via the Web UI</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>idr<span class="w"> </span>dbt<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--db<span class="o">=</span>demo.duckdb<span class="w"> </span>--output-dir<span class="o">=</span>dbt_idr/seeds
 </code></pre></div>
 <hr />
 <h3 id="4-idr-quickstart">4. <code>idr quickstart</code></h3>
 <p>Generates synthetic multi-channel customer records across Web, Store, Mobile, and Call Center, creates a local DuckDB instance, runs full identity resolution, and displays a summary table.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>idr<span class="w"> </span>quickstart<span class="w"> </span><span class="o">[</span>--rows<span class="o">=</span><span class="m">10000</span><span class="o">]</span><span class="w"> </span><span class="o">[</span>--output<span class="o">=</span>quickstart_demo.duckdb<span class="o">]</span><span class="w"> </span><span class="o">[</span>--seed<span class="o">=</span><span class="m">42</span><span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>idr<span class="w"> </span>quickstart<span class="w"> </span><span class="o">[</span>--rows<span class="o">=</span><span class="m">10000</span><span class="o">]</span><span class="w"> </span><span class="o">[</span>--output<span class="o">=</span>quickstart_demo.duckdb<span class="o">]</span><span class="w"> </span><span class="o">[</span>--seed<span class="o">=</span><span class="m">42</span><span class="o">]</span>
 </code></pre></div>
 <h4 id="options_2">Options</h4>
 <table>
@@ -2091,7 +2109,7 @@
 <hr />
 <h3 id="5-idr-mcp">5. <code>idr mcp</code></h3>
 <p>Launches the Model Context Protocol (MCP) server, exposing 17 operational tools to AI assistants (Claude Desktop, Cursor, Antigravity).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>idr<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>--transport<span class="o">=</span>stdio<span class="p">|</span>sse<span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>idr<span class="w"> </span>mcp<span class="w"> </span><span class="o">[</span>--transport<span class="o">=</span>stdio<span class="p">|</span>sse<span class="o">]</span>
 </code></pre></div>
 <h4 id="options_3">Options</h4>
 <table>
@@ -2113,9 +2131,16 @@
 </tbody>
 </table>
 <hr />
-<h3 id="6-idr-serve">6. <code>idr serve</code></h3>
-<p>Starts the FastAPI REST server with Swagger UI documentation (<code>/docs</code>) and Prometheus metrics scraper (<code>/metrics</code>).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>idr<span class="w"> </span>serve<span class="w"> </span><span class="o">[</span>--host<span class="o">=</span><span class="m">0</span>.0.0.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--port<span class="o">=</span><span class="m">8000</span><span class="o">]</span><span class="w"> </span><span class="o">[</span>--reload<span class="o">]</span>
+<h3 id="6-idr-ui-idr-serve">6. <code>idr ui</code> &amp; <code>idr serve</code></h3>
+<p>Starts the FastAPI REST server, serves the embedded React Studio SPA, and exposes Swagger UI documentation (<code>/docs</code>) and Prometheus metrics (<code>/metrics</code>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Launch UI + API and automatically open http://localhost:8000 in your browser:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>idr<span class="w"> </span>ui<span class="w"> </span><span class="o">[</span>--host<span class="o">=</span><span class="m">127</span>.0.0.1<span class="o">]</span><span class="w"> </span><span class="o">[</span>--port<span class="o">=</span><span class="m">8000</span><span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-browser<span class="o">]</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Zero-install execution via uvx:</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>uvx<span class="w"> </span>--from<span class="w"> </span><span class="s2">"sql-identity-resolution[all]"</span><span class="w"> </span>idr<span class="w"> </span>ui
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># Headless API / UI server mode:</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>idr<span class="w"> </span>serve<span class="w"> </span><span class="o">[</span>--host<span class="o">=</span><span class="m">0</span>.0.0.0<span class="o">]</span><span class="w"> </span><span class="o">[</span>--port<span class="o">=</span><span class="m">8000</span><span class="o">]</span><span class="w"> </span><span class="o">[</span>--reload<span class="o">]</span><span class="w"> </span><span class="o">[</span>--open<span class="o">]</span>
 </code></pre></div>
 <h4 id="options_4">Options</h4>
 <table>

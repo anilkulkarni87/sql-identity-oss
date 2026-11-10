@@ -2,126 +2,126 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/01-overview/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/02-installation/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/03-quickstart/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/04-configuration/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/05-cli/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/06-platforms/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/07-pipeline/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/08-schema/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/09-ui/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/10-api/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/11-mcp/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/12-dbt/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/13-scale-testing/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/14-troubleshooting/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/15-ci-cd/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/16-security/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/17-e2e-testing/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/18-architecture/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/19-matching-algorithm/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/20-data-model/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/21-how-it-works/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/22-metrics/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/23-benchmarks/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/24-sizing/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/25-scaling/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/26-production-hardening/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/27-distribution/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/BIGQUERY_TESTING_GUIDE/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/DATABRICKS_TESTING_GUIDE/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/SNOWFLAKE_TESTING_GUIDE/</loc>
-         <lastmod>2026-11-09</lastmod>
+         <lastmod>2026-11-10</lastmod>
     </url>
 </urlset>

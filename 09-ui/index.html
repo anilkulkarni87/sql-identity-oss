@@ -468,16 +468,23 @@
 <nav aria-label="🚀 Running the Web UI" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#option-1-docker-compose-recommended">
+<a class="md-nav__link" href="#option-1-single-command-launcher-zero-nodejs-required">
 <span class="md-ellipsis">
-      Option 1: Docker Compose (Recommended)
+      Option 1: Single-Command Launcher (Zero Node.js Required)
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#option-2-local-development">
+<a class="md-nav__link" href="#option-2-docker-compose">
 <span class="md-ellipsis">
-      Option 2: Local Development
+      Option 2: Docker Compose
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#option-3-local-frontend-development-hot-reload">
+<span class="md-ellipsis">
+      Option 3: Local Frontend Development (Hot Reload)
     </span>
 </a>
 </li>
@@ -653,16 +660,23 @@
 <nav aria-label="🚀 Running the Web UI" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
-<a class="md-nav__link" href="#option-1-docker-compose-recommended">
+<a class="md-nav__link" href="#option-1-single-command-launcher-zero-nodejs-required">
 <span class="md-ellipsis">
-      Option 1: Docker Compose (Recommended)
+      Option 1: Single-Command Launcher (Zero Node.js Required)
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#option-2-local-development">
+<a class="md-nav__link" href="#option-2-docker-compose">
 <span class="md-ellipsis">
-      Option 2: Local Development
+      Option 2: Docker Compose
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#option-3-local-frontend-development-hot-reload">
+<span class="md-ellipsis">
+      Option 3: Local Frontend Development (Hot Reload)
     </span>
 </a>
 </li>
@@ -754,22 +768,30 @@
 <p>The IDR Web UI is a modern React SPA paired with the FastAPI backend. It enables non-technical and technical users to visually configure, run, monitor, and explore the identity resolution graph.</p>
 <hr/>
 <h2 id="running-the-web-ui">🚀 Running the Web UI</h2>
-<h3 id="option-1-docker-compose-recommended">Option 1: Docker Compose (Recommended)</h3>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build
+<h3 id="option-1-single-command-launcher-zero-nodejs-required">Option 1: Single-Command Launcher (Zero Node.js Required)</h3>
+<p><div class="highlight"><pre><span></span><code><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="c1"># If installed in your Python environment:</span>
+<a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>idr<span class="w"> </span>ui
+<a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a>
+<a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a><span class="c1"># Or zero-install via uvx:</span>
+<a href="#__codelineno-0-5" id="__codelineno-0-5" name="__codelineno-0-5"></a>uvx<span class="w"> </span>--from<span class="w"> </span><span class="s2">"sql-identity-resolution[all]"</span><span class="w"> </span>idr<span class="w"> </span>ui
+</code></pre></div>
+This starts the FastAPI backend + embedded React UI on <code>http://localhost:8000</code> and opens your browser automatically.</p>
+<h3 id="option-2-docker-compose">Option 2: Docker Compose</h3>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-1-1" id="__codelineno-1-1" name="__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>--build
 </code></pre></div>
 <ul>
 <li><strong>Web UI</strong>: <a href="http://localhost:3000">http://localhost:3000</a></li>
 <li><strong>FastAPI Backend</strong>: <a href="http://localhost:8000">http://localhost:8000</a></li>
 <li><strong>API Documentation</strong>: <a href="http://localhost:8000/docs">http://localhost:8000/docs</a></li>
 </ul>
-<h3 id="option-2-local-development">Option 2: Local Development</h3>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-1-1" id="__codelineno-1-1" name="__codelineno-1-1"></a><span class="c1"># Terminal 1: Backend</span>
-<a href="#__codelineno-1-2" id="__codelineno-1-2" name="__codelineno-1-2"></a>idr<span class="w"> </span>serve<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
-<a href="#__codelineno-1-3" id="__codelineno-1-3" name="__codelineno-1-3"></a>
-<a href="#__codelineno-1-4" id="__codelineno-1-4" name="__codelineno-1-4"></a><span class="c1"># Terminal 2: Frontend</span>
-<a href="#__codelineno-1-5" id="__codelineno-1-5" name="__codelineno-1-5"></a><span class="nb">cd</span><span class="w"> </span>idr_ui
-<a href="#__codelineno-1-6" id="__codelineno-1-6" name="__codelineno-1-6"></a>npm<span class="w"> </span>install
-<a href="#__codelineno-1-7" id="__codelineno-1-7" name="__codelineno-1-7"></a>npm<span class="w"> </span>run<span class="w"> </span>dev
+<h3 id="option-3-local-frontend-development-hot-reload">Option 3: Local Frontend Development (Hot Reload)</h3>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-2-1" id="__codelineno-2-1" name="__codelineno-2-1"></a><span class="c1"># Terminal 1: Backend</span>
+<a href="#__codelineno-2-2" id="__codelineno-2-2" name="__codelineno-2-2"></a>idr<span class="w"> </span>serve<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--reload
+<a href="#__codelineno-2-3" id="__codelineno-2-3" name="__codelineno-2-3"></a>
+<a href="#__codelineno-2-4" id="__codelineno-2-4" name="__codelineno-2-4"></a><span class="c1"># Terminal 2: Frontend Vite dev server</span>
+<a href="#__codelineno-2-5" id="__codelineno-2-5" name="__codelineno-2-5"></a><span class="nb">cd</span><span class="w"> </span>idr_ui
+<a href="#__codelineno-2-6" id="__codelineno-2-6" name="__codelineno-2-6"></a>npm<span class="w"> </span>install
+<a href="#__codelineno-2-7" id="__codelineno-2-7" name="__codelineno-2-7"></a>npm<span class="w"> </span>run<span class="w"> </span>dev
 </code></pre></div>
 <hr/>
 <h2 id="1-setup-wizard-setup">🧙‍♂️ 1. Setup Wizard (<code>/setup</code>)</h2>
@@ -793,11 +815,14 @@
 <li>Check the source tables you want to include in identity resolution.</li>
 </ul>
 <h3 id="step-3-map-identifiers-attributes">Step 3: Map Identifiers &amp; Attributes</h3>
+<p>For each selected table, configure four core mappings (see <a href="../04-configuration/">Configuration Guide</a> for the complete mental model):</p>
 <ul>
-<li>For each selected table, set the <strong>Entity Key</strong> (unique primary key) and <strong>Watermark Column</strong> (for incremental processing).</li>
-<li>Map identity columns to standardized types (<code>EMAIL</code>, <code>PHONE</code>, <code>LOYALTY_ID</code>, etc.).</li>
-<li>Mark pre-hashed values if already SHA-256 encoded.</li>
-<li>Map golden attributes (e.g. <code>first_name</code>, <code>last_name</code>, <code>email</code>) for profile survivorship.</li>
+<li><strong>Entity Key (Primary Key)</strong>: The unique row identifier column in the source table (e.g., <code>customer_id</code>, <code>order_id</code>). IDR prefixes this with the table ID (<code>crm:1042</code>) so keys across different tables never collide.</li>
+<li><strong>Watermark Column</strong>: A timestamp or date column (<code>updated_at</code>, <code>order_date</code>) used for two purposes:</li>
+<li><strong>Incremental Runs (<code>INCR</code> mode):</strong> Only scans rows modified since the previous run's watermark, saving 90–99% of warehouse compute.</li>
+<li><strong><code>RECENCY</code> Survivorship:</strong> Determines which record holds the newest attribute value when building the Golden Profile.</li>
+<li><strong>Identifiers (Graph Link Keys)</strong>: Columns used to <strong>match and link</strong> records together into identity clusters (<code>EMAIL</code>, <code>PHONE</code>, <code>LOYALTY_ID</code>). Mark pre-hashed values if already SHA-256 encoded.</li>
+<li><strong>Attributes (Golden Profile Fields)</strong>: Columns carried forward into <code>idr_out.golden_profiles</code> (e.g., <code>first_name</code>, <code>last_name</code>, <code>email</code>, <code>phone</code>, <code>city</code>) to construct the winning Customer 360 record after clusters are resolved.</li>
 </ul>
 <h3 id="step-4-matching-rules-exclusions">Step 4: Matching Rules &amp; Exclusions</h3>
 <ul>
