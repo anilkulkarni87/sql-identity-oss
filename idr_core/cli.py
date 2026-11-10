@@ -232,6 +232,9 @@ Examples:
     serve_parser.add_argument(
         "--open", action="store_true", help="Open the UI in the default browser"
     )
+    serve_parser.add_argument(
+        "--quiet", action="store_true", help="Hide per-request HTTP access logs"
+    )
 
     # === idr ui ===
     ui_parser = subparsers.add_parser(
@@ -242,6 +245,9 @@ Examples:
     ui_parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
     ui_parser.add_argument(
         "--no-browser", action="store_true", help="Do not automatically open the browser"
+    )
+    ui_parser.add_argument(
+        "--quiet", action="store_true", help="Hide per-request HTTP access logs"
     )
 
     # === idr mcp ===
@@ -330,10 +336,9 @@ def _resolve_platform(args) -> str:
     try:
         from idr_core.credential_discovery import discover_all
 
-        discovered = discover_all()
+        discovered_platforms = {c.get("platform") for c in discover_all()}
         for candidate in ("snowflake", "bigquery", "databricks", "duckdb"):
-            info = discovered.get(candidate, {})
-            if info.get("available"):
+            if candidate in discovered_platforms:
                 return candidate
     except Exception:
         pass
@@ -395,19 +400,36 @@ def get_adapter(args):
 
             from idr_core.adapters.databricks import DatabricksAdapter
 
-            # Check for required env vars (CLI doesn't have args for these)
+            # Resolve credentials: env vars first, then ~/.databrickscfg / dbt profiles
             host = os.environ.get("DATABRICKS_HOST")
             http_path = os.environ.get("DATABRICKS_HTTP_PATH")
             token = os.environ.get("DATABRICKS_TOKEN")
+            catalog = os.environ.get("DATABRICKS_CATALOG")
+
+            if not (host and http_path and token):
+                from idr_core.credential_discovery import discover_all
+
+                for conn_info in discover_all():
+                    if conn_info.get("platform") != "databricks":
+                        continue
+                    p = conn_info.get("params", {})
+                    if p.get("server_hostname") and p.get("http_path") and p.get("access_token"):
+                        host = host or p["server_hostname"]
+                        http_path = http_path or p["http_path"]
+                        token = token or p["access_token"]
+                        catalog = catalog or p.get("catalog")
+                        print(f"Using discovered credentials: {conn_info.get('name')}")
+                        break
 
             if not (host and http_path and token):
                 raise ValueError(
-                    "Databricks connection requires environment variables: DATABRICKS_HOST, DATABRICKS_HTTP_PATH, DATABRICKS_TOKEN"
+                    "Databricks connection requires DATABRICKS_HOST, DATABRICKS_HTTP_PATH, "
+                    "DATABRICKS_TOKEN (env vars) or a ~/.databrickscfg profile with host, http_path, token"
                 )
 
-            print("Connecting to Databricks...")
+            host = host.replace("https://", "").replace("http://", "").split("/")[0]
+            print(f"Connecting to Databricks ({host})...")
             conn = sql.connect(server_hostname=host, http_path=http_path, access_token=token)
-            catalog = os.environ.get("DATABRICKS_CATALOG")
             return DatabricksAdapter(conn, catalog=catalog)
 
         except ImportError:
@@ -669,7 +691,13 @@ def handle_serve(args) -> int:
         url = f"http://{browse_host}:{args.port}"
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
 
-    uvicorn.run("idr_api.main:app", host=args.host, port=args.port, reload=args.reload)
+    uvicorn.run(
+        "idr_api.main:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        access_log=not getattr(args, "quiet", False),
+    )
     return 0
 
 
