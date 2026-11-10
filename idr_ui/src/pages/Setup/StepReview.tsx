@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Loader2, CheckCircle2, Settings, Play, Save, ClipboardList,
     ChevronDown, ChevronRight, Database, Shield, Layers, Code,
-    Activity, Clock, Cpu, FileSpreadsheet, GitMerge, Network, Sparkles
+    Activity, Clock, Cpu, FileSpreadsheet, GitMerge, Network, Sparkles,
+    ArrowRight
 } from "lucide-react";
 import { IDRConfig } from '../../types';
 import { api } from '../../api/client';
@@ -23,6 +25,7 @@ export default function StepReview({
     readOnly?: boolean,
     warningMessage?: string | null
 }) {
+    const navigate = useNavigate();
     type ReviewPhase = 'idle' | 'saving' | 'running' | 'success';
     const [phase, setPhase] = useState<ReviewPhase>('idle');
     const [error, setError] = useState<string | null>(null);
@@ -64,22 +67,53 @@ export default function StepReview({
         if (phase !== 'running') return;
 
         let cancelled = false;
+
+        // Try Server-Sent Events (SSE) for instant real-time stage updates
+        let eventSource: EventSource | null = null;
+        try {
+            const rawBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+            const baseUrl = (rawBaseUrl && rawBaseUrl.length > 0 ? rawBaseUrl : '/api').replace(/\/$/, '');
+            eventSource = new EventSource(`${baseUrl}/setup/run/events`);
+            eventSource.onmessage = (event) => {
+                if (cancelled || !event.data) return;
+                try {
+                    const parsed = JSON.parse(event.data);
+                    if (parsed.progress) {
+                        setLiveProgress(parsed.progress);
+                    } else if (parsed.stages) {
+                        setLiveProgress(parsed);
+                    }
+                } catch {
+                    // Ignore JSON parse errors from keepalives
+                }
+            };
+            eventSource.onerror = () => {
+                eventSource?.close();
+                eventSource = null;
+            };
+        } catch {
+            // Fall back to HTTP polling if EventSource is not supported
+        }
+
         const poll = async () => {
             try {
                 const prog = await api.getRunProgress();
                 if (!cancelled && prog && prog.status !== 'IDLE') {
                     setLiveProgress(prog);
                 }
-            } catch {
-                // Ignore transient polling errors
+            } catch (err) {
+                console.warn("Live progress poll error:", err);
             }
         };
 
         poll();
-        const interval = setInterval(poll, 1000);
+        const interval = setInterval(poll, 300); // 300ms polling for responsive, low-latency stage transitions
         return () => {
             cancelled = true;
             clearInterval(interval);
+            if (eventSource) {
+                eventSource.close();
+            }
         };
     }, [phase]);
 
@@ -128,6 +162,15 @@ export default function StepReview({
                 max_iterations: maxIterations,
                 dry_run: dryRun,
             });
+            // Fetch final progress snapshot so all completed stages reflect accurate row counts & durations
+            try {
+                const finalProg = await api.getRunProgress();
+                if (finalProg && finalProg.status !== 'IDLE') {
+                    setLiveProgress(finalProg);
+                }
+            } catch {
+                // Ignore transient errors on final snapshot
+            }
             setRunResult(result);
             setPhase('success');
         } catch (err: any) {
@@ -156,107 +199,6 @@ export default function StepReview({
     const btnClass = "px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center";
     const btnOutlineClass = "px-4 py-2 border border-gray-600 text-gray-300 rounded-md text-sm font-medium hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500 flex items-center";
 
-    if (success) {
-        if (dryRun && runResult?.dry_run_summary) {
-            return (
-                <div className="flex flex-col items-center justify-center h-[500px] space-y-6 text-center max-w-2xl mx-auto">
-                    <div className="rounded-full bg-purple-500/20 p-6 border border-purple-500/30">
-                        <ClipboardList className="w-16 h-16 text-purple-400" />
-                    </div>
-                    <div className="space-y-2">
-                        <h2 className="text-2xl font-bold text-white">Dry Run Complete</h2>
-                        <p className="text-gray-400">Analysis finished. No changes were committed to the ID graph.</p>
-                    </div>
-
-                    <div className="w-full bg-gray-800 rounded-lg p-6 border border-gray-700 grid grid-cols-1 gap-4 text-left">
-                        <h3 className="font-semibold text-gray-300 border-b border-gray-700 pb-2">Proposed Changes</h3>
-
-                        <div className="flex justify-between items-center px-2">
-                            <span className="text-gray-400">Entities Impacted (New + Moved)</span>
-                            <span className="text-xl font-bold text-white">{runResult.dry_run_summary.proposed_changes || 0}</span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-3 px-2 pt-2 border-t border-gray-700/60 text-xs">
-                            <div className="bg-gray-900/60 p-2.5 rounded border border-gray-700">
-                                <span className="text-gray-400 block">New Entities</span>
-                                <span className="text-base font-semibold text-green-400">{runResult.dry_run_summary.new_entities ?? 0}</span>
-                            </div>
-                            <div className="bg-gray-900/60 p-2.5 rounded border border-gray-700">
-                                <span className="text-gray-400 block">Moved Clusters</span>
-                                <span className="text-base font-semibold text-amber-400">{runResult.dry_run_summary.moved_entities ?? 0}</span>
-                            </div>
-                            <div className="bg-gray-900/60 p-2.5 rounded border border-gray-700">
-                                <span className="text-gray-400 block">Unchanged</span>
-                                <span className="text-base font-semibold text-gray-300">{runResult.dry_run_summary.unchanged_entities ?? 0}</span>
-                            </div>
-                        </div>
-                        {runResult.dry_run_summary.error && (
-                            <div className="bg-red-900/20 text-red-200 p-2 rounded text-sm">
-                                Error fetching details: {runResult.dry_run_summary.error}
-                            </div>
-                        )}
-                        <p className="text-xs text-gray-500 mt-2">
-                            To apply these changes, disable Dry Run and run the pipeline again.
-                        </p>
-                    </div>
-
-                    <div className="flex gap-4">
-                        <button className={btnOutlineClass} onClick={() => { setPhase('idle'); setRunResult(null); }}>Back to Config</button>
-                        <button className={btnClass} onClick={() => { setPhase('idle'); setRunResult(null); setDryRun(false); }}>Run for Real</button>
-                    </div>
-                </div>
-            );
-        }
-
-        const isNoChanges = runResult?.status === 'SUCCESS_NO_CHANGES';
-        return (
-            <div className="flex flex-col items-center justify-center py-12 space-y-6 text-center max-w-xl mx-auto">
-                <div className="rounded-full bg-green-500/20 p-6 border border-green-500/30">
-                    <CheckCircle2 className="w-16 h-16 text-green-400" />
-                </div>
-                <div className="space-y-2">
-                    <h2 className="text-2xl font-bold text-white">
-                        {isNoChanges ? 'Up to Date — No New Records!' : 'Setup & Run Complete!'}
-                    </h2>
-                    <p className="text-gray-400 text-sm">
-                        {isNoChanges
-                            ? `Incremental check finished in ${Math.round(runResult?.duration_seconds || 0)}s. Zero new or modified records were found since the last watermark.`
-                            : `Your Identity Resolution pipeline finished in ${Math.round(runResult?.duration_seconds || 0)}s.`}
-                    </p>
-                </div>
-
-                {runResult && (
-                    <div className="grid grid-cols-3 gap-3 w-full bg-gray-900/70 p-4 rounded-xl border border-gray-700 text-xs">
-                        <div className="p-2 bg-gray-800/80 rounded border border-gray-700">
-                            <span className="text-gray-400 block">Entities Processed</span>
-                            <span className="text-base font-mono font-bold text-white">
-                                {(runResult.entities_processed ?? 0).toLocaleString()}
-                            </span>
-                        </div>
-                        <div className="p-2 bg-gray-800/80 rounded border border-gray-700">
-                            <span className="text-gray-400 block">Edges Created</span>
-                            <span className="text-base font-mono font-bold text-blue-400">
-                                {(runResult.edges_created ?? 0).toLocaleString()}
-                            </span>
-                        </div>
-                        <div className="p-2 bg-gray-800/80 rounded border border-gray-700">
-                            <span className="text-gray-400 block">Clusters Impacted</span>
-                            <span className="text-base font-mono font-bold text-emerald-400">
-                                {(runResult.clusters_impacted ?? 0).toLocaleString()}
-                            </span>
-                        </div>
-                    </div>
-                )}
-
-                <div className="flex gap-3">
-                    <button className={btnOutlineClass} onClick={() => { setPhase('idle'); setRunResult(null); }}>
-                        Back to Run Controls
-                    </button>
-                    <button className={btnClass} onClick={onComplete}>Go to Dashboard</button>
-                </div>
-            </div>
-        );
-    }
-
     const totalSources = config.sources?.length || 0;
     const totalExactRules = config.rules?.length || 0;
     const totalFuzzyRules = config.fuzzy_rules?.length || 0;
@@ -264,15 +206,18 @@ export default function StepReview({
     const totalExclusions = (config.exclusions?.length || 0) + (config.use_default_exclusions ? 33 : 0);
     const totalOverrides = config.overrides?.length || 0;
 
-    // Progress calculation for live panel
+    // Progress calculation for live & completed panel
     const stagesList = liveProgress?.stages || [];
-    const completedStages = stagesList.filter(s => s.status === 'completed').length;
+    const completedStages = stagesList.filter(s => s.status === 'completed' || s.status === 'skipped').length;
     const totalStages = stagesList.length || 8;
     const activeStageObj = stagesList.find(s => s.status === 'running');
-    const progressPercent = Math.min(
-        98,
-        Math.round(((completedStages + (activeStageObj ? 0.4 : 0)) / Math.max(1, totalStages)) * 100)
-    );
+    const isCompleted = success || liveProgress?.status === 'SUCCESS' || liveProgress?.status === 'DRY_RUN_COMPLETE';
+    const progressPercent = isCompleted
+        ? 100
+        : Math.min(
+            98,
+            Math.round(((completedStages + (activeStageObj ? 0.4 : 0)) / Math.max(1, totalStages)) * 100)
+        );
 
     return (
         <div className="space-y-6 flex flex-col">
@@ -330,18 +275,32 @@ export default function StepReview({
                 </div>
             )}
 
-            {/* LIVE PIPELINE EXECUTION PROGRESS PANEL */}
-            {loading && liveProgress && (
-                <div className="bg-gray-900/90 border border-blue-500/40 rounded-xl p-5 space-y-4 shadow-lg">
+            {/* LIVE & COMPLETED PIPELINE EXECUTION PROGRESS PANEL */}
+            {(loading || success || (liveProgress && liveProgress.status !== 'IDLE')) && liveProgress && (
+                <div className={`border rounded-xl p-5 space-y-4 shadow-lg transition-all ${
+                    success
+                        ? 'bg-emerald-950/20 border-emerald-500/40'
+                        : 'bg-gray-900/90 border-blue-500/40'
+                }`}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-blue-500/20 border border-blue-500/30">
-                                <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                            <div className={`p-2 rounded-lg border ${
+                                success
+                                    ? 'bg-emerald-500/20 border-emerald-500/30'
+                                    : 'bg-blue-500/20 border-blue-500/30'
+                            }`}>
+                                {loading ? (
+                                    <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                                ) : (
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                                )}
                             </div>
                             <div>
                                 <div className="flex items-center gap-2">
                                     <h3 className="text-sm font-bold text-white">
-                                        Executing Pipeline ({runMode === 'INCREMENTAL' ? 'Incremental' : 'Full Refresh'})
+                                        {success
+                                            ? `Identity Resolution Complete (${runResult?.status || liveProgress.status})`
+                                            : `Executing Pipeline (${runMode === 'INCREMENTAL' ? 'Incremental' : 'Full Refresh'})`}
                                     </h3>
                                     {liveProgress.run_id && (
                                         <span className="text-xs font-mono px-2 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700">
@@ -349,19 +308,21 @@ export default function StepReview({
                                         </span>
                                     )}
                                 </div>
-                                <p className="text-xs text-blue-300 mt-0.5">
-                                    {liveProgress.current_detail || 'Processing stage...'}
+                                <p className={`text-xs mt-0.5 ${success ? 'text-emerald-300' : 'text-blue-300'}`}>
+                                    {success
+                                        ? `Finished in ${Math.round(runResult?.duration_seconds ?? liveProgress.elapsed_seconds ?? 0)}s — All stages completed`
+                                        : (liveProgress.current_detail || 'Processing stage...')}
                                 </p>
                             </div>
                         </div>
 
                         <div className="flex items-center gap-4 text-xs font-mono">
                             <span className="px-2.5 py-1 rounded bg-gray-800 border border-gray-700 text-gray-300 flex items-center gap-1.5">
-                                <Clock className="w-3.5 h-3.5 text-blue-400" />
-                                {Math.round(liveProgress.elapsed_seconds || 0)}s elapsed
+                                <Clock className={`w-3.5 h-3.5 ${success ? 'text-emerald-400' : 'text-blue-400'}`} />
+                                {Math.round(liveProgress.elapsed_seconds || runResult?.duration_seconds || 0)}s elapsed
                             </span>
-                            <span className="text-blue-400 font-bold">
-                                Stage {Math.min(completedStages + 1, totalStages)} of {totalStages} ({progressPercent}%)
+                            <span className={`font-bold ${success ? 'text-emerald-400' : 'text-blue-400'}`}>
+                                Stage {Math.min(completedStages, totalStages)} of {totalStages} ({progressPercent}%)
                             </span>
                         </div>
                     </div>
@@ -369,16 +330,20 @@ export default function StepReview({
                     {/* Overall Progress Bar */}
                     <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
                         <div
-                            className="h-full bg-gradient-to-r from-blue-600 to-cyan-400 rounded-full transition-all duration-500"
+                            className={`h-full rounded-full transition-all duration-500 ${
+                                success
+                                    ? 'bg-gradient-to-r from-emerald-600 to-teal-400'
+                                    : 'bg-gradient-to-r from-blue-600 to-cyan-400'
+                            }`}
                             style={{ width: `${progressPercent}%` }}
                         />
                     </div>
 
-                    {/* 8-Stage Live Status Grid */}
+                    {/* 8-Stage Status Grid */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-1">
                         {stagesList.map((st) => {
-                            const isRunning = st.status === 'running';
-                            const isDone = st.status === 'completed';
+                            const isRunning = !success && st.status === 'running';
+                            const isDone = success || st.status === 'completed';
                             return (
                                 <div
                                     key={st.name}
@@ -425,6 +390,113 @@ export default function StepReview({
                             );
                         })}
                     </div>
+
+                    {/* RUN RESULTS & ACTIONS PANEL (Rendered immediately upon success) */}
+                    {success && runResult && (
+                        <div className="pt-4 border-t border-gray-700/70 space-y-4">
+                            {dryRun && runResult.dry_run_summary ? (
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2 text-purple-300 font-semibold text-sm">
+                                        <ClipboardList className="w-4 h-4" />
+                                        Dry Run Analysis — Proposed Graph Changes (No Writes Committed)
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">Proposed Changes</span>
+                                            <span className="text-lg font-mono font-bold text-white">
+                                                {(runResult.dry_run_summary.proposed_changes ?? 0).toLocaleString()}
+                                            </span>
+                                        </div>
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">New Entities</span>
+                                            <span className="text-lg font-mono font-bold text-green-400">
+                                                {(runResult.dry_run_summary.new_entities ?? 0).toLocaleString()}
+                                            </span>
+                                        </div>
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">Moved Entities</span>
+                                            <span className="text-lg font-mono font-bold text-amber-400">
+                                                {(runResult.dry_run_summary.moved_entities ?? 0).toLocaleString()}
+                                            </span>
+                                        </div>
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">Unchanged Entities</span>
+                                            <span className="text-lg font-mono font-bold text-gray-300">
+                                                {(runResult.dry_run_summary.unchanged_entities ?? 0).toLocaleString()}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-3 pt-1">
+                                        <button
+                                            className={btnClass}
+                                            onClick={() => { setDryRun(false); handleRun(); }}
+                                        >
+                                            <Play className="w-4 h-4 mr-1.5" />
+                                            Execute Real Pipeline (Commit Changes)
+                                        </button>
+                                        <button
+                                            className={btnOutlineClass}
+                                            onClick={() => { setPhase('idle'); setRunResult(null); }}
+                                        >
+                                            Edit Configuration
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">Entities Processed</span>
+                                            <span className="text-lg font-mono font-bold text-white">
+                                                {(runResult.entities_processed ?? 0).toLocaleString()}
+                                            </span>
+                                        </div>
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">Edges Created</span>
+                                            <span className="text-lg font-mono font-bold text-blue-400">
+                                                {(runResult.edges_created ?? 0).toLocaleString()}
+                                            </span>
+                                        </div>
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">Clusters Impacted</span>
+                                            <span className="text-lg font-mono font-bold text-emerald-400">
+                                                {(runResult.clusters_impacted ?? 0).toLocaleString()}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3 pt-1">
+                                        <button
+                                            className={btnClass}
+                                            onClick={() => navigate('/explorer')}
+                                        >
+                                            <Network className="w-4 h-4 mr-1.5" />
+                                            Open Graph Explorer
+                                            <ArrowRight className="w-4 h-4 ml-1.5" />
+                                        </button>
+                                        <button
+                                            className={btnOutlineClass}
+                                            onClick={() => navigate('/runs')}
+                                        >
+                                            <Activity className="w-4 h-4 mr-1.5" />
+                                            View Run History
+                                        </button>
+                                        <button
+                                            className={btnOutlineClass}
+                                            onClick={() => { setPhase('idle'); setRunResult(null); }}
+                                        >
+                                            Run Pipeline Again
+                                        </button>
+                                        <button
+                                            className={btnOutlineClass}
+                                            onClick={onComplete}
+                                        >
+                                            Go to Dashboard
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 

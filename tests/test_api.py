@@ -518,3 +518,17 @@ class TestSetupWizardAndExplorerE2E:
             assert r2.status_code == 403
         finally:
             app.dependency_overrides.pop(deps.get_current_user, None)
+
+    def test_run_progress_and_events_endpoints(self, client):
+        resp = client.get("/api/setup/run/progress")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "status" in data
+        assert "stages" in data
+        assert resp.headers.get("cache-control") == "no-cache, no-store, must-revalidate"
+
+        # Verify SSE events endpoint returns streaming response with headers
+        with client.stream("GET", "/api/setup/run/events") as stream_resp:
+            assert stream_resp.status_code == 200
+            assert "text/event-stream" in stream_resp.headers["content-type"]
+            assert stream_resp.headers.get("x-accel-buffering") == "no"
