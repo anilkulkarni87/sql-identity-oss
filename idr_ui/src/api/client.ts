@@ -302,6 +302,7 @@ export const api = {
         strict: boolean
         max_iterations: number
         dry_run: boolean
+        max_group_size?: number
     }) => fetchJson<Record<string, unknown>>('/setup/run', {
         method: 'POST',
         body: JSON.stringify(payload),

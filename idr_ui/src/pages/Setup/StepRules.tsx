@@ -120,7 +120,8 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
             type: 'EXACT',
             match_keys: [type],
             priority: rules.length + 1,
-            canonicalize: defaultCanon
+            canonicalize: defaultCanon,
+            max_group_size: 10000,
         };
         updatePriorities([...rules, newRule]);
     };
@@ -313,6 +314,19 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                                 />
                                             </div>
                                         )}
+                                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-700/50">
+                                            <label className="text-xs text-gray-400">Max Group Size:</label>
+                                            <input
+                                                type="number"
+                                                min="2"
+                                                value={rule.max_group_size ?? 10000}
+                                                onChange={(e) => updateRuleField(idx, 'max_group_size', parseInt(e.target.value) || 10000)}
+                                                className="w-24 bg-gray-900 border border-gray-700 text-xs font-mono text-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-500"
+                                            />
+                                            <span className="text-[11px] text-gray-500">
+                                                (Skips identifier values with more than this many records to prevent mega-clusters)
+                                            </span>
+                                        </div>
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-3 gap-3 bg-gray-900/50 p-3 rounded border border-gray-700">

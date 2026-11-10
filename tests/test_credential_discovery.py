@@ -1,12 +1,14 @@
 import os
 from pathlib import Path
 from idr_core.credential_discovery import (
+    discover_all,
     discover_all_connections,
     discover_from_databrickscfg,
     discover_from_dbt_profiles,
     discover_from_env,
     discover_from_snowflake_config,
     _mask,
+    _sanitize_host,
 )
 
 
@@ -103,4 +105,32 @@ token = token123
     conns = discover_all_connections()
     db_conns = [c for c in conns if c.get("params", {}).get("server_hostname") == "dbc-shared.databricks.com"]
     assert len(db_conns) == 1
+    assert discover_all == discover_all_connections
+
+
+def test_discover_from_headless_databrickscfg(tmp_path):
+    """Test when ~/.databrickscfg starts directly with key-values (no [DEFAULT] header)."""
+    cfg = tmp_path / ".databrickscfg"
+    cfg.write_text("""host=https://dbc-headless.cloud.databricks.com/
+http_path=/sql/1.0/warehouses/abcdef123
+token=dapi%special%token%123
+""")
+
+    conns = discover_from_databrickscfg(cfg)
+    assert len(conns) == 1
+    c = conns[0]
+    assert c["platform"] == "databricks"
+    assert c["name"] == "Databricks CLI Profile [DEFAULT]"
+    assert c["params"]["server_hostname"] == "dbc-headless.cloud.databricks.com"
+    assert c["params"]["http_path"] == "/sql/1.0/warehouses/abcdef123"
+    assert c["params"]["access_token"] == "dapi%special%token%123"
+
+
+def test_sanitize_host_edge_cases():
+    assert _sanitize_host("https://dbc-xyz.cloud.databricks.com/") == "dbc-xyz.cloud.databricks.com"
+    assert _sanitize_host("http://dbc-xyz.cloud.databricks.com:443/sql/1.0/endpoints") == "dbc-xyz.cloud.databricks.com:443"
+    assert _sanitize_host('"https://dbc-quotes.cloud.databricks.com"') == "dbc-quotes.cloud.databricks.com"
+    assert _sanitize_host("   'https://dbc-spaces.cloud.databricks.com/?o=123'  ") == "dbc-spaces.cloud.databricks.com"
+    assert _sanitize_host(None) == ""
+
 

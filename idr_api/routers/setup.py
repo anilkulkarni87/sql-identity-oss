@@ -1,6 +1,10 @@
+import asyncio
+import copy
+import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from idr_core.schema_manager import SchemaManager
@@ -95,14 +99,20 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
 
                 from idr_core.adapters.databricks import DatabricksAdapter
 
+                raw_host = params.get("server_hostname") or ""
+                clean_host = raw_host.strip("'\" \t").replace("https://", "").replace("http://", "").split("/")[0]
+                http_path = (params.get("http_path") or "").strip("'\" \t")
+                token = (params.get("access_token") or "").strip("'\" \t")
+                catalog = (params.get("catalog") or "main").strip("'\" \t")
+
                 conn = sql.connect(
-                    server_hostname=params.get("server_hostname"),
-                    http_path=params.get("http_path"),
-                    access_token=params.get("access_token"),
+                    server_hostname=clean_host,
+                    http_path=http_path,
+                    access_token=token,
                 )
-                adapter = DatabricksAdapter(conn, catalog=params.get("catalog"))
+                adapter = DatabricksAdapter(conn, catalog=catalog)
             except ImportError:
-                raise HTTPException(400, "Databricks connector not installed")
+                raise HTTPException(400, "Databricks connector not installed. Run: pip install databricks-sql-connector")
 
         else:
             raise HTTPException(400, f"Unsupported platform: {request.platform}")
@@ -431,9 +441,31 @@ class RunRequest(BaseModel):
     strict: bool = False
     max_iterations: int = 30
     dry_run: bool = False
+    max_group_size: Optional[int] = None
 
 
 _ACTIVE_RUN_PROGRESS: Dict[str, Dict[str, Any]] = {}
+_RUN_EVENT_QUEUES: Dict[str, List[asyncio.Queue]] = {}
+
+
+def _get_active_progress(user_key: str) -> Optional[Dict[str, Any]]:
+    """Return active run progress for user_key, with fallback to default scope or latest active run."""
+    return (
+        _ACTIVE_RUN_PROGRESS.get(user_key)
+        or _ACTIVE_RUN_PROGRESS.get("__default__")
+        or (next(reversed(list(_ACTIVE_RUN_PROGRESS.values())), None) if _ACTIVE_RUN_PROGRESS else None)
+    )
+
+
+def _broadcast_progress_event(user_key: str, event_data: Dict[str, Any]) -> None:
+    """Broadcast progress event to all active SSE queues for this user, default scope, or global listeners."""
+    targets = {user_key, "__default__", "*"}
+    for key in targets:
+        for q in list(_RUN_EVENT_QUEUES.get(key, [])):
+            try:
+                q.put_nowait(event_data)
+            except Exception:
+                pass
 
 
 def _build_initial_progress(mode: str, dry_run: bool, strict: bool) -> Dict[str, Any]:
@@ -482,14 +514,56 @@ async def get_run_progress(current_user: Dict[str, Any] = Depends(get_current_us
     import time
 
     user_key = get_user_key(current_user)
-    prog = _ACTIVE_RUN_PROGRESS.get(user_key)
+    prog = _get_active_progress(user_key)
     if not prog:
-        return {"status": "IDLE", "stages": []}
+        return JSONResponse(
+            content={"status": "IDLE", "stages": []},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
-    snapshot = dict(prog)
+    snapshot = copy.deepcopy(prog)
     if snapshot.get("status") == "RUNNING" and snapshot.get("started_epoch"):
         snapshot["elapsed_seconds"] = round(time.time() - snapshot["started_epoch"], 1)
-    return snapshot
+    return JSONResponse(
+        content=snapshot,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@router.get("/run/events")
+async def stream_run_events(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Server-Sent Events (SSE) streaming live stage transitions and iterations."""
+    user_key = get_user_key(current_user)
+    q: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _RUN_EVENT_QUEUES.setdefault(user_key, []).append(q)
+
+    async def event_generator():
+        try:
+            # Yield current progress snapshot immediately upon connection
+            initial = _get_active_progress(user_key)
+            if initial:
+                yield f"data: {json.dumps(copy.deepcopy(initial))}\n\n"
+            while True:
+                try:
+                    evt = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {json.dumps(evt)}\n\n"
+                    if evt.get("event") == "run_complete":
+                        break
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            if user_key in _RUN_EVENT_QUEUES and q in _RUN_EVENT_QUEUES[user_key]:
+                _RUN_EVENT_QUEUES[user_key].remove(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/run")
@@ -497,7 +571,6 @@ async def run_pipeline(
     request: RunRequest, current_user: Dict[str, Any] = Depends(require_write_access)
 ):
     """Trigger the IDR pipeline with live stage progress tracking."""
-    import asyncio
     import time
 
     adapter, user_key = _require_user_adapter(current_user)
@@ -512,10 +585,13 @@ async def run_pipeline(
             strict=request.strict,
             max_iters=request.max_iterations,
             dry_run=request.dry_run,
+            max_group_size=request.max_group_size,
         )
 
         progress_state = _build_initial_progress(config.run_mode, config.dry_run, config.strict)
         _ACTIVE_RUN_PROGRESS[user_key] = progress_state
+        _ACTIVE_RUN_PROGRESS["__default__"] = progress_state
+        _broadcast_progress_event(user_key, {"event": "run_start", "progress": copy.deepcopy(progress_state)})
 
         def _on_progress(evt: Dict[str, Any]) -> None:
             etype = evt.get("event")
@@ -559,6 +635,16 @@ async def run_pipeline(
                 for st in progress_state["stages"]:
                     if st["status"] == "pending":
                         st["status"] = "skipped"
+
+            # Broadcast event with full progress snapshot to SSE listeners
+            _broadcast_progress_event(
+                user_key,
+                {
+                    "event": etype,
+                    "stage": evt.get("stage"),
+                    "progress": copy.deepcopy(progress_state),
+                },
+            )
 
         runner = IDRRunner(adapter, progress_callback=_on_progress)
         result = await asyncio.to_thread(runner.run, config)

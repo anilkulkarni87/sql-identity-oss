@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, RefreshCw, Sparkles, Check } from "lucide-react";
 import { api } from '../../api/client';
@@ -23,6 +23,7 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
     const [error, setError] = useState<string | null>(null);
     const [warning, setWarning] = useState<string | null>(null);
     const [pendingData, setPendingData] = useState<any>(null);
+    const [hasUserSelectedPlatform, setHasUserSelectedPlatform] = useState(false);
 
     // Auto-discover credentials from local environment, dbt profiles, CLI configs, ADC
     const { data: discoveredData } = useQuery({
@@ -32,6 +33,35 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
     });
 
     const discoveredConnections = discoveredData?.connections || [];
+
+    // Automatically detect and pre-select discovered cloud connection on initial load
+    useEffect(() => {
+        if (!hasUserSelectedPlatform && discoveredConnections.length > 0 && Object.keys(params).length === 0) {
+            // Prioritize Databricks if configured, then any non-duckdb cloud connection
+            const primaryConn = discoveredConnections.find(c => c.platform === 'databricks')
+                || discoveredConnections.find(c => c.platform !== 'duckdb')
+                || discoveredConnections[0];
+            if (primaryConn) {
+                setPlatform(primaryConn.platform);
+                setParams({ ...(primaryConn.params || {}) });
+            }
+        }
+    }, [discoveredConnections, hasUserSelectedPlatform, params]);
+
+    const handlePlatformChange = (newPlatform: string) => {
+        setHasUserSelectedPlatform(true);
+        setPlatform(newPlatform);
+        setError(null);
+        setWarning(null);
+
+        // Auto-fill parameters if credentials were discovered for this platform
+        const matched = discoveredConnections.find(c => c.platform === newPlatform);
+        if (matched) {
+            setParams({ ...(matched.params || {}) });
+        } else {
+            setParams(newPlatform === 'databricks' ? { catalog: 'main', schema: 'default' } : {});
+        }
+    };
 
     const onSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -173,22 +203,31 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
             {/* 2. Platform Selector */}
             <form onSubmit={onSubmit} className="space-y-6">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {PLATFORMS.map(p => (
-                        <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => { setPlatform(p.id); setParams({}); setError(null); }}
-                            className={`p-3 rounded-lg border text-left transition-all ${platform === p.id
-                                ? 'bg-blue-600/10 border-blue-500 ring-1 ring-blue-500'
-                                : 'bg-gray-800 border-gray-700 hover:border-gray-600'
-                                }`}
-                        >
-                            <div className={`font-semibold text-sm ${platform === p.id ? 'text-blue-400' : 'text-gray-200'}`}>
-                                {p.name}
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1 line-clamp-1">{p.description}</div>
-                        </button>
-                    ))}
+                    {PLATFORMS.map(p => {
+                        const isDiscovered = discoveredConnections.some(c => c.platform === p.id);
+                        return (
+                            <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => handlePlatformChange(p.id)}
+                                className={`relative p-3 rounded-lg border text-left transition-all ${platform === p.id
+                                    ? 'bg-blue-600/10 border-blue-500 ring-1 ring-blue-500'
+                                    : 'bg-gray-800 border-gray-700 hover:border-gray-600'
+                                    }`}
+                            >
+                                {isDiscovered && (
+                                    <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-950 text-emerald-400 border border-emerald-800/60 flex items-center gap-1">
+                                        <Sparkles className="w-2.5 h-2.5" />
+                                        Detected
+                                    </span>
+                                )}
+                                <div className={`font-semibold text-sm ${platform === p.id ? 'text-blue-400' : 'text-gray-200'}`}>
+                                    {p.name}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1 line-clamp-1">{p.description}</div>
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {/* 3. Parameter Inputs */}
@@ -315,6 +354,44 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
 
                     {platform === 'databricks' && (
                         <>
+                            {/* Discovered Profiles Banner / Selector */}
+                            {discoveredConnections.filter(c => c.platform === 'databricks').length > 0 && (
+                                <div className="p-3 bg-blue-950/40 border border-blue-500/30 rounded-lg text-xs space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-semibold text-blue-300 flex items-center gap-1.5">
+                                            <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                                            Auto-detected Databricks Configuration
+                                        </span>
+                                        <span className="text-[10px] text-gray-400">
+                                            CLI & Environment
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5 pt-1">
+                                        {discoveredConnections.filter(c => c.platform === 'databricks').map(dc => {
+                                            const isSelected = params.server_hostname === dc.params?.server_hostname &&
+                                                params.http_path === dc.params?.http_path;
+                                            return (
+                                                <button
+                                                    key={dc.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setParams({ ...(dc.params || {}) });
+                                                        setError(null);
+                                                    }}
+                                                    className={`px-2.5 py-1 rounded text-[11px] font-mono transition-colors border ${
+                                                        isSelected
+                                                            ? 'bg-blue-600 text-white border-blue-400 shadow-sm'
+                                                            : 'bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-600'
+                                                    }`}
+                                                >
+                                                    {dc.name}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
                             <div>
                                 <label className={labelClass}>Server Hostname</label>
                                 <input
@@ -323,8 +400,15 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                                     value={params.server_hostname || ''}
                                     placeholder="dbc-xxxx.cloud.databricks.com"
                                     className={inputClass}
-                                    onChange={e => updateParam('server_hostname', e.target.value)}
+                                    onChange={e => {
+                                        let val = e.target.value.trim();
+                                        if (val.startsWith("https://")) val = val.slice("https://".length);
+                                        if (val.startsWith("http://")) val = val.slice("http://".length);
+                                        val = val.split("/")[0].split("?")[0];
+                                        updateParam('server_hostname', val);
+                                    }}
                                 />
+                                <p className="text-[11px] text-gray-500 mt-1">Databricks workspace hostname (e.g. dbc-xxxx.cloud.databricks.com, no https://).</p>
                             </div>
                             <div>
                                 <label className={labelClass}>HTTP Path</label>
@@ -332,10 +416,11 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                                     type="text"
                                     required
                                     value={params.http_path || ''}
-                                    placeholder="/sql/1.0/endpoints/xxxx"
+                                    placeholder="/sql/1.0/warehouses/xxxx"
                                     className={inputClass}
-                                    onChange={e => updateParam('http_path', e.target.value)}
+                                    onChange={e => updateParam('http_path', e.target.value.trim())}
                                 />
+                                <p className="text-[11px] text-gray-500 mt-1">SQL Warehouse endpoint HTTP path (e.g. /sql/1.0/warehouses/...)</p>
                             </div>
                             <div>
                                 <label className={labelClass}>Access Token</label>
@@ -345,7 +430,7 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                                     value={params.access_token || ''}
                                     placeholder="dapi..."
                                     className={inputClass}
-                                    onChange={e => updateParam('access_token', e.target.value)}
+                                    onChange={e => updateParam('access_token', e.target.value.trim())}
                                 />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
@@ -355,18 +440,19 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                                         type="text"
                                         required
                                         value={params.catalog || 'main'}
+                                        placeholder="main"
                                         className={inputClass}
-                                        onChange={e => updateParam('catalog', e.target.value)}
+                                        onChange={e => updateParam('catalog', e.target.value.trim())}
                                     />
                                 </div>
                                 <div>
                                     <label className={labelClass}>Schema</label>
                                     <input
                                         type="text"
-                                        value={params.schema || ''}
+                                        value={params.schema || 'default'}
                                         placeholder="default"
                                         className={inputClass}
-                                        onChange={e => updateParam('schema', e.target.value)}
+                                        onChange={e => updateParam('schema', e.target.value.trim())}
                                     />
                                 </div>
                             </div>

@@ -67,9 +67,11 @@ title: Supported Warehouses, Schema & Operations
     idr run --platform databricks --mode INCR
     ```
 
-    - **Credential Auto-Discovery**: Automatically reads `~/.databrickscfg` profiles.
+    - **Credential Auto-Discovery**: Automatically reads `~/.databrickscfg` profiles (including headless INI and named profiles).
     - **Table Existence Checks**: Uses `SHOW TABLES IN <schema> LIKE '<table_name>'` so Unity Catalog / SQL Warehouses never log `[TABLE_OR_VIEW_NOT_FOUND]` errors during preflight checks.
     - **Adapter**: `idr_core/adapters/databricks.py` (`DatabricksAdapter`).
+
+    ![Databricks Full IDR Run](assets/recordings/idr-databricks-run.gif)
 
 ---
 

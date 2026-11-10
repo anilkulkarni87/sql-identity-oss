@@ -62,6 +62,12 @@ idr quickstart --rows 10000 --output demo.duckdb
 idr ui --db demo.duckdb
 ```
 
+### 🎬 Live Cloud Execution (Databricks Unity Catalog)
+
+Zero-config credential discovery (`~/.databrickscfg`) and 8-stage execution against Databricks SQL Warehouse:
+
+![IDR Full Pipeline Run on Databricks](assets/recordings/idr-databricks-run.gif)
+
 ---
 
 ## 🏗️ Enterprise Capabilities Built In

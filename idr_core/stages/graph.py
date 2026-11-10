@@ -134,8 +134,14 @@ class GraphStage(BaseStage):
         """Build identity edges using anchor-based approach."""
         self._apply_pre_edge_overrides()
 
+        max_allowed_expr = (
+            f"LEAST(COALESCE(MAX(max_group_size), 10000), {int(self.config.max_group_size)})"
+            if getattr(self.config, "max_group_size", None)
+            else "COALESCE(MAX(max_group_size), 10000)"
+        )
+
         # This uses the N-1 edge approach (anchor-based) instead of N² fully connected
-        self.adapter.execute("""
+        self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.edges_new AS
             WITH identifier_groups AS (
                 SELECT
@@ -143,7 +149,7 @@ class GraphStage(BaseStage):
                     identifier_value_norm,
                     COUNT(*) as group_size,
                     MIN(entity_key) as anchor_key,
-                    MAX(max_group_size) as max_allowed
+                    {max_allowed_expr} as max_allowed
                 FROM idr_work.identifiers_all
                 GROUP BY identifier_type, identifier_value_norm
                 HAVING COUNT(*) > 1
@@ -189,10 +195,10 @@ class GraphStage(BaseStage):
                         identifier_type,
                         identifier_value_norm,
                         COUNT(*) as group_size,
-                        MAX(max_group_size) as max_allowed
+                        {max_allowed_expr} as max_allowed
                     FROM idr_work.identifiers_all
                     GROUP BY identifier_type, identifier_value_norm
-                    HAVING COUNT(*) > MAX(max_group_size)
+                    HAVING COUNT(*) > {max_allowed_expr}
                 ) skipped
             """)
         except Exception:

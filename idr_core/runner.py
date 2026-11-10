@@ -62,6 +62,7 @@ class RunConfig:
     max_iters: int = 30
     dry_run: bool = False
     strict: bool = False
+    max_group_size: Optional[int] = None
 
     def __post_init__(self):
         mode = str(self.run_mode or "").upper()
@@ -73,6 +74,8 @@ class RunConfig:
             raise ValueError(f"Invalid run_mode: {self.run_mode}")
         if self.max_iters < 1:
             raise ValueError(f"max_iters must be >= 1, got {self.max_iters}")
+        if self.max_group_size is not None and self.max_group_size < 2:
+            raise ValueError(f"max_group_size must be >= 2, got {self.max_group_size}")
 
 
 @dataclass

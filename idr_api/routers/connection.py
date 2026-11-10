@@ -86,14 +86,37 @@ def connect(request: ConnectionRequest, current_user: dict = Depends(get_current
             # Use Databricks SQL Connector
             from databricks import sql
 
+            raw_host = (
+                request.server_hostname
+                or _get_env("DATABRICKS_HOST")
+                or _get_env("DATABRICKS_SERVER_HOSTNAME")
+                or _get_env("DATABRICKS_URL")
+                or _get_env("DATABRICKS_WORKSPACE_URL")
+                or ""
+            )
+            clean_host = raw_host.strip("'\" \t").replace("https://", "").replace("http://", "").split("/")[0]
+            http_path = (
+                request.http_path
+                or _get_env("DATABRICKS_HTTP_PATH")
+                or _get_env("DATABRICKS_SQL_HTTP_PATH")
+                or ""
+            ).strip("'\" \t")
+            token = (
+                request.access_token
+                or _get_env("DATABRICKS_TOKEN")
+                or _get_env("DATABRICKS_ACCESS_TOKEN")
+                or _get_env("DATABRICKS_PAT")
+                or ""
+            ).strip("'\" \t")
+            catalog = (request.catalog or _get_env("DATABRICKS_CATALOG") or "main").strip("'\" \t")
+
             conn = sql.connect(
-                server_hostname=request.server_hostname or _get_env("DATABRICKS_HOST"),
-                http_path=request.http_path or _get_env("DATABRICKS_HTTP_PATH"),
-                access_token=request.access_token or _get_env("DATABRICKS_TOKEN"),
+                server_hostname=clean_host,
+                http_path=http_path,
+                access_token=token,
             )
             from idr_core.adapters.databricks import DatabricksAdapter
 
-            catalog = request.catalog or _get_env("DATABRICKS_CATALOG")
             _manager.set_adapter_for_user(
                 user_key, DatabricksAdapter(conn, catalog=catalog), request.model_dump()
             )

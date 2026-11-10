@@ -80,6 +80,33 @@ def configure_logging(level: int = logging.INFO, json_format: Optional[bool] = N
 
     root.addHandler(handler)
 
+    _quiet_third_party_loggers()
+
+
+# Third-party loggers that emit per-request chatter at INFO level
+# (e.g. Databricks SQL connector: "Received status code 200 for POST request").
+NOISY_THIRD_PARTY_LOGGERS = (
+    "databricks",
+    "databricks.sql",
+    "databricks.sdk",
+    "thrift",
+    "urllib3",
+    "httpx",
+    "httpcore",
+    "snowflake.connector",
+    "google.auth",
+    "google.cloud",
+    "py4j",
+)
+
+
+def _quiet_third_party_loggers() -> None:
+    """Raise warehouse driver loggers to WARNING unless IDR_DRIVER_LOGS is enabled."""
+    if os.environ.get("IDR_DRIVER_LOGS", "0").lower() in ("1", "true", "yes"):
+        return
+    for name in NOISY_THIRD_PARTY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
 
 def get_logger(name: str) -> logging.Logger:
     """Get a configured logger."""
