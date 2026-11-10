@@ -10,21 +10,73 @@
 
 /* Light & Dark Theme Refinements */
 [data-md-color-scheme="default"] {
-  --md-primary-fg-color: #0f172a;
-  --md-primary-fg-color--light: #1e293b;
-  --md-primary-fg-color--dark: #020617;
+  --md-primary-fg-color: #4f46e5;
+  --md-primary-fg-color--light: #6366f1;
+  --md-primary-fg-color--dark: #3730a3;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.85);
+  --md-typeset-a-color: #2563eb;
   --md-accent-fg-color: #2563eb;
   --md-code-bg-color: #f8fafc;
 }
 
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #0f172a;
-  --md-primary-bg-color: #0d1117;
+  --md-primary-fg-color: #6366f1;
+  --md-primary-fg-color--light: #818cf8;
+  --md-primary-fg-color--dark: #4f46e5;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.82);
+  --md-typeset-a-color: #38bdf8;
+  --md-accent-fg-color: #38bdf8;
   --md-default-bg-color: #0d1117;
   --md-default-bg-color--light: #161b22;
   --md-default-bg-color--lighter: #21262d;
-  --md-accent-fg-color: #38bdf8;
+  --md-default-fg-color: #f0f6fc;
+  --md-default-fg-color--light: #c9d1d9;
+  --md-default-fg-color--lighter: #8b949e;
+  --md-default-fg-color--lightest: #30363d;
   --md-code-bg-color: #161b22;
+}
+
+/* Header, Top Navigation Tabs & Sidebar Contrast Enforcement */
+.md-header,
+.md-tabs {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.md-header__title,
+.md-header__button,
+.md-header__option,
+.md-source,
+.md-tabs__link {
+  color: #f8fafc !important;
+}
+
+.md-tabs__link {
+  opacity: 0.82;
+  font-weight: 500;
+}
+
+.md-tabs__link--active,
+.md-tabs__link:hover {
+  color: #38bdf8 !important;
+  opacity: 1;
+}
+
+[data-md-color-scheme="slate"] .md-nav__title {
+  color: #f0f6fc !important;
+  font-weight: 700;
+}
+
+[data-md-color-scheme="slate"] .md-nav__link {
+  color: #c9d1d9;
+}
+
+[data-md-color-scheme="slate"] .md-nav__link--active,
+[data-md-color-scheme="slate"] .md-nav__link:hover {
+  color: #38bdf8 !important;
 }
 
 /* --------------------------------------------------------------------------
