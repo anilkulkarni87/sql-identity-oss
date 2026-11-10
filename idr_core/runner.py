@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from .adapters.base import IDRAdapter, get_dialect_config
 from .logger_utils import get_logger
@@ -123,20 +123,34 @@ class IDRRunner:
         result = runner.run(RunConfig(run_mode="FULL"))
     """
 
-    def __init__(self, adapter: IDRAdapter):
+    def __init__(
+        self,
+        adapter: IDRAdapter,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ):
         """
         Initialize runner with a platform adapter.
 
         Args:
             adapter: Platform-specific adapter (DuckDB, Snowflake, etc.)
+            progress_callback: Optional callback invoked on stage transitions and iterations
         """
         self.adapter = adapter
+        self.progress_callback = progress_callback
         self.run_id: Optional[str] = None
         self._stage_metrics: List[StageMetric] = []
         self._warnings: List[str] = []
         self._dialect = get_dialect_config(adapter.dialect)
         self._generate_evidence: bool = False  # Set per-run from config
         self.logger = get_logger("IDRRunner")
+
+    def _emit_progress(self, payload: Dict[str, Any]) -> None:
+        """Safely invoke progress callback if configured."""
+        if self.progress_callback:
+            try:
+                self.progress_callback(payload)
+            except Exception:
+                pass
 
     def run(self, config: Optional[RunConfig] = None) -> RunResult:
         """
@@ -174,6 +188,15 @@ class IDRRunner:
             logger=self.logger,
             warnings=self._warnings,
             generate_evidence=False,  # Updated after preflight
+            progress_callback=self.progress_callback,
+        )
+        self._emit_progress(
+            {
+                "event": "run_start",
+                "run_id": self.run_id,
+                "mode": config.run_mode,
+                "dry_run": config.dry_run,
+            }
         )
 
         # Initialize stages
@@ -217,6 +240,26 @@ class IDRRunner:
             )
             identifiers = extraction.extract_identifiers(config.run_mode)
             self._end_stage("identifier_extraction", identifiers)
+
+            # In INCR mode, state-diffing prunes unchanged rows from no-watermark tables.
+            # Refresh delta entities count (excluding candidate-expanded historical rows where watermark_value IS NULL)
+            # and short-circuit immediately if no delta entities remain.
+            if config.run_mode == "INCR":
+                entities = (
+                    self.adapter.query_one(
+                        "SELECT COUNT(*) FROM idr_work.entities_delta WHERE watermark_value IS NOT NULL"
+                    )
+                    or 0
+                )
+                if entities == 0:
+                    return self._complete_run(
+                        start_time,
+                        config,
+                        entities=0,
+                        edges=0,
+                        clusters=0,
+                        status="SUCCESS_NO_CHANGES",
+                    )
 
             # 3b. Attribute extraction
             self._start_stage("attribute_extraction")
@@ -318,6 +361,7 @@ class IDRRunner:
             extra={"run_id": self.run_id, "stage": name, "event": "stage_start"},
         )
         self._stage_metrics.append(StageMetric(stage_name=name, started_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+        self._emit_progress({"event": "stage_start", "run_id": self.run_id, "stage": name})
 
     def _end_stage(self, stage_name: Union[PipelineStage, str], rows_affected: int = 0) -> None:
         """Record end of a processing stage."""
@@ -336,6 +380,15 @@ class IDRRunner:
                         "rows_affected": rows_affected,
                         "duration_seconds": metric.duration_seconds,
                     },
+                )
+                self._emit_progress(
+                    {
+                        "event": "stage_end",
+                        "run_id": self.run_id,
+                        "stage": name,
+                        "rows_affected": int(rows_affected or 0),
+                        "duration_seconds": round(metric.duration_seconds, 1),
+                    }
                 )
                 break
 
@@ -477,6 +530,20 @@ class IDRRunner:
                         TIMESTAMP '{(metric.ended_at or metric.started_at).strftime("%Y-%m-%d %H:%M:%S")}',
                         {int(metric.duration_seconds)}, {metric.rows_affected})
             """)
+
+        self._emit_progress(
+            {
+                "event": "run_complete",
+                "run_id": self.run_id,
+                "status": status,
+                "duration_seconds": round(duration, 1),
+                "entities": entities,
+                "edges": edges,
+                "clusters": clusters,
+                "iterations": iterations,
+                "error": error,
+            }
+        )
 
         return RunResult(
             run_id=self.run_id,

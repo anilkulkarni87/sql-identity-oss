@@ -71,12 +71,33 @@
             {% set max_group_size = mapping['max_group_size'] %}
 
             {# Build normalization expression #}
-            {% if canonicalize == 'LOWERCASE' %}
-                {% set norm_expr = 'lower(' ~ column_name ~ ')' %}
-            {% elif canonicalize == 'UPPERCASE' %}
-                {% set norm_expr = 'upper(' ~ column_name ~ ')' %}
+            {% set raw_str = "trim(cast(" ~ column_name ~ " as " ~ dbt.type_string() ~ "))" %}
+            {% if target.type in ('duckdb', 'postgres') %}
+                {% set digits_expr = "regexp_replace(" ~ raw_str ~ ", '[^0-9]', '', 'g')" %}
+                {% set strip_plus_expr = "regexp_replace(lower(" ~ raw_str ~ "), '[+][^@]*@', '@', 'g')" %}
+                {% set alnum_expr = "upper(regexp_replace(" ~ raw_str ~ ", '[^a-zA-Z0-9]', '', 'g'))" %}
             {% else %}
-                {% set norm_expr = column_name %}
+                {% set digits_expr = "regexp_replace(" ~ raw_str ~ ", '[^0-9]', '')" %}
+                {% set strip_plus_expr = "regexp_replace(lower(" ~ raw_str ~ "), '[+][^@]*@', '@')" %}
+                {% set alnum_expr = "upper(regexp_replace(" ~ raw_str ~ ", '[^a-zA-Z0-9]', ''))" %}
+            {% endif %}
+
+            {% if canonicalize in ('LOWERCASE', 'EMAIL_STANDARD') %}
+                {% set norm_expr = 'lower(' ~ raw_str ~ ')' %}
+            {% elif canonicalize == 'UPPERCASE' %}
+                {% set norm_expr = 'upper(' ~ raw_str ~ ')' %}
+            {% elif canonicalize == 'EMAIL_STRIP_PLUS' %}
+                {% set norm_expr = strip_plus_expr %}
+            {% elif canonicalize == 'PHONE_DIGITS' %}
+                {% set norm_expr = digits_expr %}
+            {% elif canonicalize == 'PHONE_US_10' %}
+                {% set norm_expr = "case when length(" ~ digits_expr ~ ") = 11 and substr(" ~ digits_expr ~ ", 1, 1) = '1' then substr(" ~ digits_expr ~ ", 2, 10) else " ~ digits_expr ~ " end" %}
+            {% elif canonicalize == 'ALPHANUMERIC_UPPER' %}
+                {% set norm_expr = alnum_expr %}
+            {% elif '{val}' in (canonicalize | string) or '{col}' in (canonicalize | string) %}
+                {% set norm_expr = (canonicalize | string).replace('{val}', '(' ~ raw_str ~ ')').replace('{col}', '(' ~ raw_str ~ ')') %}
+            {% else %}
+                {% set norm_expr = raw_str %}
             {% endif %}
 
             {% set query %}
@@ -129,10 +150,10 @@ filtered_identifiers as (
     from raw_identifiers r
     where not exists (
         select 1 from exclusions e
-        where e.identifier_type = r.identifier_type
+        where (upper(e.identifier_type) = upper(r.identifier_type) or upper(e.identifier_type) in ('ANY', '*'))
           and (
-            (e.match_type = 'EXACT' and r.identifier_value_norm = e.identifier_value_pattern)
-            or (e.match_type = 'LIKE' and r.identifier_value_norm like e.identifier_value_pattern)
+            (upper(coalesce(e.match_type, 'EXACT')) = 'EXACT' and lower(r.identifier_value_norm) = lower(e.identifier_value_pattern))
+            or (upper(coalesce(e.match_type, 'EXACT')) = 'LIKE' and lower(r.identifier_value_norm) like lower(e.identifier_value_pattern))
           )
     )
 )

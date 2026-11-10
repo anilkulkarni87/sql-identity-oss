@@ -212,9 +212,11 @@ class ProfileBuilder:
             tid = validate_identifier(str(src["table_id"]), "source_table.table_id")
             fqn = validate_fqn(str(src["table_fqn"]), "source_table.table_fqn")
             key_expr = validate_sql_expr(str(src["entity_key_expr"]), "source_table.entity_key_expr")
-            wm_col = src.get("watermark_column")
-            if wm_col:
-                wm_col = validate_identifier(str(wm_col), "source_table.watermark_column")
+            raw_wm = src.get("watermark_column")
+            if raw_wm and str(raw_wm).strip().lower() not in ("", "none", "null"):
+                wm_col = validate_identifier(str(raw_wm).strip(), "source_table.watermark_column")
+            else:
+                wm_col = None
 
             mapped_cols = []
             # For every requested golden attribute, see if this source maps it

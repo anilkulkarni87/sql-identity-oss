@@ -33,8 +33,107 @@ class GraphStage(BaseStage):
             )
             self.adapter.execute(f"ALTER TABLE {new_table} RENAME TO {rename_target}")
 
+    def _apply_pre_edge_overrides(self) -> None:
+        """Remove ISOLATE entities from identifiers_all before anchor edge grouping."""
+        try:
+            if not self.adapter.table_exists("idr_meta.identity_override"):
+                return
+            iso_cnt = self.adapter.query_one("""
+                SELECT COUNT(*) FROM idr_meta.identity_override
+                WHERE is_active = TRUE AND UPPER(override_type) = 'ISOLATE'
+            """) or 0
+            if iso_cnt > 0:
+                self.adapter.execute("""
+                    DELETE FROM idr_work.identifiers_all
+                    WHERE entity_key IN (
+                        SELECT entity_key_a FROM idr_meta.identity_override
+                        WHERE is_active = TRUE AND UPPER(override_type) = 'ISOLATE'
+                    )
+                """)
+        except Exception as e:
+            self.logger.warning(f"Failed to apply ISOLATE overrides: {e}")
+
+    def _apply_post_edge_overrides(self) -> None:
+        """Apply DO_NOT_LINK edge exclusions and FORCE_LINK manual edges."""
+        try:
+            if not self.adapter.table_exists("idr_meta.identity_override"):
+                return
+            ov_cnt = self.adapter.query_one("""
+                SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE
+            """) or 0
+            if ov_cnt == 0:
+                return
+
+            # 1. DO_NOT_LINK: remove direct edges and shared-anchor edges between blocked pairs
+            dnl_rows = self.adapter.query("""
+                SELECT entity_key_a, entity_key_b
+                FROM idr_meta.identity_override
+                WHERE is_active = TRUE AND UPPER(override_type) = 'DO_NOT_LINK'
+            """)
+            for row in dnl_rows:
+                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
+                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
+                high_key = max(a, b)
+                # Remove direct edge between a and b
+                self.adapter.execute(f"""
+                    DELETE FROM idr_work.edges_new
+                    WHERE (left_entity_key = '{a}' AND right_entity_key = '{b}')
+                       OR (left_entity_key = '{b}' AND right_entity_key = '{a}')
+                """)
+                # Detach high_key from any anchor group that also contains low_key
+                low_key = min(a, b)
+                self.adapter.execute(f"""
+                    DELETE FROM idr_work.edges_new
+                    WHERE left_entity_key = '{high_key}'
+                      AND right_entity_key IN (
+                          SELECT right_entity_key FROM idr_work.identifiers_all i
+                          JOIN (
+                              SELECT identifier_type, identifier_value_norm, MIN(entity_key) AS right_entity_key
+                              FROM idr_work.identifiers_all
+                              WHERE entity_key IN ('{low_key}', '{high_key}')
+                              GROUP BY identifier_type, identifier_value_norm
+                              HAVING COUNT(DISTINCT entity_key) = 2
+                          ) shared ON i.identifier_type = shared.identifier_type
+                                  AND i.identifier_value_norm = shared.identifier_value_norm
+                      )
+                """)
+
+            # 2. FORCE_LINK: inject explicit edges and ensure entities exist in entities_delta
+            fl_rows = self.adapter.query("""
+                SELECT entity_key_a, entity_key_b, COALESCE(reason, 'FORCE_LINK') AS reason
+                FROM idr_meta.identity_override
+                WHERE is_active = TRUE AND UPPER(override_type) = 'FORCE_LINK'
+            """)
+            for row in fl_rows:
+                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
+                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
+                if a == b:
+                    continue
+                left_k, right_k = (a, b) if a > b else (b, a)
+                self.adapter.execute(f"""
+                    INSERT INTO idr_work.edges_new (left_entity_key, right_entity_key, identifier_type, identifier_value_norm)
+                    SELECT '{left_k}', '{right_k}', 'MANUAL_OVERRIDE', 'FORCE_LINK'
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM idr_work.edges_new
+                        WHERE left_entity_key = '{left_k}' AND right_entity_key = '{right_k}'
+                    )
+                """)
+                for ekey in (a, b):
+                    tbl_prefix = ekey.split(":", 1)[0] if ":" in ekey else "manual"
+                    self.adapter.execute(f"""
+                        INSERT INTO idr_work.entities_delta (run_id, table_id, entity_key, watermark_value)
+                        SELECT '{self.run_id}', '{tbl_prefix}', '{ekey}', NULL
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM idr_work.entities_delta WHERE entity_key = '{ekey}'
+                        )
+                    """)
+        except Exception as e:
+            self.logger.warning(f"Failed to apply post-edge overrides: {e}")
+
     def build_edges(self) -> int:
         """Build identity edges using anchor-based approach."""
+        self._apply_pre_edge_overrides()
+
         # This uses the N-1 edge approach (anchor-based) instead of N² fully connected
         self.adapter.execute("""
             CREATE OR REPLACE TABLE idr_work.edges_new AS
@@ -68,6 +167,8 @@ class GraphStage(BaseStage):
                 AND i.identifier_value_norm = g.identifier_value_norm
             WHERE i.entity_key != g.anchor_key
         """)
+
+        self._apply_post_edge_overrides()
 
         # Log skipped groups (optional - table may not exist)
         try:
@@ -161,6 +262,39 @@ class GraphStage(BaseStage):
             {existing_edges_sql}
         """)
 
+        # Ensure ISOLATE and DO_NOT_LINK overrides are respected even over historical INCR edges
+        try:
+            if self.adapter.table_exists("idr_meta.identity_override"):
+                ov_cnt = self.adapter.query_one(
+                    "SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE"
+                ) or 0
+                if ov_cnt > 0:
+                    self.adapter.execute("""
+                        DELETE FROM idr_work.lp_edges
+                        WHERE src IN (
+                            SELECT entity_key_a FROM idr_meta.identity_override
+                            WHERE is_active = TRUE AND UPPER(override_type) = 'ISOLATE'
+                        )
+                        OR dst IN (
+                            SELECT entity_key_a FROM idr_meta.identity_override
+                            WHERE is_active = TRUE AND UPPER(override_type) = 'ISOLATE'
+                        )
+                    """)
+                    self.adapter.execute("""
+                        DELETE FROM idr_work.lp_edges
+                        WHERE EXISTS (
+                            SELECT 1 FROM idr_meta.identity_override o
+                            WHERE o.is_active = TRUE
+                              AND UPPER(o.override_type) = 'DO_NOT_LINK'
+                              AND (
+                                  (idr_work.lp_edges.src = o.entity_key_a AND idr_work.lp_edges.dst = o.entity_key_b)
+                                  OR (idr_work.lp_edges.src = o.entity_key_b AND idr_work.lp_edges.dst = o.entity_key_a)
+                              )
+                        )
+                    """)
+        except Exception:
+            pass
+
         # Check if there are any edges to propagate
         edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.lp_edges") or 0
 
@@ -172,6 +306,7 @@ class GraphStage(BaseStage):
                 FROM idr_work.entities_delta
                 WHERE run_id = '{self.run_id}'
             """)
+            self._stabilize_resolved_ids()
             clusters = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
             return 0, clusters or 0
 
@@ -214,6 +349,21 @@ class GraphStage(BaseStage):
             # Dialect-safe table swap (supports BigQuery CTAS & Drop and Snowflake/DuckDB rename)
             self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_new")
 
+            if self.ctx.progress_callback:
+                try:
+                    self.ctx.progress_callback(
+                        {
+                            "event": "stage_progress",
+                            "run_id": self.run_id,
+                            "stage": "label_propagation",
+                            "iteration": iterations,
+                            "max_iters": max_iters,
+                            "changes": int(changes),
+                        }
+                    )
+                except Exception:
+                    pass
+
             if changes == 0:
                 break
 
@@ -239,10 +389,97 @@ class GraphStage(BaseStage):
             )
         """)
 
+        # Preserve existing cluster resolved_ids across runs (Largest cluster wins on merge)
+        self._stabilize_resolved_ids()
+
         # Count unique clusters
         clusters = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
 
         return iterations, clusters or 0
+
+    def _stabilize_resolved_ids(self) -> None:
+        """
+        Keep resolved_ids persistent across runs:
+        - If new entities join an existing cluster, retain that cluster's existing resolved_id.
+        - If multiple existing clusters merge into one component, the largest previous cluster's
+          resolved_id wins (tie-broken by oldest timestamp, then lexicographical MIN(resolved_id)).
+        - If an existing cluster splits, only one component may claim the previous resolved_id
+          (preferring the component containing the anchor entity_key == prev_resolved_id).
+        """
+        try:
+            if not self.adapter.table_exists("idr_out.identity_resolved_membership_current"):
+                return
+            prev_cnt = self.adapter.query_one(
+                "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
+            ) or 0
+            if prev_cnt == 0:
+                return
+
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized AS
+                WITH prev_cluster_stats AS (
+                    SELECT
+                        resolved_id AS prev_resolved_id,
+                        COUNT(*) AS prev_size,
+                        MIN(updated_at) AS prev_created_at
+                    FROM idr_out.identity_resolved_membership_current
+                    GROUP BY resolved_id
+                ),
+                overlap AS (
+                    SELECT
+                        l.label AS raw_label,
+                        m.resolved_id AS prev_resolved_id,
+                        pcs.prev_size,
+                        pcs.prev_created_at,
+                        COUNT(*) AS shared_entities,
+                        MAX(CASE WHEN l.entity_key = m.resolved_id THEN 1 ELSE 0 END) AS has_anchor
+                    FROM idr_work.lp_labels l
+                    JOIN idr_out.identity_resolved_membership_current m
+                      ON l.entity_key = m.entity_key
+                    JOIN prev_cluster_stats pcs
+                      ON m.resolved_id = pcs.prev_resolved_id
+                    GROUP BY l.label, m.resolved_id, pcs.prev_size, pcs.prev_created_at
+                ),
+                claimed_prev AS (
+                    SELECT
+                        raw_label,
+                        prev_resolved_id,
+                        prev_size,
+                        prev_created_at,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY prev_resolved_id
+                            ORDER BY
+                                CASE WHEN raw_label = prev_resolved_id THEN 1 ELSE 0 END DESC,
+                                has_anchor DESC,
+                                shared_entities DESC,
+                                raw_label ASC
+                        ) AS prev_claim_rn
+                    FROM overlap
+                ),
+                winning_cluster AS (
+                    SELECT
+                        raw_label,
+                        prev_resolved_id AS winning_resolved_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY raw_label
+                            ORDER BY
+                                prev_size DESC,
+                                prev_created_at ASC,
+                                prev_resolved_id ASC
+                        ) AS win_rn
+                    FROM claimed_prev
+                    WHERE prev_claim_rn = 1
+                )
+                SELECT
+                    l.entity_key,
+                    COALESCE(w.winning_resolved_id, l.label) AS label
+                FROM idr_work.lp_labels l
+                LEFT JOIN winning_cluster w
+                  ON l.label = w.raw_label AND w.win_rn = 1
+            """)
+            self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_stabilized")
+        except Exception as e:
+            self.logger.warning(f"Failed to stabilize resolved_ids: {e}")
 
     def run_fuzzy_matching(self, max_iters: int) -> int:
         """

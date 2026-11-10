@@ -7,9 +7,10 @@ used by all pipeline stages.
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from ..adapters.base import IDRAdapter
+from ..canonicalizers import validate_canonicalize_spec
 from ..config import (
     validate_float,
     validate_fqn,
@@ -32,6 +33,7 @@ class StageContext:
     logger: logging.Logger
     warnings: List[str]
     generate_evidence: bool = False
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
 
 class BaseStage:
@@ -75,13 +77,7 @@ class BaseStage:
             elif value_type == "float":
                 return validate_float(value, field_name)
             elif value_type == "enum":
-                str_val = str(value).upper() if value else ""
-                if str_val not in self._CANONICALIZE_ENUM:
-                    raise ValueError(
-                        f"Invalid {field_name}: '{value}'. "
-                        f"Must be one of: {', '.join(sorted(self._CANONICALIZE_ENUM))}"
-                    )
-                return str_val
+                return validate_canonicalize_spec(str(value) if value else "", field_name)
             else:
                 raise ValueError(f"Unknown validation type: {value_type}")
         except ValueError as e:

@@ -27,10 +27,23 @@ with labeled_entities as (
     from {{ ref('int_labels') }}
 ),
 
--- Get all entities from staging (for singletons)
+-- Get all entities from staging and active overrides (for singletons)
 all_entities as (
     select distinct entity_key
     from {{ ref('stg_identifiers') }}
+    union
+    select distinct entity_key_a as entity_key
+    from {{ ref('idr_overrides') }}
+    where cast(is_active as {{ dbt.type_string() }}) in ('true', 'TRUE', '1')
+      and entity_key_a is not null
+      and entity_key_a != ''
+    union
+    select distinct entity_key_b as entity_key
+    from {{ ref('idr_overrides') }}
+    where cast(is_active as {{ dbt.type_string() }}) in ('true', 'TRUE', '1')
+      and upper(override_type) in ('FORCE_LINK', 'DO_NOT_LINK')
+      and entity_key_b is not null
+      and entity_key_b != ''
 ),
 
 -- Singletons: entities with no edges

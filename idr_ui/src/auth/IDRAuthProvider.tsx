@@ -1,11 +1,12 @@
 
-import React, { useContext } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { AuthProvider, AuthProviderProps, useAuth } from "react-oidc-context";
 import { User } from "oidc-client-ts";
 
 const authority = import.meta.env.VITE_AUTH_AUTHORITY?.trim();
 const clientId = import.meta.env.VITE_AUTH_CLIENT_ID?.trim();
-const allowInsecureDevAuth = import.meta.env.VITE_ALLOW_INSECURE_DEV_AUTH === 'true';
+const envAllowDev = import.meta.env.VITE_ALLOW_INSECURE_DEV_AUTH;
+const initialAllowDev = envAllowDev !== 'false';
 
 const oidcConfig: AuthProviderProps = {
     authority: authority || "",
@@ -49,8 +50,27 @@ const AuthBridge = ({ children }: { children: React.ReactNode }) => {
 };
 
 export const IDRAuthProvider = ({ children }: { children: React.ReactNode }) => {
-    // Explicit insecure local override only.
-    if ((!authority || !clientId) && allowInsecureDevAuth) {
+    const [runtimeAllowDev, setRuntimeAllowDev] = useState<boolean>(initialAllowDev);
+    const [checkingBackend, setCheckingBackend] = useState<boolean>(
+        (!authority || !clientId) && !initialAllowDev
+    );
+
+    useEffect(() => {
+        if ((!authority || !clientId) && !initialAllowDev) {
+            fetch('/api/health')
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.allow_insecure_dev_auth) {
+                        setRuntimeAllowDev(true);
+                    }
+                })
+                .catch(() => {})
+                .finally(() => setCheckingBackend(false));
+        }
+    }, []);
+
+    // Explicit insecure local override or backend runtime IDR_ALLOW_INSECURE_DEV_AUTH=true
+    if ((!authority || !clientId) && runtimeAllowDev) {
         const devAuth: IDRAuthContextType = {
             isAuthenticated: true,
             isLoading: false,
@@ -65,6 +85,21 @@ export const IDRAuthProvider = ({ children }: { children: React.ReactNode }) => 
         );
     }
 
+    if ((!authority || !clientId) && checkingBackend) {
+        const loadingAuth: IDRAuthContextType = {
+            isAuthenticated: false,
+            isLoading: true,
+            user: null,
+            signinRedirect: async () => { },
+            signoutRedirect: async () => { },
+        };
+        return (
+            <IDRAuthContext.Provider value={loadingAuth}>
+                {children}
+            </IDRAuthContext.Provider>
+        );
+    }
+
     // Fail closed when auth is not configured.
     if (!authority || !clientId) {
         const authConfigError: IDRAuthContextType = {
@@ -72,7 +107,7 @@ export const IDRAuthProvider = ({ children }: { children: React.ReactNode }) => 
             isLoading: false,
             user: null,
             error: new Error(
-                "Authentication is not configured. Set VITE_AUTH_AUTHORITY and VITE_AUTH_CLIENT_ID, or explicitly enable VITE_ALLOW_INSECURE_DEV_AUTH=true for local development."
+                "Authentication is not configured. Set VITE_AUTH_AUTHORITY and VITE_AUTH_CLIENT_ID, or explicitly enable IDR_ALLOW_INSECURE_DEV_AUTH=true / VITE_ALLOW_INSECURE_DEV_AUTH=true for local development."
             ),
             signinRedirect: async () => { },
             signoutRedirect: async () => { },

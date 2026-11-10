@@ -19,8 +19,9 @@ idr [--help] <command> [options]
 | `idr init` | Provision or reset system schemas (`idr_meta`, `idr_work`, `idr_out`) |
 | `idr config` | Validate, generate SQL DDL, apply YAML configurations, or export to `dbt_idr` seeds |
 | `idr dbt export` | Export YAML or live warehouse metadata directly into the 6 standard `dbt_idr` seed CSVs |
+| `idr privacy forget` | Execute or preview GDPR / CCPA Right-to-be-Forgotten cascading graph purge + SHA-256 audit log |
 | `idr quickstart` | Generate synthetic multi-channel retail data and run an automated local demo |
-| `idr mcp` / `idr-mcp` | Start the Model Context Protocol (MCP) server for AI assistants (19 tools) |
+| `idr mcp` / `idr-mcp` | Start the Model Context Protocol (MCP) server for AI assistants (21 tools) |
 | `idr serve` | Launch the FastAPI REST service, bundled UI, and Prometheus metrics endpoint |
 | `idr version` | Print current package and engine version |
 
@@ -89,8 +90,9 @@ idr init --platform=<platform> [connection-flags] [--reset]
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--platform` | String | **Required** | Target warehouse (`duckdb`, `snowflake`, `bigquery`, `databricks`) |
+| `--platform` | String | Auto-detected | Target warehouse (`duckdb`, `snowflake`, `bigquery`, `databricks`) |
 | `--reset` | Flag | `False` | **Destructive**: Drops and recreates existing metadata tables |
+| `--no-default-exclusions` | Flag | `False` | Skip seeding the curated default toxic identifier exclusion pack (`DEFAULT_EXCLUSIONS`) |
 
 #### Example
 
@@ -200,6 +202,20 @@ idr serve [--host=0.0.0.0] [--port=8000] [--reload] [--open]
 | `--host` | String | `0.0.0.0` | IP address to bind server |
 | `--port` | Integer | `8000` | Port number to bind server |
 | `--reload` | Flag | `False` | Enable auto-reload on code change (development mode) |
+
+---
+
+### 7. `idr privacy forget`
+
+Executes a GDPR / CCPA "Right to be Forgotten" (RTBF) cascading purge across the identity graph. Given an `--identifier` (e.g., email or phone), `--entity-key`, or `--resolved-id`, IDR discovers all transitively linked records across all source tables in that customer's cluster, deletes matching rows across `idr_out.*` and `idr_work.*`, and writes a zero-cleartext-PII SHA-256 cryptographic compliance receipt to `idr_meta.privacy_audit_log`.
+
+```bash
+# Preview impacted entities and clusters without deleting anything:
+idr privacy forget --db=analytics.duckdb --identifier="alice@company.com" --dry-run
+
+# Execute cascading RTBF purge across all IDR output & staging tables:
+idr privacy forget --db=analytics.duckdb --identifier="alice@company.com" --reason="GDPR_ART_17"
+```
 
 ---
 

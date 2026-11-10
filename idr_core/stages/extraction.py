@@ -7,6 +7,7 @@ and canonicalization, and attribute extraction for fuzzy matching.
 
 import os
 
+from ..canonicalizers import build_canonicalize_expr
 from ..config import build_where_clause
 from .base import BaseStage
 
@@ -39,8 +40,23 @@ class ExtractionStage(BaseStage):
             """)
             return 0
 
+        has_membership = False
+        if run_mode == "INCR":
+            try:
+                if self.adapter.table_exists("idr_out.identity_resolved_membership_current"):
+                    mem_cnt = (
+                        self.adapter.query_one(
+                            "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
+                        )
+                        or 0
+                    )
+                    has_membership = mem_cnt > 0
+            except Exception:
+                has_membership = False
+
         # Build UNION query for all sources
         union_parts = []
+        self._no_watermark_table_ids = []
         for src in sources:
             # Validate DB-sourced metadata before SQL interpolation
             table_id = self._validate_metadata_value(
@@ -53,11 +69,18 @@ class ExtractionStage(BaseStage):
                 src["entity_key_expr"], "expr", "source_table.entity_key_expr"
             )
 
-            watermark_col = src.get("watermark_column") or ""
+            raw_wm = src.get("watermark_column")
+            watermark_col = (
+                ""
+                if raw_wm is None or str(raw_wm).strip().lower() in ("", "none", "null")
+                else str(raw_wm).strip()
+            )
             if watermark_col:
                 self._validate_metadata_value(
                     watermark_col, "identifier", "source_table.watermark_column"
                 )
+            else:
+                self._no_watermark_table_ids.append(table_id)
 
             # If watermark column exists, cast it. Otherwise use a default old date constant.
             if watermark_col:
@@ -70,9 +93,29 @@ class ExtractionStage(BaseStage):
                 else:
                     watermark_expr = f"CAST({default_ts} AS {self._dialect['timestamp_type']})"
 
+            last_wm = src.get("last_watermark_value")
+            # Self-heal missing watermark in INCR mode if this table already has resolved entities
+            if run_mode == "INCR" and watermark_col and not last_wm and has_membership:
+                try:
+                    existing_for_table = self.adapter.query_one(
+                        f"SELECT 1 FROM idr_out.identity_resolved_membership_current "
+                        f"WHERE entity_key LIKE '{table_id}:%' LIMIT 1"
+                    )
+                    if existing_for_table:
+                        recovered_wm = self.adapter.query_one(
+                            f"SELECT MAX({watermark_expr}) FROM {table_fqn}"
+                        )
+                        if recovered_wm:
+                            last_wm = str(recovered_wm)
+                except Exception:
+                    pass
+
+            # Note: For tables WITHOUT a watermark column, build_where_clause returns "1=1"
+            # so all rows are scanned in extract_entities, and unchanged entities are pruned
+            # via state-diffing against idr_out.identity_identifiers_current in extract_identifiers.
             where_clause = build_where_clause(
                 watermark_col,
-                src.get("last_watermark_value"),
+                last_wm,
                 src.get("lookback", 0),
                 run_mode,
                 self.adapter.dialect,
@@ -121,6 +164,7 @@ class ExtractionStage(BaseStage):
                     entity_key {str_type},
                     identifier_type {str_type},
                     identifier_value_norm {str_type},
+                    is_hashed BOOLEAN,
                     max_group_size {self._dialect["int_type"]}
                 )
             """)
@@ -149,13 +193,8 @@ class ExtractionStage(BaseStage):
             # Raw trimmed expression
             raw_expr = f"TRIM(CAST(({value_expr}) AS {str_type}))"
 
-            # Apply canonicalization
-            if canonicalize == "LOWERCASE":
-                norm_expr = f"LOWER({raw_expr})"
-            elif canonicalize == "UPPERCASE":
-                norm_expr = f"UPPER({raw_expr})"
-            else:
-                norm_expr = raw_expr
+            # Apply canonicalization (built-in preset, registered fn, or inline SQL with {val})
+            norm_expr = build_canonicalize_expr(raw_expr, canonicalize, self.adapter.dialect)
 
             # Apply PII hashing if enabled
             is_hashed = bool(m.get("is_hashed", False))
@@ -188,7 +227,8 @@ class ExtractionStage(BaseStage):
                     {max_group_size} AS max_group_size
                 FROM idr_work.entities_delta e
                 JOIN {self.get_source_fqn(table_id)} src
-                    ON e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {str_type}))
+                    ON e.table_id = '{table_id}'
+                   AND e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {str_type}))
                 WHERE {where_condition}
             """)
 
@@ -200,22 +240,95 @@ class ExtractionStage(BaseStage):
             {union_sql}
         """)
 
-        # Apply exclusions (optional - table may not exist)
+        # Apply exclusions (supports exact/wildcard identifier_type and case-insensitive patterns)
         try:
             if self.adapter.table_exists("idr_meta.identifier_exclusion"):
                 self.adapter.execute("""
                     DELETE FROM idr_work.identifiers_delta
                     WHERE EXISTS (
                         SELECT 1 FROM idr_meta.identifier_exclusion ex
-                        WHERE idr_work.identifiers_delta.identifier_type = ex.identifier_type
+                        WHERE (
+                            UPPER(idr_work.identifiers_delta.identifier_type) = UPPER(ex.identifier_type)
+                            OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                        )
                         AND (
-                            (ex.match_type = 'EXACT' AND idr_work.identifiers_delta.identifier_value_norm = ex.identifier_value_pattern)
-                            OR (ex.match_type = 'LIKE' AND idr_work.identifiers_delta.identifier_value_norm LIKE ex.identifier_value_pattern)
+                            (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(idr_work.identifiers_delta.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
+                            OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(idr_work.identifiers_delta.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
                         )
                     )
                 """)
         except Exception:
             pass  # Exclusion table may not exist - skip silently
+
+        # Stage 1b: State-diff pruning for no-watermark tables in INCR mode.
+        # Tables without a watermark column are scanned in full (WHERE 1=1) so in-place UPDATEs
+        # to existing rows are never missed. Here we diff their extracted identifiers against
+        # idr_out.identity_identifiers_current and prune entities whose identifiers are 100% unchanged.
+        no_wm_tables = [f"'{tid}'" for tid in getattr(self, "_no_watermark_table_ids", [])]
+        if (
+            run_mode == "INCR"
+            and no_wm_tables
+            and self.adapter.table_exists("idr_out.identity_identifiers_current")
+        ):
+            try:
+                no_wm_in = ", ".join(no_wm_tables)
+                has_mem_tbl = self.adapter.table_exists(
+                    "idr_out.identity_resolved_membership_current"
+                )
+                new_entity_branch = (
+                    f"""
+                    UNION
+                    SELECT DISTINCT e.entity_key
+                    FROM idr_work.entities_delta e
+                    WHERE e.table_id IN ({no_wm_in})
+                      AND NOT EXISTS (
+                          SELECT 1 FROM idr_out.identity_resolved_membership_current m
+                          WHERE m.entity_key = e.entity_key
+                      )
+                    """
+                    if has_mem_tbl
+                    else ""
+                )
+                self.adapter.execute(f"""
+                    CREATE OR REPLACE TABLE idr_work.changed_no_wm_entities AS
+                    SELECT DISTINCT d.entity_key
+                    FROM idr_work.identifiers_delta d
+                    JOIN idr_work.entities_delta e ON d.entity_key = e.entity_key
+                    WHERE e.table_id IN ({no_wm_in})
+                      AND NOT EXISTS (
+                          SELECT 1 FROM idr_out.identity_identifiers_current h
+                          WHERE h.entity_key = d.entity_key
+                            AND h.identifier_type = d.identifier_type
+                            AND h.identifier_value_norm = d.identifier_value_norm
+                      )
+                    UNION
+                    SELECT DISTINCT e.entity_key
+                    FROM idr_work.entities_delta e
+                    JOIN idr_out.identity_identifiers_current h ON e.entity_key = h.entity_key
+                    WHERE e.table_id IN ({no_wm_in})
+                      AND NOT EXISTS (
+                          SELECT 1 FROM idr_work.identifiers_delta d
+                          WHERE d.entity_key = h.entity_key
+                            AND d.identifier_type = h.identifier_type
+                            AND d.identifier_value_norm = h.identifier_value_norm
+                      )
+                    {new_entity_branch}
+                """)
+                self.adapter.execute(f"""
+                    DELETE FROM idr_work.entities_delta
+                    WHERE table_id IN ({no_wm_in})
+                      AND entity_key NOT IN (
+                          SELECT entity_key FROM idr_work.changed_no_wm_entities
+                      )
+                """)
+                self.adapter.execute("""
+                    DELETE FROM idr_work.identifiers_delta
+                    WHERE entity_key NOT IN (
+                        SELECT entity_key FROM idr_work.entities_delta
+                    )
+                """)
+            except Exception as e:
+                self.logger.warning(f"No-watermark state diff failed, keeping all rows: {e}")
 
         # Stage 2: Candidate expansion for incremental processing
         # In INCR mode, find existing entities in idr_out sharing any delta identifiers,
@@ -292,7 +405,35 @@ class ExtractionStage(BaseStage):
         return count or 0
 
     def extract_attributes(self) -> int:
-        """Extract attributes specifically configured for fuzzy matching/survivorship."""
+        """Extract attributes specifically configured for fuzzy matching."""
+        str_type = self._dialect["string_type"]
+
+        # Note: Golden Record survivorship (ProfileBuilder) queries source tables directly.
+        # idr_work.entity_attributes is ONLY consumed by GraphStage.run_fuzzy_matching().
+        # If there are no active fuzzy rules, skip materializing millions of attribute rows!
+        has_fuzzy_rules = False
+        try:
+            if self.adapter.table_exists("idr_meta.fuzzy_rule"):
+                fuzzy_cnt = (
+                    self.adapter.query_one(
+                        "SELECT COUNT(*) FROM idr_meta.fuzzy_rule WHERE is_active = TRUE"
+                    )
+                    or 0
+                )
+                has_fuzzy_rules = fuzzy_cnt > 0
+        except Exception:
+            has_fuzzy_rules = False
+
+        if not has_fuzzy_rules:
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.entity_attributes (
+                    entity_key {str_type},
+                    attribute_name {str_type},
+                    attribute_value {str_type}
+                )
+            """)
+            return 0
+
         mappings = self.adapter.query("""
             SELECT table_id, attribute_name, attribute_expr
             FROM idr_meta.entity_attribute_mapping
@@ -315,7 +456,7 @@ class ExtractionStage(BaseStage):
             )
 
             # Cast everything to string for generic processing
-            val_expr = f"CAST({expr} AS {self._dialect['string_type']})"
+            val_expr = f"CAST({expr} AS {str_type})"
 
             union_parts.append(f"""
                 SELECT
@@ -324,7 +465,8 @@ class ExtractionStage(BaseStage):
                     {val_expr} AS attribute_value
                 FROM idr_work.entities_delta e
                 JOIN {self.get_source_fqn(table_id)} src
-                    ON e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {self._dialect["string_type"]}))
+                    ON e.table_id = '{table_id}'
+                   AND e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {str_type}))
                 WHERE {expr} IS NOT NULL
             """)
 

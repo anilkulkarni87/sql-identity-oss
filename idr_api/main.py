@@ -190,11 +190,13 @@ async def health():
     """Health check endpoint."""
     _manager = get_manager()
     adapter = _manager.get_any_adapter()
+    allow_dev_auth = os.getenv("IDR_ALLOW_INSECURE_DEV_AUTH", "").lower() in ("1", "true", "yes")
     return {
         "status": "healthy",
         "connected": adapter is not None,
         "platform": adapter.dialect if adapter else None,
         "active_connections": _manager.connection_count(),
+        "allow_insecure_dev_auth": allow_dev_auth,
     }
 
 
@@ -235,7 +237,10 @@ try:
                 and os.path.isfile(candidate)
             ):
                 return FileResponse(candidate)
-            return FileResponse(os.path.join(_static_dir, "index.html"))
+            return FileResponse(
+                os.path.join(_static_dir, "index.html"),
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
 
         print(f"INFO: Serving UI from {_static_dir}")
 except ImportError:

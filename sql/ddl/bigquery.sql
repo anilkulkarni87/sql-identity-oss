@@ -329,3 +329,40 @@ CREATE TABLE IF NOT EXISTS idr_out.config_snapshot (
   created_at TIMESTAMP,
   PRIMARY KEY (config_hash) NOT ENFORCED
 );
+
+CREATE TABLE IF NOT EXISTS idr_meta.identity_override (
+  override_type STRING,
+  entity_key_a STRING,
+  entity_key_b STRING,
+  override_id STRING,
+  reason STRING,
+  created_by STRING,
+  is_active BOOL,
+  created_at TIMESTAMP,
+  PRIMARY KEY (override_type, entity_key_a, entity_key_b) NOT ENFORCED
+);
+
+CREATE TABLE IF NOT EXISTS idr_meta.privacy_audit_log (
+  request_id STRING,
+  search_type STRING,
+  target_hash STRING,
+  resolved_id_hash STRING,
+  entities_purged INT64,
+  edges_purged INT64,
+  profiles_purged INT64,
+  status STRING,
+  requested_by STRING,
+  reason STRING,
+  executed_at TIMESTAMP,
+  PRIMARY KEY (request_id) NOT ENFORCED
+);
+
+CREATE TABLE IF NOT EXISTS idr_out.resolved_id_crosswalk (
+  previous_resolved_id STRING,
+  current_resolved_id STRING,
+  change_type STRING,
+  entities_moved INT64,
+  run_id STRING,
+  updated_at TIMESTAMP,
+  PRIMARY KEY (previous_resolved_id, current_resolved_id) NOT ENFORCED
+);

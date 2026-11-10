@@ -187,6 +187,59 @@ class OutputStage(BaseStage):
             FROM idr_work.cluster_density cd
         """)
 
+    def _record_resolved_id_crosswalk(self) -> None:
+        """Record retired/merged/split resolved_ids into idr_out.resolved_id_crosswalk before membership update."""
+        try:
+            if not self.adapter.table_exists("idr_out.resolved_id_crosswalk"):
+                return
+            if not self.adapter.table_exists("idr_out.identity_resolved_membership_current"):
+                return
+            prev_cnt = self.adapter.query_one(
+                "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
+            ) or 0
+            if prev_cnt == 0:
+                return
+
+            current_ts = self._dialect["current_timestamp"]
+            source_query = f"""
+                WITH prev_destinations AS (
+                    SELECT
+                        m.resolved_id AS previous_resolved_id,
+                        COUNT(DISTINCT l.label) AS dest_count
+                    FROM idr_out.identity_resolved_membership_current m
+                    JOIN idr_work.lp_labels l ON m.entity_key = l.entity_key
+                    GROUP BY m.resolved_id
+                )
+                SELECT
+                    m.resolved_id AS previous_resolved_id,
+                    l.label AS current_resolved_id,
+                    CASE WHEN pd.dest_count > 1 THEN 'SPLIT' ELSE 'MERGED' END AS change_type,
+                    COUNT(*) AS entities_moved,
+                    '{self.run_id}' AS run_id,
+                    {current_ts} AS updated_at
+                FROM idr_out.identity_resolved_membership_current m
+                JOIN idr_work.lp_labels l ON m.entity_key = l.entity_key
+                JOIN prev_destinations pd ON m.resolved_id = pd.previous_resolved_id
+                WHERE m.resolved_id != l.label
+                GROUP BY m.resolved_id, l.label, pd.dest_count
+            """
+            self.upsert(
+                target_table="idr_out.resolved_id_crosswalk",
+                source_query=source_query,
+                key_cols=["previous_resolved_id", "current_resolved_id"],
+                update_cols=["change_type", "entities_moved", "run_id", "updated_at"],
+                insert_cols=[
+                    "previous_resolved_id",
+                    "current_resolved_id",
+                    "change_type",
+                    "entities_moved",
+                    "run_id",
+                    "updated_at",
+                ],
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to record resolved_id_crosswalk: {e}")
+
     def generate_output(self) -> None:
         """Update output tables with resolved identities."""
         current_ts = self._dialect["current_timestamp"]
@@ -197,6 +250,9 @@ class OutputStage(BaseStage):
             SELECT DISTINCT label AS resolved_id
             FROM idr_work.lp_labels
         """)
+
+        # 1b. Record resolved_id crosswalk for any clusters that merged or split
+        self._record_resolved_id_crosswalk()
 
         # 2. Update membership table
         self.upsert(
@@ -342,7 +398,7 @@ class OutputStage(BaseStage):
                 )
             """)
 
-        # 4. Update watermarks
+        # 4. Update watermarks (ignore NULL watermark_value rows from candidate expansion / overrides)
         self.upsert(
             target_table="idr_meta.run_state",
             source_query=f"""
@@ -352,6 +408,7 @@ class OutputStage(BaseStage):
                     '{self.run_id}' AS last_run_id,
                     {current_ts} AS updated_at
                 FROM idr_work.entities_delta
+                WHERE watermark_value IS NOT NULL
                 GROUP BY table_id
             """,
             key_cols=["table_id"],

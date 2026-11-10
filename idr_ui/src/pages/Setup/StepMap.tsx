@@ -74,7 +74,16 @@ export default function StepMap({ tables, initialConfig, onNext, onBack }: StepM
                 if (!newConfig[table]) {
                     // Smart defaults
                     const likelyKey = cols.find(c => c.name.toLowerCase().includes('id') && !c.name.toLowerCase().includes('email'))?.name || cols[0]?.name;
-                    const likelyWatermark = cols.find(c => ['updated_at', 'modified_at', 'last_modified', 'timestamp'].some(k => c.name.toLowerCase().includes(k)))?.name;
+                    const wmKeywords = [
+                        'updated_at', 'modified_at', 'last_modified', 'timestamp',
+                        'created_at', 'transaction_date', 'order_date', 'event_date',
+                        'event_ts', 'last_visit_date', 'enrolled_date', 'assigned_at',
+                        'flagged_at', 'review_date', '_at', '_date', '_ts'
+                    ];
+                    const likelyWatermark = (
+                        cols.find(c => c.name !== likelyKey && wmKeywords.some(k => c.name.toLowerCase().includes(k))) ||
+                        cols.find(c => c.name !== likelyKey && ['timestamp', 'date', 'datetime'].some(t => (c.type || '').toLowerCase().includes(t)))
+                    )?.name;
 
                     newConfig[table] = {
                         id: table.replace(/\./g, '_'),

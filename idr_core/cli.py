@@ -162,6 +162,43 @@ Examples:
     init_parser.add_argument("--meta-dataset", default="idr_meta", help="BigQuery metadata dataset")
     init_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
     init_parser.add_argument("--reset", action="store_true", help="Drop and recreate tables")
+    init_parser.add_argument(
+        "--no-default-exclusions",
+        action="store_true",
+        help="Skip seeding the default toxic identifier exclusion pack",
+    )
+
+    # === idr privacy ===
+    privacy_parser = subparsers.add_parser(
+        "privacy", help="GDPR / CCPA Right-to-be-Forgotten (RTBF) graph operations"
+    )
+    privacy_subparsers = privacy_parser.add_subparsers(dest="privacy_cmd")
+    forget_parser = privacy_subparsers.add_parser(
+        "forget",
+        help="Cascading deletion of an identity across all IDR output & work tables with SHA-256 audit log",
+    )
+    forget_parser.add_argument("--identifier", help="Identifier value (e.g. email or phone) to forget")
+    forget_parser.add_argument("--entity-key", help="Specific entity_key (e.g. crm:101) to forget")
+    forget_parser.add_argument("--resolved-id", help="Specific cluster resolved_id to forget")
+    forget_parser.add_argument(
+        "--dry-run", action="store_true", help="Preview impacted entities and tables without deleting"
+    )
+    forget_parser.add_argument(
+        "--reason", default="GDPR_CCPA_RTBF", help="Audit reason (default: GDPR_CCPA_RTBF)"
+    )
+    forget_parser.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        required=False,
+        help="Target platform (auto-detected if omitted)",
+    )
+    forget_parser.add_argument("--db", help="DuckDB database path")
+    forget_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    forget_parser.add_argument("--location", default="US", help="BigQuery location")
+    forget_parser.add_argument("--dataset", default="idr_out", help="BigQuery output dataset")
+    forget_parser.add_argument("--meta-dataset", default="idr_meta", help="BigQuery metadata dataset")
+    forget_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
 
     apply_parser = config_subparsers.add_parser("apply", help="Apply config to metadata tables")
     apply_parser.add_argument("--file", "-f", required=True, help="Config file path")
@@ -244,6 +281,9 @@ Examples:
 
     if parsed_args.command == "init":
         return handle_init(parsed_args)
+
+    if parsed_args.command == "privacy":
+        return handle_privacy(parsed_args)
 
     if parsed_args.command == "run":
         return handle_run(parsed_args)
@@ -386,12 +426,60 @@ def handle_init(args) -> int:
     try:
         print("Initializing metadata tables...")
         manager = SchemaManager(adapter)
-        manager.initialize(reset=args.reset)
+        seed_defaults = not getattr(args, "no_default_exclusions", False)
+        manager.initialize(reset=args.reset, seed_default_exclusions=seed_defaults)
 
         print("✅ Metadata tables initialized.")
         return 0
     except Exception as e:
         print(f"❌ Initialization failed: {e}")
+        return 1
+    finally:
+        adapter.close()
+
+
+def handle_privacy(args) -> int:
+    """Handle privacy RTBF subcommands."""
+    from idr_core.privacy import PrivacyManager
+
+    if getattr(args, "privacy_cmd", None) != "forget":
+        print("Usage: idr privacy forget --identifier=<val> | --entity-key=<key> | --resolved-id=<id>")
+        return 1
+
+    if not any([args.identifier, args.entity_key, args.resolved_id]):
+        print("❌ Specify at least one of --identifier, --entity-key, or --resolved-id.")
+        return 1
+
+    try:
+        adapter = get_adapter(args)
+    except Exception as e:
+        print(f"Error creating adapter: {e}")
+        return 1
+
+    try:
+        pm = PrivacyManager(adapter)
+        res = pm.forget(
+            identifier_value=args.identifier,
+            entity_key=args.entity_key,
+            resolved_id=args.resolved_id,
+            dry_run=args.dry_run,
+            requested_by="cli",
+            reason=args.reason,
+        )
+        mode_label = "DRY RUN PREVIEW" if args.dry_run else "RTBF PURGE COMPLETE"
+        print(f"\n{'=' * 60}")
+        print(f"  IDR Privacy ({mode_label}) - {res['status']}")
+        print(f"{'=' * 60}")
+        print(f"  Request ID:      {res['request_id']}")
+        print(f"  Target SHA-256:  {res['target_hash'][:16]}...")
+        print(f"  Clusters Found:  {len(res['resolved_ids'])} {res['resolved_ids']}")
+        print(f"  Entities Purged: {res['entities_purged']} {res['entity_keys']}")
+        print(f"  Edges Purged:    {res['edges_purged']}")
+        print(f"  Profiles Purged: {res['profiles_purged']}")
+        print(f"{'=' * 60}\n")
+        return 0
+    except Exception as e:
+        print(f"❌ Privacy forget failed: {e}")
         return 1
     finally:
         adapter.close()

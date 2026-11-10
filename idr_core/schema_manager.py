@@ -17,12 +17,14 @@ class SchemaManager:
         self.dialect_name = adapter.dialect
         self.dialect_config = get_dialect_config(self.dialect_name)
 
-    def initialize(self, reset: bool = False) -> None:
+    def initialize(self, reset: bool = False, seed_default_exclusions: bool = False) -> None:
         """
         Initialize all system tables.
 
         Args:
             reset: If True, drop known schemas before creating.
+            seed_default_exclusions: If True, non-destructively seed the curated
+                default toxic identifier exclusion pack into `idr_meta.identifier_exclusion`.
         """
         schemas = ["idr_meta", "idr_work", "idr_out"]
 
@@ -36,6 +38,24 @@ class SchemaManager:
         print("Creating tables...")
         for table_def in SYSTEM_TABLES:
             self._create_table(table_def)
+
+        if seed_default_exclusions:
+            self.seed_default_exclusions()
+
+    def seed_default_exclusions(self) -> int:
+        """
+        Non-destructively seed DEFAULT_EXCLUSIONS into `idr_meta.identifier_exclusion`.
+        Preserves any exclusions manually inserted by users via SQL.
+        """
+        from .config import DEFAULT_EXCLUSIONS, config_to_sql
+
+        dummy_cfg = {"sources": [], "exclusions": DEFAULT_EXCLUSIONS}
+        stmts = config_to_sql(dummy_cfg, dialect=self.dialect_name)
+        count = 0
+        for stmt in stmts:
+            self.adapter.execute(stmt)
+            count += 1
+        return count
 
     def _drop_schemas(self, schemas: List[str]) -> None:
         """Drop schemas and all objects within them."""

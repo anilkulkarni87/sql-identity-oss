@@ -29,6 +29,15 @@ models:
 seeds:
   dbt_idr:
     +schema: idr_meta
+    idr_overrides:
+      +column_types:
+        override_id: varchar
+        override_type: varchar
+        entity_key_a: varchar
+        entity_key_b: varchar
+        reason: varchar
+        created_by: varchar
+        is_active: boolean
 
 # Package variables - users can override in their dbt_project.yml
 vars:

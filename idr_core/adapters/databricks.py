@@ -133,7 +133,32 @@ class DatabricksAdapter(IDRAdapter):
                 return result[0] if result else None
 
     def table_exists(self, table_fqn: str) -> bool:
-        """Check if table exists."""
+        """Check if table exists without triggering TABLE_OR_VIEW_NOT_FOUND errors."""
+        clean_fqn = table_fqn.replace("`", "").replace('"', "").strip()
+        parts = [p for p in clean_fqn.split(".") if p]
+        if len(parts) in (2, 3):
+            schema_part = ".".join(parts[:-1])
+            table_part = parts[-1].lower()
+            try:
+                query = f"SHOW TABLES IN {schema_part} LIKE '{table_part}'"
+                if self.is_spark:
+                    rows = self.conn_obj.sql(query).collect()
+                else:
+                    with self.conn_obj.cursor() as cur:
+                        cur.execute(query)
+                        rows = cur.fetchall()
+                for row in rows or []:
+                    tbl_name = (
+                        row["tableName"]
+                        if isinstance(row, dict) or hasattr(row, "__getitem__") and not isinstance(row, tuple)
+                        else row[1]
+                    )
+                    if str(tbl_name).lower() == table_part:
+                        return True
+                return False
+            except Exception:
+                return False
+
         try:
             if self.is_spark:
                 self.conn_obj.sql(f"DESCRIBE TABLE {table_fqn}")

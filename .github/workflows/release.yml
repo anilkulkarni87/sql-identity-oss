@@ -42,6 +42,8 @@ jobs:
           node-version: "20"
 
       - name: Build React UI into idr_api/static
+        env:
+          VITE_ALLOW_INSECURE_DEV_AUTH: "true"
         run: |
           npm ci --ignore-scripts --no-audit
           npm run build

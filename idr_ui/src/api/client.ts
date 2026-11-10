@@ -145,7 +145,54 @@ export const api = {
             rule_id: string
         }>
         golden_profile?: Record<string, unknown> | null
+        crosswalk_history?: Array<{
+            previous_resolved_id: string
+            current_resolved_id: string
+            change_type: string
+            entities_moved: number
+            run_id: string
+            updated_at: string
+        }> | null
     }>(`/clusters/${encodeURIComponent(clusterId)}`),
+
+    manageOverride: (payload: {
+        action: 'add' | 'remove' | 'list'
+        override_type?: 'FORCE_LINK' | 'DO_NOT_LINK' | 'ISOLATE'
+        entity_key_a?: string
+        entity_key_b?: string
+        reason?: string
+    }) => fetchJson<{
+        status: string
+        action?: string
+        overrides?: Array<Record<string, unknown>>
+    }>('/overrides', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }),
+
+    privacyForget: (payload: {
+        identifier_value?: string
+        entity_key?: string
+        resolved_id?: string
+        dry_run?: boolean
+        reason?: string
+    }) => fetchJson<{
+        request_id: string
+        status: string
+        dry_run: boolean
+        target_hash: string
+        resolved_id_hash: string
+        resolved_ids: string[]
+        entity_keys: string[]
+        entities_purged: number
+        edges_purged: number
+        profiles_purged: number
+        tables_cleaned: string[]
+        executed_at: string
+    }>('/privacy/forget', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }),
 
     // Run History
     getRuns: (limit = 20) => fetchJson<Array<{
@@ -259,6 +306,25 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
     }),
+
+    getRunProgress: () => fetchJson<{
+        run_id?: string | null
+        status: string
+        mode?: string
+        dry_run?: boolean
+        elapsed_seconds?: number
+        current_stage?: string | null
+        current_detail?: string | null
+        stages: Array<{
+            name: string
+            label: string
+            order: number
+            status: 'pending' | 'running' | 'completed' | 'skipped'
+            duration_seconds?: number | null
+            rows_affected?: number | null
+            detail?: string | null
+        }>
+    }>('/setup/run/progress'),
 
     // Schema Docs
     getSchema: () => fetchJson<Array<{

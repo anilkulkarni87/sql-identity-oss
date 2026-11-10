@@ -97,6 +97,20 @@
     {% do run_query(create_survivorship) %}
     {{ log("  ✓ idr_survivorship_rules", info=True) }}
 
+    {# idr_overrides #}
+    {% set create_overrides %}
+        create table if not exists {{ target.schema }}_idr_meta.idr_overrides (
+            override_id varchar(255),
+            override_type varchar(50) not null,
+            entity_key_a varchar(500) not null,
+            entity_key_b varchar(500),
+            reason varchar(500),
+            is_active boolean default true
+        )
+    {% endset %}
+    {% do run_query(create_overrides) %}
+    {{ log("  ✓ idr_overrides", info=True) }}
+
     {{ log("Done! Tables created in schema: " ~ target.schema ~ "_idr_meta", info=True) }}
     {{ log("", info=True) }}
     {{ log("Next steps:", info=True) }}

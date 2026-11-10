@@ -285,3 +285,39 @@ CREATE TABLE IF NOT EXISTS idr_out.config_snapshot (
   mappings_json VARCHAR,
   created_at TIMESTAMP_NTZ
 );
+
+CREATE TABLE IF NOT EXISTS idr_meta.identity_override (
+  override_type VARCHAR,
+  entity_key_a VARCHAR,
+  entity_key_b VARCHAR,
+  override_id VARCHAR,
+  reason VARCHAR,
+  created_by VARCHAR,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (override_type, entity_key_a, entity_key_b)
+);
+
+CREATE TABLE IF NOT EXISTS idr_meta.privacy_audit_log (
+  request_id VARCHAR PRIMARY KEY,
+  search_type VARCHAR,
+  target_hash VARCHAR,
+  resolved_id_hash VARCHAR,
+  entities_purged BIGINT,
+  edges_purged BIGINT,
+  profiles_purged BIGINT,
+  status VARCHAR,
+  requested_by VARCHAR,
+  reason VARCHAR,
+  executed_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE TABLE IF NOT EXISTS idr_out.resolved_id_crosswalk (
+  previous_resolved_id VARCHAR,
+  current_resolved_id VARCHAR,
+  change_type VARCHAR,
+  entities_moved BIGINT,
+  run_id VARCHAR,
+  updated_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (previous_resolved_id, current_resolved_id)
+);

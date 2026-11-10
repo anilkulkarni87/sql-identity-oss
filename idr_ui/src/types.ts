@@ -27,7 +27,8 @@ export interface MatchingRule {
     type: string; // 'EXACT' or 'FUZZY'
     match_keys: string[]; // For EXACT: identifiers to match
     priority: number;
-    canonicalize?: 'LOWERCASE' | 'UPPERCASE' | 'EXACT';
+    canonicalize?: string; // Presets (EMAIL_STANDARD, EMAIL_STRIP_PLUS, PHONE_US_10, PHONE_DIGITS, ALPHANUMERIC_UPPER, LOWERCASE, UPPERCASE, EXACT) or custom {val} SQL
+    max_group_size?: number;
     // Fuzzy Specific
     blocking_key?: string;
     fuzzy_attribute?: string;
@@ -39,6 +40,14 @@ export interface ExclusionRule {
     type: string;
     value: string;
     match?: 'EXACT' | 'LIKE';
+    match_type?: 'EXACT' | 'LIKE';
+    reason?: string;
+}
+
+export interface OverrideRule {
+    override_type: 'FORCE_LINK' | 'DO_NOT_LINK' | 'ISOLATE';
+    entity_key_a: string;
+    entity_key_b?: string;
     reason?: string;
 }
 
@@ -55,6 +64,8 @@ export interface IDRConfig {
     fuzzy_rules?: MatchingRule[];
     survivorship?: SurvivorshipRule[];
     exclusions?: ExclusionRule[];
+    overrides?: OverrideRule[];
+    use_default_exclusions?: boolean;
 }
 
 export interface TableColumn {

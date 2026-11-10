@@ -120,8 +120,16 @@ def _build_integration_test_config() -> dict:
 
 
 def test_config_to_dbt_seeds_roundtrip(tmp_path):
-    """Verify config_to_dbt_seeds writes all 6 expected dbt_idr seed CSVs with valid headers."""
+    """Verify config_to_dbt_seeds writes all 7 expected dbt_idr seed CSVs with valid headers."""
     cfg = _build_integration_test_config()
+    cfg["overrides"] = [
+        {
+            "type": "FORCE_LINK",
+            "entity_key_a": "crm:10",
+            "entity_key_b": "orders:200",
+            "reason": "VIP manual merge",
+        }
+    ]
     out_dir = tmp_path / "seeds"
     written = config_to_dbt_seeds(cfg, str(out_dir))
 
@@ -132,8 +140,18 @@ def test_config_to_dbt_seeds_roundtrip(tmp_path):
         "idr_rules.csv",
         "idr_exclusions.csv",
         "idr_survivorship_rules.csv",
+        "idr_overrides.csv",
     }
     assert set(written.keys()) == expected_files
+
+    # Verify overrides CSV rows
+    with open(written["idr_overrides.csv"], encoding="utf-8") as f:
+        ov_rows = list(csv.DictReader(f))
+    assert len(ov_rows) == 1
+    assert ov_rows[0]["override_type"] == "FORCE_LINK"
+    assert ov_rows[0]["entity_key_a"] == "crm:10"
+    assert ov_rows[0]["entity_key_b"] == "orders:200"
+    assert ov_rows[0]["is_active"] == "true"
 
     # Verify sources CSV rows
     with open(written["idr_sources.csv"], encoding="utf-8") as f:

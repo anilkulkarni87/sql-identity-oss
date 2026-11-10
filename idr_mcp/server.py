@@ -864,6 +864,100 @@ def export_dbt_seeds(
         return {"status": "ERROR", "error": f"Failed to export dbt seeds: {str(e)}"}
 
 
+@mcp.tool()
+def forget_customer_identity(
+    identifier_value: str = None,
+    entity_key: str = None,
+    resolved_id: str = None,
+    dry_run: bool = False,
+    reason: str = "GDPR_CCPA_RTBF",
+) -> Dict[str, Any]:
+    """
+    Execute or preview a GDPR / CCPA Right-to-be-Forgotten (RTBF) cascading purge
+    across all IDR output and staging tables, writing a zero-PII SHA-256 receipt
+    to idr_meta.privacy_audit_log.
+    """
+    try:
+        adapter = get_adapter()
+        from idr_core.privacy import PrivacyManager
+
+        pm = PrivacyManager(adapter)
+        return pm.forget(
+            identifier_value=identifier_value,
+            entity_key=entity_key,
+            resolved_id=resolved_id,
+            dry_run=dry_run,
+            requested_by="mcp_agent",
+            reason=reason,
+        )
+    except Exception as e:
+        return {"status": "ERROR", "error": f"Failed to execute RTBF forget: {str(e)}"}
+
+
+@mcp.tool()
+def manage_identity_override(
+    action: str,
+    override_type: str = None,
+    entity_key_a: str = None,
+    entity_key_b: str = None,
+    reason: str = "Manual stewardship override",
+) -> Dict[str, Any]:
+    """
+    Manage manual stewardship overrides in idr_meta.identity_override.
+    Actions: 'list', 'add', 'remove'.
+    Override types: 'FORCE_LINK', 'DO_NOT_LINK', 'ISOLATE'.
+    """
+    try:
+        adapter = get_adapter()
+        act = action.strip().lower()
+        if act == "list":
+            rows = adapter.query(
+                "SELECT * FROM idr_meta.identity_override WHERE is_active = TRUE ORDER BY created_at DESC"
+            )
+            return {"status": "SUCCESS", "overrides": rows}
+
+        if not override_type or not entity_key_a:
+            return {"status": "ERROR", "error": "override_type and entity_key_a are required"}
+
+        otype = override_type.strip().upper()
+        if otype not in ("FORCE_LINK", "DO_NOT_LINK", "ISOLATE"):
+            return {"status": "ERROR", "error": f"Invalid override_type '{otype}'"}
+
+        ek_a = entity_key_a.strip().replace("'", "''")
+        ek_b = (entity_key_b.strip() if entity_key_b else "__ISOLATE__").replace("'", "''")
+        rsn = (reason or "").replace("'", "''")
+
+        if act == "remove":
+            adapter.execute(f"""
+                DELETE FROM idr_meta.identity_override
+                WHERE UPPER(override_type) = '{otype}'
+                  AND entity_key_a = '{ek_a}'
+                  AND entity_key_b = '{ek_b}'
+            """)
+            return {"status": "SUCCESS", "action": "removed", "override_type": otype, "entity_key_a": ek_a, "entity_key_b": ek_b}
+
+        if act == "add":
+            from idr_core.adapters.base import get_dialect_config
+
+            current_ts = get_dialect_config(adapter.dialect)["current_timestamp"]
+            adapter.execute(f"""
+                DELETE FROM idr_meta.identity_override
+                WHERE UPPER(override_type) = '{otype}'
+                  AND entity_key_a = '{ek_a}'
+                  AND entity_key_b = '{ek_b}'
+            """)
+            adapter.execute(f"""
+                INSERT INTO idr_meta.identity_override
+                (override_type, entity_key_a, entity_key_b, reason, is_active, created_at)
+                VALUES ('{otype}', '{ek_a}', '{ek_b}', '{rsn}', TRUE, {current_ts})
+            """)
+            return {"status": "SUCCESS", "action": "added", "override_type": otype, "entity_key_a": ek_a, "entity_key_b": ek_b}
+
+        return {"status": "ERROR", "error": f"Unknown action '{action}'. Use 'list', 'add', or 'remove'."}
+    except Exception as e:
+        return {"status": "ERROR", "error": f"Failed to manage override: {str(e)}"}
+
+
 # --- Entry Point ---
 
 

@@ -105,6 +105,23 @@ class ClusterDetail(BaseModel):
     entities: List[EntityInfo]
     edges: List[EdgeInfo]
     golden_profile: Optional[Dict[str, Any]] = None
+    crosswalk_history: Optional[List[Dict[str, Any]]] = None
+
+
+class OverrideRequest(BaseModel):
+    action: str = "add"  # add, remove, list
+    override_type: Optional[str] = None  # FORCE_LINK, DO_NOT_LINK, ISOLATE
+    entity_key_a: Optional[str] = None
+    entity_key_b: Optional[str] = None
+    reason: Optional[str] = "UI stewardship override"
+
+
+class PrivacyForgetRequest(BaseModel):
+    identifier_value: Optional[str] = None
+    entity_key: Optional[str] = None
+    resolved_id: Optional[str] = None
+    dry_run: bool = False
+    reason: str = "GDPR_CCPA_RTBF"
 
 
 # ============================================================

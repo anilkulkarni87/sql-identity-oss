@@ -21,7 +21,10 @@ Every source table must specify a short `id` (e.g., `"crm"`, `"orders"`, `"pos"`
 * **How the app uses it:** During extraction, IDR combines `id` and `entity_key` into a globally unique composite node key formatted as `<source_id>:<entity_key>`:
   * Row `1042` in `raw.crm_customers` (`id: "crm"`) becomes **`crm:1042`**
   * Row `1042` in `raw.web_orders` (`id: "orders"`) becomes **`orders:1042`**
-* **Deterministic Cluster ID (`resolved_id`):** When multiple records merge into a cluster, IDR deterministically assigns the lexicographically smallest `entity_key` in that connected component (e.g., `crm:1042`) as the cluster's canonical `resolved_id`.
+* **Deterministic & Persistent Cluster ID (`resolved_id`):**
+  * On the initial run, IDR deterministically assigns the lexicographically smallest `entity_key` in a connected component (e.g., `crm:1042`) as the cluster's `resolved_id`.
+  * **Cross-Run Persistence:** On subsequent runs, if new entities join an existing cluster (even if a new entity has a lexicographically smaller key like `aaa:001`), IDR **locks and preserves** the cluster's existing `resolved_id` (`crm:1042`).
+  * **Cluster Merges & Crosswalk (`idr_out.resolved_id_crosswalk`):** When two existing clusters merge together, the **largest cluster's `resolved_id` wins** (tie-broken by oldest timestamp, then lexicographical `MIN(resolved_id)`), and the retired `resolved_id` is logged in `idr_out.resolved_id_crosswalk` (`previous_resolved_id -> current_resolved_id`, `change_type: MERGED | SPLIT`).
 
 > [!TIP]
 > **What if my table has a composite primary key?**
@@ -266,9 +269,22 @@ Exact matching rules that form graph edges.
 | `id` | string | Required | Unique rule ID. |
 | `type` | string | `"EXACT"` | Match type. |
 | `match_keys` | list | Required | Identifier types that must match (e.g. `["email"]`). |
-| `canonicalize` | string | `"LOWERCASE"` | Value normalization: `"LOWERCASE"`, `"UPPERCASE"`, or `"EXACT"` / `"NONE"`. |
+| `canonicalize` | string or dict | `"LOWERCASE"` | Value normalization preset (`"EMAIL_STANDARD"`, `"EMAIL_STRIP_PLUS"`, `"PHONE_DIGITS"`, `"PHONE_US_10"`, `"ALPHANUMERIC_UPPER"`, `"LOWERCASE"`, `"UPPERCASE"`, `"EXACT"` / `"NONE"`), a custom Python canonicalizer registered via `register_canonicalizer()`, or an inline SQL expression using `{val}` (can also be a dialect-keyed dict). |
 | `priority` | integer | `100` | Rule priority (lower number = higher edge priority in evidence). |
 | `max_group_size` | integer | `10000` | High-cardinality guardrail. Groups larger than this are skipped and logged to `idr_out.skipped_identifier_groups`. |
+
+#### Built-In Domain Canonicalizers & Custom Expressions
+
+| Canonicalizer | Behavior | Example Input -> Output |
+|---|---|---|
+| `EMAIL_STANDARD` | Trims whitespace and lowercases (preserves `+tag`) | `" Alice+VIP@Example.COM "` -> `"alice+vip@example.com"` |
+| `EMAIL_STRIP_PLUS` | Trims, lowercases, and strips `+tag` before `@` | `" Alice+VIP@Example.COM "` -> `"alice@example.com"` |
+| `PHONE_DIGITS` | Strips all non-digit characters (`[^0-9]`) | `"+1 (555) 234-5678"` -> `"15552345678"` |
+| `PHONE_US_10` | Strips non-digits and removes leading US `1` country code (11 -> 10 digits) | `"+1 (555) 234-5678"` -> `"5552345678"` |
+| `ALPHANUMERIC_UPPER` | Strips spaces/punctuation (`[^A-Za-z0-9]`) and uppercases | `"ab-12 34!"` -> `"AB1234"` |
+| `LOWERCASE` / `UPPERCASE` / `EXACT` | Standard case conversion or exact trimmed value | `"User_1"` -> `"user_1"` |
+| **Inline Warehouse SQL (`{val}`)** | Any SQL expression referencing `{val}` (or dialect dict) | `"LPAD(LTRIM(TRIM({val}), '0'), 8, '0')"` |
+| **Python Plugin (`register_canonicalizer`)** | Custom Python builder `register_canonicalizer(name, lambda col, dialect: ...)` | `"MY_CUSTOM_NORM"` |
 
 ### 3. `fuzzy_rules` (Probabilistic Super-Clustering)
 Optional refinement rules executed when `--strict` is not enabled.
@@ -294,15 +310,27 @@ Controls how attributes from multiple source records within a cluster are consol
 | **`PRIORITY`** | Selects the value from the highest-ranked source system. Automatically skips `NULL` values. | `source_priority` (ordered list of source `id`s) |
 | **`FREQUENCY`** | Selects the most frequently occurring non-null value across all cluster members (tie-broken by recency). | None |
 
-### 5. `exclusions` (Identifier Blocklist)
+### 5. `exclusions` (Identifier Blocklist & Default Toxic Pack)
 Blocks specific placeholder or shared values from linking records to prevent hub-and-spoke false clustering.
+
+* **Curated Default Toxic Pack (`DEFAULT_EXCLUSIONS`):** Running `idr init` automatically seeds 33 common placeholder emails (`noreply@%`, `test@%`, `%@example.com`), bogus phones (`0000000000`, `1111111111`, `1234567890`), and universal sentinel strings (`null`, `n/a`, `unknown`, `anonymous`, `guest`) into `idr_meta.identifier_exclusion`. You can also opt in via `use_default_exclusions: true` in YAML.
+* **Direct Warehouse Table Management Preserved:** Any rows your data engineering team manually `INSERT`s directly into `idr_meta.identifier_exclusion` via SQL are **preserved** across YAML `idr config apply` runs (upsert-only, never destructive `DELETE`).
 
 | Field | Type | Description |
 |---|---|---|
-| `identifier_type` | string | Identifier type to filter (e.g. `email`, `phone`). |
-| `value` | string | Value or pattern to block. |
+| `identifier_type` | string | Identifier type to filter (`email`, `phone`, or `"ANY"` / `"*"` to block across all identifier types). |
+| `value` | string | Value or pattern to block (case-insensitive matching). |
 | `match_type` | string | `"EXACT"` (exact string match) or `"LIKE"` (SQL wildcard matching with `%`). |
 | `reason` | string | Optional description for auditing. |
+
+### 6. `overrides` (Manual Stewardship Overrides)
+Allows data stewards to explicitly force-merge, split, or quarantine specific entities via YAML (`overrides:`) or by inserting directly into `idr_meta.identity_override`:
+
+| `override_type` | Required Keys | Behavior |
+|---|---|---|
+| **`FORCE_LINK`** | `entity_key_a`, `entity_key_b` | Injects an explicit graph edge between `entity_key_a` and `entity_key_b` even if they share zero identifiers. |
+| **`DO_NOT_LINK`** | `entity_key_a`, `entity_key_b` | Removes direct and shared-anchor edges between `entity_key_a` and `entity_key_b` (splits false merges). |
+| **`ISOLATE`** | `entity_key_a` | Quarantines `entity_key_a` into a singleton cluster so it cannot link to any other record. |
 
 ---
 

@@ -21,6 +21,40 @@ except ImportError:
 _SAFE_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 _SAFE_FQN_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*){0,2}$")
 
+# Curated Default Toxic PII Exclusion Pack (prevents Day-1 supernode explosions)
+DEFAULT_EXCLUSIONS: List[Dict[str, str]] = [
+    # Bogus / System Emails
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "test@%", "match_type": "LIKE", "reason": "Default pack: test emails"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "noreply@%", "match_type": "LIKE", "reason": "Default pack: noreply inbox"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "no-reply@%", "match_type": "LIKE", "reason": "Default pack: no-reply inbox"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "noemail@%", "match_type": "LIKE", "reason": "Default pack: placeholder email"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "null@%", "match_type": "LIKE", "reason": "Default pack: null email"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "none@%", "match_type": "LIKE", "reason": "Default pack: none email"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "unknown@%", "match_type": "LIKE", "reason": "Default pack: unknown email"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "na@%", "match_type": "LIKE", "reason": "Default pack: NA email"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "%@example.com", "match_type": "LIKE", "reason": "Default pack: RFC 2606 example domain"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "%@test.com", "match_type": "LIKE", "reason": "Default pack: test domain"},
+    # Bogus / Repeated-Digit Phone Numbers
+    {"identifier_type": "PHONE", "identifier_value_pattern": "0000000000", "match_type": "EXACT", "reason": "Default pack: all-zeros phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "1111111111", "match_type": "EXACT", "reason": "Default pack: repeated-1s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "2222222222", "match_type": "EXACT", "reason": "Default pack: repeated-2s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "3333333333", "match_type": "EXACT", "reason": "Default pack: repeated-3s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "4444444444", "match_type": "EXACT", "reason": "Default pack: repeated-4s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "5555555555", "match_type": "EXACT", "reason": "Default pack: repeated-5s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "6666666666", "match_type": "EXACT", "reason": "Default pack: repeated-6s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "7777777777", "match_type": "EXACT", "reason": "Default pack: repeated-7s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "8888888888", "match_type": "EXACT", "reason": "Default pack: repeated-8s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "9999999999", "match_type": "EXACT", "reason": "Default pack: repeated-9s phone"},
+    {"identifier_type": "PHONE", "identifier_value_pattern": "1234567890", "match_type": "EXACT", "reason": "Default pack: sequential digits phone"},
+    # Universal Sentinel Values across all identifier types
+    {"identifier_type": "ANY", "identifier_value_pattern": "null", "match_type": "EXACT", "reason": "Default pack: literal null"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "none", "match_type": "EXACT", "reason": "Default pack: literal none"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "n/a", "match_type": "EXACT", "reason": "Default pack: literal n/a"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "unknown", "match_type": "EXACT", "reason": "Default pack: literal unknown"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "anonymous", "match_type": "EXACT", "reason": "Default pack: literal anonymous"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "refused", "match_type": "EXACT", "reason": "Default pack: literal refused"},
+]
+
 
 def validate_identifier(value: str, name: str = "identifier") -> str:
     """
@@ -247,7 +281,9 @@ def config_to_sql(config: Dict[str, Any], dialect: str = "duckdb") -> List[str]:
         cols = list(data.keys())
         vals = []
         for v in data.values():
-            if isinstance(v, bool):
+            if v is None:
+                vals.append("NULL")
+            elif isinstance(v, bool):
                 vals.append(str(v).upper())  # TRUE/FALSE
             elif isinstance(v, (int, float)):
                 vals.append(str(v))
@@ -312,6 +348,12 @@ ON {join_cond}
 
     # Source tables
     for src in config.get("sources", []):
+        raw_wm = src.get("watermark_column", "updated_at")
+        wm_col = (
+            None
+            if raw_wm is None or str(raw_wm).strip().lower() in ("", "none", "null")
+            else str(raw_wm).strip()
+        )
         data = {
             "table_id": src["id"],
             "table_fqn": (
@@ -321,7 +363,7 @@ ON {join_cond}
             ),
             "entity_type": src.get("entity_type", "PERSON"),
             "entity_key_expr": src.get("entity_key", "id"),
-            "watermark_column": src.get("watermark_column", "updated_at"),
+            "watermark_column": wm_col,
             "is_active": True,
         }
         statements.append(generate_upsert("idr_meta.source_table", ["table_id"], data))
@@ -335,7 +377,7 @@ ON {join_cond}
         if not raw_ids:
             source_attrs = {a["name"]: a["expr"] for a in src.get("attributes", [])}
             for rule in config.get("rules", []):
-                if rule.get("type") == "EXACT":
+                if rule.get("type", "EXACT") == "EXACT":
                     for key in rule.get("match_keys", []):
                         # If rule key exists in source attributes, treat it as an identifier
                         if key in source_attrs:
@@ -387,47 +429,86 @@ ON {join_cond}
 
     # Rules
     for rule in config.get("rules", []):
+        raw_canon = rule.get("canonicalize", "LOWERCASE")
+        if isinstance(raw_canon, dict):
+            canon_val = raw_canon.get(dialect) or raw_canon.get("default") or "LOWERCASE"
+        else:
+            canon_val = raw_canon
         data = {
             "rule_id": rule["id"],
             "identifier_type": (
                 rule.get("identifier_type")
                 or (
                     rule["match_keys"][0]
-                    if rule.get("type") == "EXACT" and rule.get("match_keys")
+                    if rule.get("match_keys")
                     else rule.get("type", str(rule["id"]).upper())
                 )
             ),
-            "canonicalize": rule.get("canonicalize", "LOWERCASE"),
+            "canonicalize": canon_val,
             "max_group_size": rule.get("max_group_size", 10000),
             "priority": rule.get("priority", 100),
             "is_active": True,
         }
         statements.append(generate_upsert("idr_meta.rule", ["rule_id"], data))
 
-    # Exclusions
-    for excl in config.get("exclusions", []):
+    # Exclusions (merge default pack if requested + explicit exclusions)
+    combined_exclusions = []
+    if config.get("use_default_exclusions", False):
+        combined_exclusions.extend(DEFAULT_EXCLUSIONS)
+    combined_exclusions.extend(config.get("exclusions", []))
+
+    seen_excl = set()
+    for excl in combined_exclusions:
         match_type = excl.get("match_type") or excl.get("match") or "EXACT"
         id_type = excl.get("identifier_type") or excl.get("type")
         val_pattern = excl.get("value") or excl.get("identifier_value_pattern")
         if not id_type or not val_pattern:
             continue
+        dedup_key = (str(id_type).upper(), str(val_pattern).lower())
+        if dedup_key in seen_excl:
+            continue
+        seen_excl.add(dedup_key)
         data = {
             "identifier_type": id_type,
             "identifier_value_pattern": val_pattern,
             "match_type": match_type,
             "reason": excl.get("reason", "Config exclusion"),
         }
-        # Exclusions don't have a rigid PK, usually just INSERT.
-        # But to allow safe re-runs, we can key on type+value.
-        # Wait, no unique constraint on exclusion table in DDL?
-        # Checking DDL... it has no PK.
-        # But we should probably use MERGE to avoid dupes if running multiple times.
-        # Or DELETE + INSERT?
-        # Upsert with type+value is safest.
         statements.append(
             generate_upsert(
                 "idr_meta.identifier_exclusion",
                 ["identifier_type", "identifier_value_pattern"],
+                data,
+            )
+        )
+
+    # Manual Stewardship Overrides (FORCE_LINK, DO_NOT_LINK, ISOLATE)
+    for idx, ov in enumerate(config.get("overrides", [])):
+        ov_type = str(ov.get("type") or ov.get("override_type") or "").upper()
+        if ov_type not in ("FORCE_LINK", "DO_NOT_LINK", "ISOLATE"):
+            raise ValueError(
+                f"Invalid override type '{ov_type}'. Must be FORCE_LINK, DO_NOT_LINK, or ISOLATE."
+            )
+        ekey_a = ov.get("entity_key_a") or ov.get("entity_key")
+        ekey_b = ov.get("entity_key_b") or ("__ISOLATE__" if ov_type == "ISOLATE" else "")
+        if not ekey_a:
+            raise ValueError(f"Override {idx} missing 'entity_key_a' (or 'entity_key')")
+        if ov_type in ("FORCE_LINK", "DO_NOT_LINK") and not ekey_b:
+            raise ValueError(f"Override {idx} ({ov_type}) requires 'entity_key_b'")
+        ov_id = ov.get("id") or ov.get("override_id") or f"ov_{ov_type.lower()}_{idx + 1}"
+        data = {
+            "override_id": str(ov_id),
+            "override_type": ov_type,
+            "entity_key_a": str(ekey_a),
+            "entity_key_b": str(ekey_b),
+            "reason": ov.get("reason", "Manual stewardship override"),
+            "created_by": ov.get("created_by", "config"),
+            "is_active": bool(ov.get("is_active", True)),
+        }
+        statements.append(
+            generate_upsert(
+                "idr_meta.identity_override",
+                ["override_type", "entity_key_a", "entity_key_b"],
                 data,
             )
         )
@@ -462,11 +543,17 @@ ON {join_cond}
         else:
             priority_list_str = str(priority_list)
 
+        raw_recency = rule.get("recency_field")
+        recency_field = (
+            None
+            if raw_recency is None or str(raw_recency).strip().lower() in ("", "none", "null")
+            else str(raw_recency).strip()
+        )
         data = {
             "attribute_name": rule["attribute"],
             "strategy": rule["strategy"],
             "source_priority_list": priority_list_str,
-            "recency_field": rule.get("recency_field"),
+            "recency_field": recency_field,
             "is_active": True,
         }
         statements.append(generate_upsert("idr_meta.survivorship_rule", ["attribute_name"], data))
@@ -555,12 +642,18 @@ def sql_to_config(adapter) -> Dict[str, Any]:
         # Assemble sources
         for src_row in sources_rows:
             tid = src_row["table_id"]
+            raw_wm = src_row.get("watermark_column")
+            clean_wm = (
+                ""
+                if raw_wm is None or str(raw_wm).strip().lower() in ("", "none", "null")
+                else str(raw_wm).strip()
+            )
             source = {
                 "id": tid,
                 "table": src_row["table_fqn"],
                 "entity_type": src_row["entity_type"],
                 "entity_key": src_row["entity_key_expr"],
-                "watermark_column": src_row["watermark_column"],
+                "watermark_column": clean_wm,
                 "identifiers": ids_map.get(tid, []),
                 "attributes": attrs_map.get(tid, []),
             }
@@ -659,8 +752,9 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 "strategy": srv_row["strategy"],
                 "source_priority": p_list,
             }
-            if srv_row.get("recency_field"):
-                rule["recency_field"] = srv_row["recency_field"]
+            rec_f = srv_row.get("recency_field")
+            if rec_f and str(rec_f).strip().lower() not in ("", "none", "null"):
+                rule["recency_field"] = str(rec_f).strip()
 
             config["survivorship"].append(rule)
 
@@ -711,6 +805,31 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             }
             for row in excl_rows
         ]
+
+        # 6. Manual Stewardship Overrides
+        def _query_overrides(adapter):
+            try:
+                return adapter.query("""
+                    SELECT override_id, override_type, entity_key_a, entity_key_b, reason, created_by
+                    FROM idr_meta.identity_override
+                    WHERE is_active = TRUE
+                """)
+            except Exception:
+                return []
+
+        ov_rows = _query_overrides(adapter)
+        if ov_rows:
+            config["overrides"] = [
+                {
+                    "id": row["override_id"],
+                    "type": row["override_type"],
+                    "entity_key_a": row["entity_key_a"],
+                    "entity_key_b": row.get("entity_key_b") or "",
+                    "reason": row.get("reason") or "Manual stewardship override",
+                    "created_by": row.get("created_by") or "config",
+                }
+                for row in ov_rows
+            ]
 
         return config
 
@@ -965,13 +1084,22 @@ def config_to_dbt_seeds(config: Dict[str, Any], output_dir: str) -> Dict[str, st
             }
         )
 
-    # Exclusions
+    # Exclusions (include DEFAULT_EXCLUSIONS when use_default_exclusions is True)
     exclusions_rows: List[Dict[str, Any]] = []
-    for excl in config.get("exclusions", []):
+    combined_excl = []
+    if config.get("use_default_exclusions", False):
+        combined_excl.extend(DEFAULT_EXCLUSIONS)
+    combined_excl.extend(config.get("exclusions", []))
+    seen_dbt_excl = set()
+    for excl in combined_excl:
         id_type = excl.get("identifier_type") or excl.get("type")
         val_pattern = excl.get("value") or excl.get("identifier_value_pattern")
         if not id_type or not val_pattern:
             continue
+        dedup_k = (str(id_type).upper(), str(val_pattern).lower())
+        if dedup_k in seen_dbt_excl:
+            continue
+        seen_dbt_excl.add(dedup_k)
         exclusions_rows.append(
             {
                 "identifier_type": str(id_type).upper(),
@@ -996,6 +1124,40 @@ def config_to_dbt_seeds(config: Dict[str, Any], output_dir: str) -> Dict[str, st
                 "source_priority_list": p_str,
                 "recency_field": rule.get("recency_field") or "record_updated_at",
                 "description": rule.get("description", f"Survivorship for {rule['attribute']}"),
+            }
+        )
+
+    # Manual Stewardship Overrides (FORCE_LINK, DO_NOT_LINK, ISOLATE)
+    override_rows: List[Dict[str, Any]] = []
+    for idx, ov in enumerate(config.get("overrides") or []):
+        ov_type = str(ov.get("type") or ov.get("override_type") or "").upper().strip()
+        ekey_a = ov.get("entity_key_a") or ov.get("entity_key")
+        if not ov_type or not ekey_a:
+            continue
+        ekey_b = ov.get("entity_key_b") or ("__ISOLATE__" if ov_type == "ISOLATE" else "")
+        ov_id = ov.get("id") or ov.get("override_id") or f"ov_{ov_type.lower()}_{idx + 1}"
+        override_rows.append(
+            {
+                "override_id": str(ov_id),
+                "override_type": ov_type,
+                "entity_key_a": str(ekey_a),
+                "entity_key_b": str(ekey_b),
+                "reason": ov.get("reason", "Manual stewardship override"),
+                "created_by": ov.get("created_by", "config"),
+                "is_active": "true" if ov.get("is_active", True) else "false",
+            }
+        )
+    if not override_rows:
+        # Include an inactive placeholder row so dbt seed CSV type inference succeeds on all warehouses
+        override_rows.append(
+            {
+                "override_id": "ov_sample_1",
+                "override_type": "FORCE_LINK",
+                "entity_key_a": "crm:1",
+                "entity_key_b": "crm:1",
+                "reason": "Sample inactive stewardship override",
+                "created_by": "config",
+                "is_active": "false",
             }
         )
 
@@ -1046,6 +1208,19 @@ def config_to_dbt_seeds(config: Dict[str, Any], output_dir: str) -> Dict[str, st
         "idr_survivorship_rules.csv",
         ["attribute_name", "strategy", "source_priority_list", "recency_field", "description"],
         surv_rows,
+    )
+    _write_csv(
+        "idr_overrides.csv",
+        [
+            "override_id",
+            "override_type",
+            "entity_key_a",
+            "entity_key_b",
+            "reason",
+            "created_by",
+            "is_active",
+        ],
+        override_rows,
     )
 
     return written_files

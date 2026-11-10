@@ -96,7 +96,21 @@ class PreflightStage(BaseStage):
                 pass  # Skip validation if we can't get columns
 
     def _ensure_schema_upgrades(self) -> None:
-        """Apply necessary schema updates for existing deployments."""
+        """Apply necessary schema updates and ensure all system tables exist for existing deployments."""
+        try:
+            from ..schema_defs import SYSTEM_TABLES
+            from ..schema_manager import SchemaManager
+
+            sm = SchemaManager(self.adapter)
+            for table_def in SYSTEM_TABLES:
+                try:
+                    if not self.adapter.table_exists(table_def.fqn):
+                        sm._create_table(table_def)
+                except Exception:
+                    pass
+        except Exception as e:
+            self.logger.warning(f"System table check failed: {e}")
+
         try:
             # check if config_hash exists in run_history
             columns = self.adapter.get_table_columns("idr_out.run_history")

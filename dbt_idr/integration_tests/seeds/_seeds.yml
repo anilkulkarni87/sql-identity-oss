@@ -43,3 +43,14 @@ seeds:
     description: "IDR attribute mappings for golden profiles"
   - name: idr_survivorship_rules
     description: "IDR survivorship rules for golden profiles"
+  - name: idr_overrides
+    description: "IDR manual stewardship overrides (FORCE_LINK, DO_NOT_LINK, ISOLATE)"
+    config:
+      column_types:
+        override_id: varchar
+        override_type: varchar
+        entity_key_a: varchar
+        entity_key_b: varchar
+        reason: varchar
+        created_by: varchar
+        is_active: boolean

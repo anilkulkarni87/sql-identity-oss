@@ -199,8 +199,8 @@ class IDRConfig(BaseModel):
     fuzzy_rules: Optional[List[Dict[str, Any]]] = None
     survivorship: Optional[List[Dict[str, Any]]] = None
     exclusions: Optional[List[Dict[str, Any]]] = None
-    # Add other fields as loose dicts to avoid strict validation errors
-    # if the stored JSON varies slightly
+    overrides: Optional[List[Dict[str, Any]]] = None
+    use_default_exclusions: Optional[bool] = False
 
 
 @router.get("/config", response_model=IDRConfig)
@@ -262,6 +262,8 @@ def get_current_config(current_user: Dict[str, Any] = Depends(get_current_user))
                     config_dict["rules"] = parsed_rules.get("rules", [])
                     config_dict["fuzzy_rules"] = parsed_rules.get("fuzzy_rules", [])
                     config_dict["exclusions"] = parsed_rules.get("exclusions", [])
+                    config_dict["overrides"] = parsed_rules.get("overrides", [])
+                    config_dict["use_default_exclusions"] = parsed_rules.get("use_default_exclusions", False)
                 else:
                     config_dict["rules"] = parsed_rules
 
@@ -325,7 +327,8 @@ async def save_config(
         schema_manager = SchemaManager(adapter)
         schema_manager.initialize(reset=False)
 
-        # 2. Clear existing active metadata rows so deleted rules/sources don't linger
+        # 2. Clear existing active metadata rows so deleted rules/sources don't linger,
+        # while preserving any exclusions or overrides manually inserted via SQL!
         for meta_table in (
             "idr_meta.identifier_mapping",
             "idr_meta.entity_attribute_mapping",
@@ -333,13 +336,26 @@ async def save_config(
             "idr_meta.rule",
             "idr_meta.fuzzy_rule",
             "idr_meta.survivorship_rule",
-            "idr_meta.identifier_exclusion",
         ):
             try:
                 if adapter.table_exists(meta_table):
                     adapter.execute(f"DELETE FROM {meta_table} WHERE 1=1")
             except Exception:
                 pass
+
+        try:
+            if adapter.table_exists("idr_meta.identifier_exclusion"):
+                adapter.execute(
+                    "DELETE FROM idr_meta.identifier_exclusion "
+                    "WHERE COALESCE(reason, '') IN ('UI exclusion', 'Config exclusion')"
+                )
+            if adapter.table_exists("idr_meta.identity_override"):
+                adapter.execute(
+                    "DELETE FROM idr_meta.identity_override "
+                    "WHERE COALESCE(created_by, 'config') IN ('config', 'ui')"
+                )
+        except Exception:
+            pass
 
         # 3. Generate SQL from config
         statements = config_to_sql(request.config, dialect=adapter.dialect)
@@ -355,6 +371,8 @@ async def save_config(
                 "rules": request.config.get("rules", []),
                 "fuzzy_rules": request.config.get("fuzzy_rules", []),
                 "exclusions": request.config.get("exclusions", []),
+                "overrides": request.config.get("overrides", []),
+                "use_default_exclusions": bool(request.config.get("use_default_exclusions", False)),
             }
         )
         mappings_json = json.dumps(
@@ -415,19 +433,80 @@ class RunRequest(BaseModel):
     dry_run: bool = False
 
 
+_ACTIVE_RUN_PROGRESS: Dict[str, Dict[str, Any]] = {}
+
+
+def _build_initial_progress(mode: str, dry_run: bool, strict: bool) -> Dict[str, Any]:
+    import time
+
+    stage_defs = [
+        {"name": "preflight", "label": "Preflight & Schema Check"},
+        {"name": "entity_extraction", "label": "Entity Extraction"},
+        {"name": "identifier_extraction", "label": "Identifier Extraction"},
+        {"name": "attribute_extraction", "label": "Attribute Extraction"},
+        {"name": "edge_building", "label": "Edge Building"},
+        {"name": "label_propagation", "label": "Label Propagation (Graph)"},
+        *([] if strict else [{"name": "fuzzy_matching", "label": "Fuzzy Matching"}]),
+        {
+            "name": "dry_run_analysis" if dry_run else "output_generation",
+            "label": "Dry Run Analysis" if dry_run else "Output & Golden Profiles",
+        },
+    ]
+    return {
+        "run_id": None,
+        "status": "RUNNING",
+        "mode": mode,
+        "dry_run": dry_run,
+        "started_epoch": time.time(),
+        "elapsed_seconds": 0.0,
+        "current_stage": "preflight",
+        "current_detail": "Initializing pipeline...",
+        "stages": [
+            {
+                "name": s["name"],
+                "label": s["label"],
+                "order": idx + 1,
+                "status": "pending",
+                "duration_seconds": None,
+                "rows_affected": None,
+                "detail": None,
+            }
+            for idx, s in enumerate(stage_defs)
+        ],
+    }
+
+
+@router.get("/run/progress")
+async def get_run_progress(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Return live stage-by-stage progress for the active or most recent pipeline run."""
+    import time
+
+    user_key = get_user_key(current_user)
+    prog = _ACTIVE_RUN_PROGRESS.get(user_key)
+    if not prog:
+        return {"status": "IDLE", "stages": []}
+
+    snapshot = dict(prog)
+    if snapshot.get("status") == "RUNNING" and snapshot.get("started_epoch"):
+        snapshot["elapsed_seconds"] = round(time.time() - snapshot["started_epoch"], 1)
+    return snapshot
+
+
 @router.post("/run")
 async def run_pipeline(
     request: RunRequest, current_user: Dict[str, Any] = Depends(require_write_access)
 ):
-    """Trigger the IDR pipeline."""
-    adapter, _ = _require_user_adapter(current_user)
+    """Trigger the IDR pipeline with live stage progress tracking."""
+    import asyncio
+    import time
+
+    adapter, user_key = _require_user_adapter(current_user)
 
     try:
         from dataclasses import asdict
 
         from idr_core.runner import IDRRunner, RunConfig
 
-        runner = IDRRunner(adapter)
         config = RunConfig(
             run_mode=request.mode,
             strict=request.strict,
@@ -435,7 +514,54 @@ async def run_pipeline(
             dry_run=request.dry_run,
         )
 
-        result = runner.run(config)
+        progress_state = _build_initial_progress(config.run_mode, config.dry_run, config.strict)
+        _ACTIVE_RUN_PROGRESS[user_key] = progress_state
+
+        def _on_progress(evt: Dict[str, Any]) -> None:
+            etype = evt.get("event")
+            if evt.get("run_id"):
+                progress_state["run_id"] = evt["run_id"]
+            progress_state["elapsed_seconds"] = round(
+                time.time() - progress_state["started_epoch"], 1
+            )
+            if etype == "stage_start":
+                st_name = evt.get("stage")
+                progress_state["current_stage"] = st_name
+                progress_state["current_detail"] = f"Running {st_name.replace('_', ' ')}..."
+                for st in progress_state["stages"]:
+                    if st["name"] == st_name:
+                        st["status"] = "running"
+                        st["started_epoch"] = time.time()
+            elif etype == "stage_progress":
+                st_name = evt.get("stage")
+                it = evt.get("iteration")
+                max_it = evt.get("max_iters")
+                chg = evt.get("changes", 0)
+                detail = f"Iteration {it}/{max_it} ({chg:,} label updates)"
+                progress_state["current_detail"] = detail
+                for st in progress_state["stages"]:
+                    if st["name"] == st_name:
+                        st["detail"] = detail
+            elif etype == "stage_end":
+                st_name = evt.get("stage")
+                for st in progress_state["stages"]:
+                    if st["name"] == st_name:
+                        st["status"] = "completed"
+                        st["duration_seconds"] = evt.get("duration_seconds", 0.0)
+                        st["rows_affected"] = evt.get("rows_affected", 0)
+            elif etype == "run_complete":
+                progress_state["status"] = evt.get("status", "SUCCESS")
+                progress_state["elapsed_seconds"] = evt.get(
+                    "duration_seconds", progress_state["elapsed_seconds"]
+                )
+                progress_state["current_stage"] = None
+                progress_state["current_detail"] = f"Completed ({progress_state['status']})"
+                for st in progress_state["stages"]:
+                    if st["status"] == "pending":
+                        st["status"] = "skipped"
+
+        runner = IDRRunner(adapter, progress_callback=_on_progress)
+        result = await asyncio.to_thread(runner.run, config)
         res_dict = asdict(result)
 
         # Record Prometheus pipeline metrics

@@ -259,6 +259,40 @@ CREATE TABLE IF NOT EXISTS idr_out.config_snapshot (
   PRIMARY KEY (config_hash) NOT ENFORCED
 );
 
+CREATE TABLE IF NOT EXISTS idr_meta.identity_override (
+  override_type STRING,
+  entity_key_a STRING,
+  entity_key_b STRING,
+  override_id STRING,
+  reason STRING,
+  created_by STRING,
+  is_active BOOLEAN,
+  created_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS idr_meta.privacy_audit_log (
+  request_id STRING,
+  search_type STRING,
+  target_hash STRING,
+  resolved_id_hash STRING,
+  entities_purged BIGINT,
+  edges_purged BIGINT,
+  profiles_purged BIGINT,
+  status STRING,
+  requested_by STRING,
+  reason STRING,
+  executed_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS idr_out.resolved_id_crosswalk (
+  previous_resolved_id STRING,
+  current_resolved_id STRING,
+  change_type STRING,
+  entities_moved BIGINT,
+  run_id STRING,
+  updated_at TIMESTAMP
+);
+
 -- ==========================================
 -- Default Configuration
 -- ==========================================

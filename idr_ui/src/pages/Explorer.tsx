@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import IdentityGraph, { GraphNodeData, GraphEdgeData, GraphLayoutName } from '../components/IdentityGraph'
 import {
     Search, X, Filter, Sparkles, Check, Copy, Eye, EyeOff,
-    Network, Hash
+    Network, Hash, ShieldAlert, Trash2, GitBranch
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useDebounce } from '../utils/useDebounce'
@@ -32,6 +32,9 @@ export default function Explorer() {
     const [attrFilter, setAttrFilter] = useState('')
     const [edgeSearch, setEdgeSearch] = useState('')
     const [copiedKey, setCopiedKey] = useState<string | null>(null)
+    const [actionNotice, setActionNotice] = useState<string | null>(null)
+    const [rtbfPreview, setRtbfPreview] = useState<any | null>(null)
+    const [rtbfReceipt, setRtbfReceipt] = useState<any | null>(null)
 
     const { data: searchResults, isLoading: searching } = useQuery({
         queryKey: ['search', debouncedSearchQuery],
@@ -258,6 +261,60 @@ export default function Explorer() {
         setTimeout(() => setCopiedKey(null), 2000)
     }
 
+    const handleStewardshipOverride = async (
+        overrideType: 'DO_NOT_LINK' | 'ISOLATE',
+        entityKeyA: string,
+        entityKeyB?: string
+    ) => {
+        try {
+            await api.manageOverride({
+                action: 'add',
+                override_type: overrideType,
+                entity_key_a: entityKeyA,
+                entity_key_b: entityKeyB || '__ISOLATE__',
+                reason: 'Added from Identity Graph Explorer'
+            })
+            setActionNotice(
+                overrideType === 'ISOLATE'
+                    ? `Added ISOLATE override for ${entityKeyA}. It will be quarantined on the next pipeline run.`
+                    : `Added DO_NOT_LINK override between ${entityKeyA} and ${entityKeyB}. It will take effect on the next pipeline run.`
+            )
+            setTimeout(() => setActionNotice(null), 6000)
+        } catch (err: any) {
+            setActionNotice(`Failed to save override: ${err?.message || err}`)
+        }
+    }
+
+    const handlePreviewRtbf = async (resolvedId: string) => {
+        try {
+            const res = await api.privacyForget({
+                resolved_id: resolvedId,
+                dry_run: true,
+                reason: 'GDPR_CCPA_RTBF'
+            })
+            setRtbfPreview(res)
+            setRtbfReceipt(null)
+        } catch (err: any) {
+            setActionNotice(`RTBF preview failed: ${err?.message || err}`)
+        }
+    }
+
+    const handleConfirmRtbf = async (resolvedId: string) => {
+        try {
+            const res = await api.privacyForget({
+                resolved_id: resolvedId,
+                dry_run: false,
+                reason: 'GDPR_CCPA_RTBF'
+            })
+            setRtbfPreview(null)
+            setRtbfReceipt(res)
+            setSelectedCluster(null)
+            setSelectedNode(null)
+        } catch (err: any) {
+            setActionNotice(`RTBF purge failed: ${err?.message || err}`)
+        }
+    }
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -348,8 +405,81 @@ export default function Explorer() {
             )}
 
             {/* Selected Cluster Workspace */}
+            {actionNotice && (
+                <div className="bg-emerald-950/60 border border-emerald-700/80 text-emerald-200 px-4 py-3 rounded-xl text-xs flex items-center justify-between">
+                    <span>{actionNotice}</span>
+                    <button onClick={() => setActionNotice(null)} className="text-emerald-400 hover:text-white">×</button>
+                </div>
+            )}
+
+            {rtbfReceipt && (
+                <div className="bg-rose-950/40 border border-rose-700/70 text-rose-200 p-4 rounded-xl text-xs space-y-2">
+                    <div className="flex items-center justify-between font-semibold text-sm text-rose-300">
+                        <span>GDPR / CCPA Right-to-be-Forgotten Purge Complete ({rtbfReceipt.request_id})</span>
+                        <button onClick={() => setRtbfReceipt(null)} className="text-rose-400 hover:text-white">×</button>
+                    </div>
+                    <p>
+                        Purged <strong>{rtbfReceipt.entities_purged}</strong> entities and <strong>{rtbfReceipt.edges_purged}</strong> edges across <code>idr_out.*</code> and <code>idr_work.*</code>.
+                    </p>
+                    <p className="font-mono text-[11px] text-rose-300/80">
+                        Zero-PII Audit SHA-256 Receipt: {rtbfReceipt.target_hash}
+                    </p>
+                </div>
+            )}
+
             {selectedCluster && clusterDetail && (
                 <div className="space-y-6">
+                    {/* Persistent resolved_id Crosswalk History Banner */}
+                    {clusterDetail.crosswalk_history && clusterDetail.crosswalk_history.length > 0 && (
+                        <div className="bg-indigo-950/40 border border-indigo-700/60 rounded-xl p-3.5 text-xs text-indigo-200 space-y-1.5">
+                            <div className="flex items-center gap-2 font-semibold text-indigo-300">
+                                <GitBranch className="w-4 h-4" />
+                                <span>Persistent Cluster ID Crosswalk Lineage (idr_out.resolved_id_crosswalk)</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2 pt-1">
+                                {clusterDetail.crosswalk_history.map((cw, idx) => (
+                                    <span key={idx} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-900/80 border border-indigo-800/60 font-mono text-[11px]">
+                                        <span className="text-gray-400">{cw.previous_resolved_id}</span>
+                                        <span className="text-indigo-400">→</span>
+                                        <span className="text-white font-semibold">{cw.current_resolved_id}</span>
+                                        <span className="px-1.5 py-0.2 rounded bg-indigo-900/60 text-indigo-300 text-[10px]">
+                                            {cw.change_type} ({cw.entities_moved} entities)
+                                        </span>
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* RTBF Preview Confirmation Card */}
+                    {rtbfPreview && (
+                        <div className="bg-rose-950/60 border border-rose-600/80 rounded-xl p-4 text-xs text-rose-100 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <span className="font-semibold text-sm text-rose-300 flex items-center gap-2">
+                                    <Trash2 className="w-4 h-4" />
+                                    Confirm GDPR / CCPA Right-to-be-Forgotten Cascading Purge
+                                </span>
+                                <button onClick={() => setRtbfPreview(null)} className="text-rose-300 hover:text-white">Cancel</button>
+                            </div>
+                            <p>
+                                This will permanently purge cluster <code className="font-mono bg-gray-900 px-1.5 py-0.5 rounded">{selectedCluster}</code> including <strong>{rtbfPreview.entities_purged}</strong> linked entities ({rtbfPreview.entity_keys?.join(', ')}) and <strong>{rtbfPreview.edges_purged}</strong> graph edges across all IDR output & staging tables, and record a SHA-256 audit receipt in <code className="font-mono">idr_meta.privacy_audit_log</code>.
+                            </p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleConfirmRtbf(selectedCluster)}
+                                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-lg"
+                                >
+                                    Confirm & Purge Identity Graph
+                                </button>
+                                <button
+                                    onClick={() => setRtbfPreview(null)}
+                                    className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg border border-gray-600"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     {/* Unified Golden Profile Section */}
                     {clusterDetail.golden_profile && Object.keys(clusterDetail.golden_profile).length > 0 && (
                         <div className="bg-gray-800/90 rounded-xl p-5 border border-blue-500/30 shadow-xl space-y-4">
@@ -510,9 +640,19 @@ export default function Explorer() {
                                             {clusterDetail.resolved_id}
                                         </span>
                                     </div>
-                                    <span className="text-xs text-gray-400">
-                                        {graphEdges.length} connections
-                                    </span>
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-xs text-gray-400">
+                                            {graphEdges.length} connections
+                                        </span>
+                                        <button
+                                            onClick={() => handlePreviewRtbf(clusterDetail.resolved_id)}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 border border-rose-800/70 transition-colors"
+                                            title="GDPR / CCPA Right to be Forgotten cascading purge"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                            <span>GDPR Forget</span>
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="h-[520px]">
@@ -543,13 +683,23 @@ export default function Explorer() {
                                                 {selectedNode.source_id}
                                             </span>
                                         </div>
-                                        <button
-                                            onClick={() => setSelectedNode(null)}
-                                            className="text-xs text-gray-400 hover:text-white flex items-center gap-1"
-                                        >
-                                            <X className="w-3.5 h-3.5" />
-                                            Deselect
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => handleStewardshipOverride('ISOLATE', selectedNode.id)}
+                                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 border border-amber-800/70"
+                                                title="Quarantine this entity into a singleton on next run (ISOLATE)"
+                                            >
+                                                <ShieldAlert className="w-3 h-3" />
+                                                <span>Isolate Entity</span>
+                                            </button>
+                                            <button
+                                                onClick={() => setSelectedNode(null)}
+                                                className="text-xs text-gray-400 hover:text-white flex items-center gap-1"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                                Deselect
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
@@ -657,6 +807,13 @@ export default function Explorer() {
                                                     <span className="font-mono text-[10px] text-gray-400">
                                                         Rule: {edge.rule_id || 'EXACT'}
                                                     </span>
+                                                    <button
+                                                        onClick={() => handleStewardshipOverride('DO_NOT_LINK', edge.left_entity_key, edge.right_entity_key)}
+                                                        className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 hover:bg-rose-950/60 text-gray-400 hover:text-rose-300 border border-gray-700 hover:border-rose-800/60 transition-colors"
+                                                        title="Add DO_NOT_LINK override between these two entities"
+                                                    >
+                                                        Unlink Pair
+                                                    </button>
                                                 </div>
 
                                                 <p className="font-mono text-xs text-gray-200 font-medium truncate bg-gray-800/60 px-2 py-1 rounded border border-gray-700/40">

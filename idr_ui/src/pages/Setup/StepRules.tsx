@@ -1,7 +1,19 @@
 import { useState, useEffect } from 'react';
-import { GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2, ShieldAlert } from "lucide-react";
-import { ExclusionRule, IDRConfig, MatchingRule } from '../../types';
+import { GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2, ShieldAlert, Link2 } from "lucide-react";
+import { ExclusionRule, IDRConfig, MatchingRule, OverrideRule } from '../../types';
 import { api } from '../../api/client';
+
+const BUILTIN_CANONICALIZERS = [
+    'EMAIL_STANDARD',
+    'EMAIL_STRIP_PLUS',
+    'PHONE_US_10',
+    'PHONE_DIGITS',
+    'ALPHANUMERIC_UPPER',
+    'LOWERCASE',
+    'UPPERCASE',
+    'EXACT',
+    'NONE',
+];
 
 interface StepRulesProps {
     config: IDRConfig;
@@ -20,9 +32,15 @@ interface FuzzyTemplate {
 export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     const [rules, setRules] = useState<MatchingRule[]>([]);
     const [exclusions, setExclusions] = useState<ExclusionRule[]>(config.exclusions || []);
+    const [useDefaultExclusions, setUseDefaultExclusions] = useState<boolean>(!!config.use_default_exclusions);
     const [newExclType, setNewExclType] = useState<string>('');
     const [newExclValue, setNewExclValue] = useState<string>('');
     const [newExclMatch, setNewExclMatch] = useState<'EXACT' | 'LIKE'>('EXACT');
+    const [overrides, setOverrides] = useState<OverrideRule[]>(config.overrides || []);
+    const [newOvType, setNewOvType] = useState<'FORCE_LINK' | 'DO_NOT_LINK' | 'ISOLATE'>('DO_NOT_LINK');
+    const [newOvKeyA, setNewOvKeyA] = useState<string>('');
+    const [newOvKeyB, setNewOvKeyB] = useState<string>('');
+    const [newOvReason, setNewOvReason] = useState<string>('');
     const [availableTypes, setAvailableTypes] = useState<string[]>([]);
     const [availableAttributes, setAvailableAttributes] = useState<string[]>([]);
     const [fuzzyTemplates, setFuzzyTemplates] = useState<FuzzyTemplate[]>([]);
@@ -38,6 +56,8 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
             setRules(combined);
         }
         setExclusions(config.exclusions || []);
+        setUseDefaultExclusions(!!config.use_default_exclusions);
+        setOverrides(config.overrides || []);
 
         // Available match keys & attributes
         const typeSet = new Set<string>();
@@ -89,12 +109,18 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     };
 
     const addExactRule = (type: string) => {
+        const lowerType = type.toLowerCase();
+        const defaultCanon = lowerType.includes('email')
+            ? 'EMAIL_STANDARD'
+            : lowerType.includes('phone')
+            ? 'PHONE_US_10'
+            : 'LOWERCASE';
         const newRule: MatchingRule = {
             id: generateId(),
             type: 'EXACT',
             match_keys: [type],
             priority: rules.length + 1,
-            canonicalize: 'LOWERCASE'
+            canonicalize: defaultCanon
         };
         updatePriorities([...rules, newRule]);
     };
@@ -159,6 +185,29 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
         setExclusions(prev => prev.filter((_, i) => i !== idx));
     };
 
+    const addOverride = () => {
+        const ka = newOvKeyA.trim();
+        const kb = newOvKeyB.trim();
+        if (!ka) return;
+        if (newOvType !== 'ISOLATE' && !kb) return;
+        setOverrides(prev => [
+            ...prev,
+            {
+                override_type: newOvType,
+                entity_key_a: ka,
+                entity_key_b: newOvType === 'ISOLATE' ? '__ISOLATE__' : kb,
+                reason: newOvReason.trim() || 'UI stewardship override'
+            }
+        ]);
+        setNewOvKeyA('');
+        setNewOvKeyB('');
+        setNewOvReason('');
+    };
+
+    const removeOverride = (idx: number) => {
+        setOverrides(prev => prev.filter((_, i) => i !== idx));
+    };
+
     const generateId = () => Math.floor(Math.random() * 1000000);
 
     const handleNext = () => {
@@ -172,7 +221,14 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
             score_expr: resolveTemplateSql(r.score_expr || '', r.fuzzy_attribute || availableAttributes[0] || 'first_name')
         }));
 
-        onNext({ ...config, rules: exact, fuzzy_rules: fuzzy, exclusions });
+        onNext({
+            ...config,
+            rules: exact,
+            fuzzy_rules: fuzzy,
+            exclusions,
+            overrides,
+            use_default_exclusions: useDefaultExclusions,
+        });
     };
 
     const btnClass = "px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50";
@@ -214,18 +270,49 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                 </div>
 
                                 {rule.type === 'EXACT' ? (
-                                    <div className="flex items-center gap-2">
-                                        <label className="text-xs text-gray-500">Normalization:</label>
-                                        <select
-                                            value={rule.canonicalize || 'LOWERCASE'}
-                                            onChange={(e) => updateRuleField(idx, 'canonicalize', e.target.value)}
-                                            className="bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500"
-                                            onClick={(e) => e.stopPropagation()}
-                                        >
-                                            <option value="LOWERCASE">Lowercase</option>
-                                            <option value="UPPERCASE">Uppercase</option>
-                                            <option value="EXACT">None</option>
-                                        </select>
+                                    <div className="space-y-2">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <label className="text-xs text-gray-500">Normalization:</label>
+                                            <select
+                                                value={
+                                                    BUILTIN_CANONICALIZERS.includes((rule.canonicalize || 'LOWERCASE').toUpperCase())
+                                                        ? (rule.canonicalize || 'LOWERCASE').toUpperCase()
+                                                        : 'CUSTOM_SQL'
+                                                }
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    if (val === 'CUSTOM_SQL') {
+                                                        updateRuleField(idx, 'canonicalize', 'LOWER(TRIM({val}))');
+                                                    } else {
+                                                        updateRuleField(idx, 'canonicalize', val);
+                                                    }
+                                                }}
+                                                className="bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500"
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                <option value="EMAIL_STANDARD">Email Standard (Trim + Lowercase, keeps +tag)</option>
+                                                <option value="EMAIL_STRIP_PLUS">Email Strip +Tag (user+tag@domain → user@domain)</option>
+                                                <option value="PHONE_US_10">Phone US 10-Digit (Strips +1 & punctuation)</option>
+                                                <option value="PHONE_DIGITS">Phone Digits Only (Strips non-digits)</option>
+                                                <option value="ALPHANUMERIC_UPPER">Alphanumeric Upper (Strips spaces/hyphens)</option>
+                                                <option value="LOWERCASE">Lowercase</option>
+                                                <option value="UPPERCASE">Uppercase</option>
+                                                <option value="EXACT">Exact / None</option>
+                                                <option value="CUSTOM_SQL">Custom Warehouse SQL (&#123;val&#125;)...</option>
+                                            </select>
+                                        </div>
+                                        {!BUILTIN_CANONICALIZERS.includes((rule.canonicalize || 'LOWERCASE').toUpperCase()) && (
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[11px] font-mono text-blue-400">SQL Expression:</span>
+                                                <input
+                                                    type="text"
+                                                    value={rule.canonicalize || ''}
+                                                    onChange={(e) => updateRuleField(idx, 'canonicalize', e.target.value)}
+                                                    placeholder="e.g. LPAD(LTRIM(TRIM({val}), '0'), 8, '0')"
+                                                    className="flex-1 bg-gray-900 border border-blue-700/60 text-xs font-mono text-gray-200 rounded px-2.5 py-1 focus:outline-none focus:border-blue-400"
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-3 gap-3 bg-gray-900/50 p-3 rounded border border-gray-700">
@@ -313,19 +400,31 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
 
                 {/* Interactive Identifier Exclusions Editor */}
                 <div className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 mt-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                        <ShieldAlert className="w-4 h-4 text-amber-400" />
-                        <h4 className="font-medium text-sm text-gray-200">Identifier Exclusions (Blocklist)</h4>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <ShieldAlert className="w-4 h-4 text-amber-400" />
+                            <h4 className="font-medium text-sm text-gray-200">Identifier Exclusions (Blocklist)</h4>
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-xs text-amber-300 cursor-pointer bg-amber-950/40 border border-amber-800/60 px-2.5 py-1 rounded-md">
+                            <input
+                                type="checkbox"
+                                checked={useDefaultExclusions}
+                                onChange={(e) => setUseDefaultExclusions(e.target.checked)}
+                                className="accent-amber-500 rounded"
+                            />
+                            <span>Include Curated Default Toxic Pack (33 rules: noreply@%, 0000000000, N/A, etc.)</span>
+                        </label>
                     </div>
                     <p className="text-xs text-gray-400">
-                        Prevent placeholder values (e.g. <code className="bg-gray-900 px-1 py-0.5 rounded">test@test.com</code>, <code className="bg-gray-900 px-1 py-0.5 rounded">000-000-0000</code>) from linking unrelated entities.
+                        Prevent placeholder values (e.g. <code className="bg-gray-900 px-1 py-0.5 rounded">test@test.com</code>, <code className="bg-gray-900 px-1 py-0.5 rounded">0000000000</code>) from linking unrelated entities. Rows manually inserted into <code className="bg-gray-900 px-1 py-0.5 rounded">idr_meta.identifier_exclusion</code> via SQL are always preserved.
                     </p>
                     <div className="flex flex-wrap gap-2">
                         <select
-                            value={newExclType || availableTypes[0] || ''}
+                            value={newExclType || availableTypes[0] || 'ANY'}
                             onChange={(e) => setNewExclType(e.target.value)}
                             className="bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-2 py-1.5"
                         >
+                            <option value="ANY">ANY (All Types)</option>
                             {availableTypes.map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
                         <select
@@ -359,11 +458,89 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                     className="inline-flex items-center gap-2 px-2.5 py-1 bg-gray-900 border border-gray-700 rounded-full text-xs text-gray-300"
                                 >
                                     <span className="text-amber-400 font-semibold">{ex.type}</span>
-                                    <span className="text-gray-500">({ex.match || 'EXACT'})</span>
+                                    <span className="text-gray-500">({ex.match || ex.match_type || 'EXACT'})</span>
                                     <span className="font-mono">{ex.value}</span>
                                     <button
                                         type="button"
                                         onClick={() => removeExclusion(i)}
+                                        className="text-gray-500 hover:text-red-400"
+                                    >
+                                        ×
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Manual Stewardship Overrides Editor */}
+                <div className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 mt-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <Link2 className="w-4 h-4 text-emerald-400" />
+                        <h4 className="font-medium text-sm text-gray-200">Manual Stewardship Overrides (FORCE_LINK / DO_NOT_LINK / ISOLATE)</h4>
+                    </div>
+                    <p className="text-xs text-gray-400">
+                        Force-merge specific entity keys (<code className="bg-gray-900 px-1 py-0.5 rounded">FORCE_LINK</code>), block false merges (<code className="bg-gray-900 px-1 py-0.5 rounded">DO_NOT_LINK</code>), or quarantine a single contaminated record (<code className="bg-gray-900 px-1 py-0.5 rounded">ISOLATE</code>).
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                        <select
+                            value={newOvType}
+                            onChange={(e) => setNewOvType(e.target.value as 'FORCE_LINK' | 'DO_NOT_LINK' | 'ISOLATE')}
+                            className="bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-2 py-1.5"
+                        >
+                            <option value="DO_NOT_LINK">DO_NOT_LINK (Block Pair)</option>
+                            <option value="FORCE_LINK">FORCE_LINK (Merge Pair)</option>
+                            <option value="ISOLATE">ISOLATE (Quarantine Entity)</option>
+                        </select>
+                        <input
+                            type="text"
+                            value={newOvKeyA}
+                            onChange={(e) => setNewOvKeyA(e.target.value)}
+                            placeholder="Entity Key A (e.g. crm:101)"
+                            className="min-w-[150px] bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-3 py-1.5 font-mono"
+                        />
+                        {newOvType !== 'ISOLATE' && (
+                            <input
+                                type="text"
+                                value={newOvKeyB}
+                                onChange={(e) => setNewOvKeyB(e.target.value)}
+                                placeholder="Entity Key B (e.g. orders:502)"
+                                className="min-w-[150px] bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-3 py-1.5 font-mono"
+                            />
+                        )}
+                        <input
+                            type="text"
+                            value={newOvReason}
+                            onChange={(e) => setNewOvReason(e.target.value)}
+                            placeholder="Reason (optional)"
+                            className="flex-1 min-w-[140px] bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-3 py-1.5"
+                        />
+                        <button
+                            type="button"
+                            onClick={addOverride}
+                            className="px-3 py-1.5 bg-emerald-600/30 border border-emerald-600/60 hover:bg-emerald-600/50 text-emerald-200 rounded text-xs font-medium"
+                        >
+                            + Add Override
+                        </button>
+                    </div>
+                    {overrides.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-2">
+                            {overrides.map((ov, i) => (
+                                <span
+                                    key={`${ov.override_type}-${ov.entity_key_a}-${ov.entity_key_b}-${i}`}
+                                    className="inline-flex items-center gap-2 px-2.5 py-1 bg-gray-900 border border-gray-700 rounded-full text-xs text-gray-300"
+                                >
+                                    <span className="text-emerald-400 font-semibold">{ov.override_type}</span>
+                                    <span className="font-mono">{ov.entity_key_a}</span>
+                                    {ov.override_type !== 'ISOLATE' && ov.entity_key_b && (
+                                        <>
+                                            <span className="text-gray-500">↔</span>
+                                            <span className="font-mono">{ov.entity_key_b}</span>
+                                        </>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => removeOverride(i)}
                                         className="text-gray-500 hover:text-red-400"
                                     >
                                         ×

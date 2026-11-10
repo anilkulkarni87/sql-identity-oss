@@ -15,7 +15,9 @@ Usage:
 
 __version__ = "0.6.1"
 
-from .config import load_config, validate_config
+from .canonicalizers import list_canonicalizers, register_canonicalizer
+from .config import DEFAULT_EXCLUSIONS, load_config, validate_config
+from .privacy import PrivacyManager
 from .runner import IDRRunner, RunConfig, RunResult
 
 __all__ = [
@@ -24,5 +26,9 @@ __all__ = [
     "RunResult",
     "load_config",
     "validate_config",
+    "register_canonicalizer",
+    "list_canonicalizers",
+    "DEFAULT_EXCLUSIONS",
+    "PrivacyManager",
     "__version__",
 ]
