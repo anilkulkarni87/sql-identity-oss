@@ -1,0 +1,1070 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Production-grade deterministic & probabilistic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks">
+      
+      
+      
+        <link rel="canonical" href="https://anilkulkarni87.github.io/sql-identity-oss/configuration-and-governance/">
+      
+      
+        <link rel="prev" href="../concepts-and-architecture/">
+      
+      
+        <link rel="next" href="../interfaces-and-dbt/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.47">
+    
+    
+      
+        <title>Configuration, Canonicalizers & Governance - SQL Identity Resolution</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.6f8fc17f.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration-canonicalizers-enterprise-governance" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="SQL Identity Resolution" class="md-header__button md-logo" aria-label="SQL Identity Resolution" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 6.5c-1.7 0-3 1.3-3 3v.2l-2 .7c-.6-1.2-1.8-2.1-3.2-2.3V5.9C14 5.6 15 4.4 15 3c0-1.7-1.3-3-3-3S9 1.3 9 3c0 1.4 1 2.6 2.2 2.9v2.2c-1.3.2-2.5 1.1-3.2 2.3l-2-.7v-.2c0-1.7-1.3-3-3-3s-3 1.3-3 3 1.3 3 3 3c1.1 0 2-.6 2.5-1.4l2 .7c-.2 1.3.2 2.7 1.1 3.7l-1.4 1.8Q6.6 17 6 17c-1.7 0-3 1.3-3 3s1.3 3 3 3 3-1.3 3-3q0-1.05-.6-1.8l1.4-1.8c1.4.8 3 .8 4.4 0l1.4 1.8q-.6.75-.6 1.8c0 1.7 1.3 3 3 3s3-1.3 3-3-1.3-3-3-3c-.4 0-.9.1-1.2.3l-1.4-1.8c.9-1 1.3-2.4 1.1-3.7l2-.7c.5.8 1.5 1.4 2.5 1.4 1.7 0 3-1.3 3-3s-1.3-3-3-3m-18 4c-.5 0-1-.4-1-1s.5-1 1-1 1 .4 1 1-.5 1-1 1M6 21c-.6 0-1-.5-1-1s.4-1 1-1 1 .5 1 1-.4 1-1 1m5-18c0-.5.4-1 1-1s1 .5 1 1-.4 1-1 1-1-.5-1-1m1 12c-1.4 0-2.5-1.1-2.5-2.5S10.6 10 12 10s2.5 1.1 2.5 2.5S13.4 15 12 15m6 4c.5 0 1 .5 1 1s-.5 1-1 1-1-.5-1-1 .5-1 1-1m3-8.5c-.5 0-1-.4-1-1s.5-1 1-1 1 .4 1 1-.5 1-1 1"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            SQL Identity Resolution
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration, Canonicalizers & Governance
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    anilkulkarni87/sql-identity-oss
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../concepts-and-architecture/" class="md-tabs__link">
+        
+  
+    
+  
+  Concepts & Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+    
+  
+  Configuration & Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../interfaces-and-dbt/" class="md-tabs__link">
+        
+  
+    
+  
+  Interfaces & dbt
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../warehouses-and-schema/" class="md-tabs__link">
+        
+  
+    
+  
+  Warehouses & Schema
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="SQL Identity Resolution" class="md-nav__button md-logo" aria-label="SQL Identity Resolution" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 6.5c-1.7 0-3 1.3-3 3v.2l-2 .7c-.6-1.2-1.8-2.1-3.2-2.3V5.9C14 5.6 15 4.4 15 3c0-1.7-1.3-3-3-3S9 1.3 9 3c0 1.4 1 2.6 2.2 2.9v2.2c-1.3.2-2.5 1.1-3.2 2.3l-2-.7v-.2c0-1.7-1.3-3-3-3s-3 1.3-3 3 1.3 3 3 3c1.1 0 2-.6 2.5-1.4l2 .7c-.2 1.3.2 2.7 1.1 3.7l-1.4 1.8Q6.6 17 6 17c-1.7 0-3 1.3-3 3s1.3 3 3 3 3-1.3 3-3q0-1.05-.6-1.8l1.4-1.8c1.4.8 3 .8 4.4 0l1.4 1.8q-.6.75-.6 1.8c0 1.7 1.3 3 3 3s3-1.3 3-3-1.3-3-3-3c-.4 0-.9.1-1.2.3l-1.4-1.8c.9-1 1.3-2.4 1.1-3.7l2-.7c.5.8 1.5 1.4 2.5 1.4 1.7 0 3-1.3 3-3s-1.3-3-3-3m-18 4c-.5 0-1-.4-1-1s.5-1 1-1 1 .4 1 1-.5 1-1 1M6 21c-.6 0-1-.5-1-1s.4-1 1-1 1 .5 1 1-.4 1-1 1m5-18c0-.5.4-1 1-1s1 .5 1 1-.4 1-1 1-1-.5-1-1m1 12c-1.4 0-2.5-1.1-2.5-2.5S10.6 10 12 10s2.5 1.1 2.5 2.5S13.4 15 12 15m6 4c.5 0 1 .5 1 1s-.5 1-1 1-1-.5-1-1 .5-1 1-1m3-8.5c-.5 0-1-.4-1-1s.5-1 1-1 1 .4 1 1-.5 1-1 1"/></svg>
+
+    </a>
+    SQL Identity Resolution
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    anilkulkarni87/sql-identity-oss
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts-and-architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Concepts & Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Configuration & Governance
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Configuration & Governance
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-complete-yaml-manifest-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Complete YAML Manifest Reference
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-built-in-domain-canonicalizers-custom-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Built-In Domain Canonicalizers &amp; Custom SQL
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-poison-pill-exclusions-idr_metaidentifier_exclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Poison-Pill Exclusions (idr_meta.identifier_exclusion)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-manual-identity-stewardship-overrides-idr_metaidentity_override" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Manual Identity Stewardship Overrides (idr_meta.identity_override)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-gdpr-ccpa-right-to-be-forgotten-idr-privacy-forget" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. GDPR / CCPA Right-to-be-Forgotten (idr privacy forget)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. GDPR / CCPA Right-to-be-Forgotten (idr privacy forget)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cli-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      CLI Usage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-purged-logged" class="md-nav__link">
+    <span class="md-ellipsis">
+      What Gets Purged &amp; Logged
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interfaces-and-dbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Interfaces & dbt
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../warehouses-and-schema/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Warehouses & Schema
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-complete-yaml-manifest-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Complete YAML Manifest Reference
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-built-in-domain-canonicalizers-custom-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Built-In Domain Canonicalizers &amp; Custom SQL
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-poison-pill-exclusions-idr_metaidentifier_exclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Poison-Pill Exclusions (idr_meta.identifier_exclusion)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-manual-identity-stewardship-overrides-idr_metaidentity_override" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Manual Identity Stewardship Overrides (idr_meta.identity_override)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-gdpr-ccpa-right-to-be-forgotten-idr-privacy-forget" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. GDPR / CCPA Right-to-be-Forgotten (idr privacy forget)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. GDPR / CCPA Right-to-be-Forgotten (idr privacy forget)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cli-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      CLI Usage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-purged-logged" class="md-nav__link">
+    <span class="md-ellipsis">
+      What Gets Purged &amp; Logged
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="configuration-canonicalizers-enterprise-governance">Configuration, Canonicalizers &amp; Enterprise Governance<a class="headerlink" href="#configuration-canonicalizers-enterprise-governance" title="Permanent link">&para;</a></h1>
+<p><code>sql-identity-resolution</code> is configured declaratively via YAML (<code>idr apply-config</code>) or interactively through the Web UI Setup Wizard. All configuration state lives in <code>idr_meta.*</code> tables inside your warehouse.</p>
+<hr />
+<h2 id="1-complete-yaml-manifest-reference">1. Complete YAML Manifest Reference<a class="headerlink" href="#1-complete-yaml-manifest-reference" title="Permanent link">&para;</a></h2>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Enable built-in poison-pill identifier exclusions (noreply@, test@, 0000000000, etc.)</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">use_default_exclusions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># 1. Source Tables</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nt">sources</span><span class="p">:</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crm</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">table</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">raw.crm_customers</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">entity_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_id</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="nt">entity_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PERSON</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">watermark_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">updated_at</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="nt">watermark_lookback_minutes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">    </span><span class="nt">identifiers</span><span class="p">:</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EMAIL</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PHONE</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">phone</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">    </span><span class="nt">attributes</span><span class="p">:</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">first_name</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">first_name</span>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">last_name</span>
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">last_name</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email</span>
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email</span>
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">phone</span>
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">phone</span>
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">record_updated_at</span>
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">updated_at</span>
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loyalty_lookup</span>
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="w">    </span><span class="nt">table</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">raw.loyalty_cards</span>
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="w">    </span><span class="nt">entity_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">card_id</span>
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">    </span><span class="nt">entity_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PERSON</span>
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">    </span><span class="c1"># Omit watermark_column if the table has no timestamp;</span>
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">    </span><span class="c1"># INCR runs will scan all rows and state-diff identifiers automatically.</span>
+</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">    </span><span class="nt">identifiers</span><span class="p">:</span>
+</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EMAIL</span>
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">member_email</span>
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">LOYALTY</span>
+</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a><span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loyalty_number</span>
+</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a><span class="w">    </span><span class="nt">attributes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
+</span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>
+</span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a><span class="c1"># 2. Deterministic Matching Rules</span>
+</span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a><span class="nt">rules</span><span class="p">:</span>
+</span><span id="__span-0-44"><a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email_standard_match</span>
+</span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EXACT</span>
+</span><span id="__span-0-46"><a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a><span class="w">    </span><span class="nt">match_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">EMAIL</span><span class="p p-Indicator">]</span>
+</span><span id="__span-0-47"><a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a><span class="w">    </span><span class="nt">canonicalize</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EMAIL_STANDARD</span>
+</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a><span class="w">    </span><span class="nt">max_group_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10000</span>
+</span><span id="__span-0-50"><a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>
+</span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">phone_us10_match</span>
+</span><span id="__span-0-52"><a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EXACT</span>
+</span><span id="__span-0-53"><a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a><span class="w">    </span><span class="nt">match_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">PHONE</span><span class="p p-Indicator">]</span>
+</span><span id="__span-0-54"><a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a><span class="w">    </span><span class="nt">canonicalize</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PHONE_US_10</span>
+</span><span id="__span-0-55"><a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+</span><span id="__span-0-56"><a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a><span class="w">    </span><span class="nt">max_group_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5000</span>
+</span><span id="__span-0-57"><a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>
+</span><span id="__span-0-58"><a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loyalty_custom_sql</span>
+</span><span id="__span-0-59"><a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EXACT</span>
+</span><span id="__span-0-60"><a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a><span class="w">    </span><span class="nt">match_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">LOYALTY</span><span class="p p-Indicator">]</span>
+</span><span id="__span-0-61"><a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a><span class="w">    </span><span class="c1"># Custom inline SQL canonicalizer using {val} placeholder</span>
+</span><span id="__span-0-62"><a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a><span class="w">    </span><span class="nt">canonicalize</span><span class="p">:</span><span class="w"> </span><span class="s">"REGEXP_REPLACE(UPPER(TRIM({val})),</span><span class="nv"> </span><span class="s">'^0+',</span><span class="nv"> </span><span class="s">'')"</span>
+</span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+</span><span id="__span-0-64"><a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a><span class="w">    </span><span class="nt">max_group_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
+</span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>
+</span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a><span class="c1"># 3. Optional Probabilistic Fuzzy Rules (Post-Deterministic Super-Clustering)</span>
+</span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a><span class="nt">fuzzy_rules</span><span class="p">:</span>
+</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fuzzy_name_match</span>
+</span><span id="__span-0-69"><a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">First + Last Name Jaro-Winkler</span>
+</span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a><span class="w">    </span><span class="nt">blocking_key</span><span class="p">:</span><span class="w"> </span><span class="s">"CONCAT(SOUNDEX(last_name),</span><span class="nv"> </span><span class="s">'_',</span><span class="nv"> </span><span class="s">SUBSTR(UPPER(first_name),</span><span class="nv"> </span><span class="s">1,</span><span class="nv"> </span><span class="s">1))"</span>
+</span><span id="__span-0-71"><a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a><span class="w">    </span><span class="nt">score_expr</span><span class="p">:</span>
+</span><span id="__span-0-72"><a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a><span class="w">      </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="s">"idr_meta.jaro_winkler_similarity(&lt;a&gt;,</span><span class="nv"> </span><span class="s">&lt;b&gt;)"</span>
+</span><span id="__span-0-73"><a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a><span class="w">      </span><span class="nt">bigquery</span><span class="p">:</span><span class="w"> </span><span class="s">"1.0</span><span class="nv"> </span><span class="s">-</span><span class="nv"> </span><span class="s">SAFE_DIVIDE(CAST(EDIT_DISTANCE(&lt;a&gt;,</span><span class="nv"> </span><span class="s">&lt;b&gt;)</span><span class="nv"> </span><span class="s">AS</span><span class="nv"> </span><span class="s">FLOAT64),</span><span class="nv"> </span><span class="s">CAST(GREATEST(LENGTH(&lt;a&gt;),</span><span class="nv"> </span><span class="s">LENGTH(&lt;b&gt;),</span><span class="nv"> </span><span class="s">1)</span><span class="nv"> </span><span class="s">AS</span><span class="nv"> </span><span class="s">FLOAT64))"</span>
+</span><span id="__span-0-74"><a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a><span class="w">    </span><span class="nt">threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.88</span>
+</span><span id="__span-0-75"><a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
+</span><span id="__span-0-76"><a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>
+</span><span id="__span-0-77"><a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a><span class="c1"># 4. Golden Profile Survivorship Rules</span>
+</span><span id="__span-0-78"><a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a><span class="nt">survivorship</span><span class="p">:</span>
+</span><span id="__span-0-79"><a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">attribute</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email</span>
+</span><span id="__span-0-80"><a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a><span class="w">    </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PRIORITY</span>
+</span><span id="__span-0-81"><a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a><span class="w">    </span><span class="nt">source_priority</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">crm</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">loyalty_lookup</span><span class="p p-Indicator">]</span>
+</span><span id="__span-0-82"><a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a><span class="w">    </span><span class="nt">recency_field</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">record_updated_at</span>
+</span><span id="__span-0-83"><a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>
+</span><span id="__span-0-84"><a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">attribute</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">first_name</span>
+</span><span id="__span-0-85"><a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a><span class="w">    </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RECENCY</span>
+</span><span id="__span-0-86"><a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a><span class="w">    </span><span class="nt">recency_field</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">record_updated_at</span>
+</span><span id="__span-0-87"><a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>
+</span><span id="__span-0-88"><a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">attribute</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">phone</span>
+</span><span id="__span-0-89"><a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a><span class="w">    </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FREQUENCY</span>
+</span><span id="__span-0-90"><a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a><span class="w">    </span><span class="nt">recency_field</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">record_updated_at</span>
+</span><span id="__span-0-91"><a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>
+</span><span id="__span-0-92"><a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a><span class="c1"># 5. Custom Identifier Exclusions (Supplementing use_default_exclusions)</span>
+</span><span id="__span-0-93"><a id="__codelineno-0-93" name="__codelineno-0-93" href="#__codelineno-0-93"></a><span class="nt">exclusions</span><span class="p">:</span>
+</span><span id="__span-0-94"><a id="__codelineno-0-94" name="__codelineno-0-94" href="#__codelineno-0-94"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EMAIL</span>
+</span><span id="__span-0-95"><a id="__codelineno-0-95" name="__codelineno-0-95" href="#__codelineno-0-95"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"%@internal-corp.com"</span>
+</span><span id="__span-0-96"><a id="__codelineno-0-96" name="__codelineno-0-96" href="#__codelineno-0-96"></a><span class="w">    </span><span class="nt">match</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">LIKE</span>
+</span><span id="__span-0-97"><a id="__codelineno-0-97" name="__codelineno-0-97" href="#__codelineno-0-97"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Internal employee emails</span>
+</span><span id="__span-0-98"><a id="__codelineno-0-98" name="__codelineno-0-98" href="#__codelineno-0-98"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANY</span>
+</span><span id="__span-0-99"><a id="__codelineno-0-99" name="__codelineno-0-99" href="#__codelineno-0-99"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"REDACTED"</span>
+</span><span id="__span-0-100"><a id="__codelineno-0-100" name="__codelineno-0-100" href="#__codelineno-0-100"></a><span class="w">    </span><span class="nt">match</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EXACT</span>
+</span><span id="__span-0-101"><a id="__codelineno-0-101" name="__codelineno-0-101" href="#__codelineno-0-101"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Masked compliance value across all identifier types</span>
+</span><span id="__span-0-102"><a id="__codelineno-0-102" name="__codelineno-0-102" href="#__codelineno-0-102"></a>
+</span><span id="__span-0-103"><a id="__codelineno-0-103" name="__codelineno-0-103" href="#__codelineno-0-103"></a><span class="c1"># 6. Manual Stewardship Overrides</span>
+</span><span id="__span-0-104"><a id="__codelineno-0-104" name="__codelineno-0-104" href="#__codelineno-0-104"></a><span class="nt">overrides</span><span class="p">:</span>
+</span><span id="__span-0-105"><a id="__codelineno-0-105" name="__codelineno-0-105" href="#__codelineno-0-105"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FORCE_LINK</span>
+</span><span id="__span-0-106"><a id="__codelineno-0-106" name="__codelineno-0-106" href="#__codelineno-0-106"></a><span class="w">    </span><span class="nt">entity_key_a</span><span class="p">:</span><span class="w"> </span><span class="s">"crm:1001"</span>
+</span><span id="__span-0-107"><a id="__codelineno-0-107" name="__codelineno-0-107" href="#__codelineno-0-107"></a><span class="w">    </span><span class="nt">entity_key_b</span><span class="p">:</span><span class="w"> </span><span class="s">"loyalty_lookup:5099"</span>
+</span><span id="__span-0-108"><a id="__codelineno-0-108" name="__codelineno-0-108" href="#__codelineno-0-108"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Verified VIP account merge</span>
+</span><span id="__span-0-109"><a id="__codelineno-0-109" name="__codelineno-0-109" href="#__codelineno-0-109"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DO_NOT_LINK</span>
+</span><span id="__span-0-110"><a id="__codelineno-0-110" name="__codelineno-0-110" href="#__codelineno-0-110"></a><span class="w">    </span><span class="nt">entity_key_a</span><span class="p">:</span><span class="w"> </span><span class="s">"crm:1001"</span>
+</span><span id="__span-0-111"><a id="__codelineno-0-111" name="__codelineno-0-111" href="#__codelineno-0-111"></a><span class="w">    </span><span class="nt">entity_key_b</span><span class="p">:</span><span class="w"> </span><span class="s">"crm:2044"</span>
+</span><span id="__span-0-112"><a id="__codelineno-0-112" name="__codelineno-0-112" href="#__codelineno-0-112"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shared family phone number — distinct individuals</span>
+</span><span id="__span-0-113"><a id="__codelineno-0-113" name="__codelineno-0-113" href="#__codelineno-0-113"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ISOLATE</span>
+</span><span id="__span-0-114"><a id="__codelineno-0-114" name="__codelineno-0-114" href="#__codelineno-0-114"></a><span class="w">    </span><span class="nt">entity_key_a</span><span class="p">:</span><span class="w"> </span><span class="s">"crm:9999"</span>
+</span><span id="__span-0-115"><a id="__codelineno-0-115" name="__codelineno-0-115" href="#__codelineno-0-115"></a><span class="w">    </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shared store kiosk account — never merge</span>
+</span></code></pre></div>
+<hr />
+<h2 id="2-built-in-domain-canonicalizers-custom-sql">2. Built-In Domain Canonicalizers &amp; Custom SQL<a class="headerlink" href="#2-built-in-domain-canonicalizers-custom-sql" title="Permanent link">&para;</a></h2>
+<p>Each deterministic rule in <code>rules</code> specifies a <code>canonicalize</code> strategy (<code>idr_core/canonicalizers.py</code> and <code>dbt_idr/models/staging/stg_identifiers.sql</code>). You can choose from <strong>9 built-in cross-warehouse canonicalizers</strong> or write <strong>custom inline warehouse SQL</strong>:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Canonicalizer Name</th>
+<th style="text-align: left;">Behavior</th>
+<th style="text-align: left;">Example Input → Normalized Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>EMAIL_STANDARD</code></td>
+<td style="text-align: left;">Trims, lowercases, and strips dots (<code>.</code>) from the local part of <code>@gmail.com</code> / <code>@googlemail.com</code> addresses while preserving <code>+tag</code> aliases.</td>
+<td style="text-align: left;"><code>'  John.Doe+vip@Gmail.com '</code> → <code>'johndoe+vip@gmail.com'</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>EMAIL_STRIP_PLUS</code></td>
+<td style="text-align: left;">Performs all <code>EMAIL_STANDARD</code> normalizations <strong>plus</strong> strips <code>+tag</code> sub-addressing from the local part across all email domains.</td>
+<td style="text-align: left;"><code>'John.Doe+promo@gmail.com'</code> → <code>'johndoe@gmail.com'</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>PHONE_DIGITS</code></td>
+<td style="text-align: left;">Strips all non-numeric characters (<code>[^0-9]</code>); returns <code>NULL</code> if fewer than 7 digits remain.</td>
+<td style="text-align: left;"><code>'+1 (800) 555-0199'</code> → <code>'18005550199'</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>PHONE_US_10</code></td>
+<td style="text-align: left;">Strips non-digits, removes a leading US country code <code>1</code> from 11-digit numbers, and returns the 10-digit subscriber number (or <code>NULL</code> if <code>&lt; 7</code> digits).</td>
+<td style="text-align: left;"><code>'+1 (415) 555-2671'</code> → <code>'4155552671'</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ALPHANUMERIC_UPPER</code></td>
+<td style="text-align: left;">Uppercases and strips all non-alphanumeric characters (<code>[^A-Z0-9]</code>). Ideal for loyalty cards, VINs, and tax/device IDs.</td>
+<td style="text-align: left;"><code>'vip-9901 a'</code> → <code>'VIP9901A'</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>LOWERCASE</code></td>
+<td style="text-align: left;"><code>LOWER(TRIM(val))</code></td>
+<td style="text-align: left;"><code>' Alice@Example.com '</code> → <code>'alice@example.com'</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>UPPERCASE</code></td>
+<td style="text-align: left;"><code>UPPER(TRIM(val))</code></td>
+<td style="text-align: left;"><code>'abc-123'</code> → <code>'ABC-123'</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>EXACT</code> / <code>NONE</code></td>
+<td style="text-align: left;"><code>TRIM(val)</code> (preserves case and internal punctuation)</td>
+<td style="text-align: left;"><code>' Token_AbC '</code> → <code>'Token_AbC'</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Custom SQL (<code>{val}</code>)</strong></td>
+<td style="text-align: left;">Any SQL expression containing <code>{val}</code> (where <code>{val}</code> is replaced by <code>CAST(&lt;identifier_expr&gt; AS VARCHAR)</code>).</td>
+<td style="text-align: left;"><code>"REGEXP_REPLACE(LOWER(TRIM({val})), '^0+', '')"</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-poison-pill-exclusions-idr_metaidentifier_exclusion">3. Poison-Pill Exclusions (<code>idr_meta.identifier_exclusion</code>)<a class="headerlink" href="#3-poison-pill-exclusions-idr_metaidentifier_exclusion" title="Permanent link">&para;</a></h2>
+<p>Bad placeholder identifiers (<code>null</code>, <code>unknown</code>, <code>0000000000</code>, <code>noreply@...</code>) can link thousands of unrelated customers into a single giant cluster. <code>sql-identity-resolution</code> provides three layers of protection:</p>
+<ol>
+<li><strong>Built-In Default Exclusion Library (<code>use_default_exclusions: true</code>)</strong>:</li>
+<li>Seeds 30+ battle-tested exclusions across <code>ANY</code> (<code>null</code>, <code>none</code>, <code>n/a</code>, <code>na</code>, <code>unknown</code>, <code>tbd</code>, <code>test</code>, <code>dummy</code>, <code>anonymous</code>, <code>redacted</code>, <code>0</code>, <code>-1</code>), <code>EMAIL</code> (<code>%@example.%</code>, <code>%@test.%</code>, <code>%@mailinator.com</code>, <code>noreply@%</code>, <code>no-reply@%</code>, <code>donotreply@%</code>, <code>info@%</code>, <code>support@%</code>, <code>admin@%</code>, <code>sales@%</code>, <code>billing@%</code>), and <code>PHONE</code> (<code>0000000000</code>–<code>9999999999</code>, <code>1234567890</code>, <code>11234567890</code>, <code>0000000</code>).</li>
+<li><strong>Custom YAML Exclusions</strong>:</li>
+<li>Add domain-specific patterns under <code>exclusions:</code> with <code>type</code> (<code>EMAIL</code>, <code>PHONE</code>, or <code>ANY</code> / <code>*</code> for all types) and <code>match</code> (<code>EXACT</code> or <code>LIKE</code>).</li>
+<li><strong>Direct Warehouse Table Management</strong>:</li>
+<li>Data stewards or upstream ETL jobs can insert rows directly into <code>idr_meta.identifier_exclusion</code> without touching YAML:
+     <div class="language-sql highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">idr_meta</span><span class="p">.</span><span class="n">identifier_exclusion</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="p">(</span><span class="n">identifier_type</span><span class="p">,</span><span class="w"> </span><span class="n">identifier_value_pattern</span><span class="p">,</span><span class="w"> </span><span class="n">match_type</span><span class="p">,</span><span class="w"> </span><span class="n">reason</span><span class="p">)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">VALUES</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p">(</span><span class="s1">'PHONE'</span><span class="p">,</span><span class="w"> </span><span class="s1">'8005551212'</span><span class="p">,</span><span class="w"> </span><span class="s1">'EXACT'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Corporate call center main line'</span><span class="p">),</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="p">(</span><span class="s1">'ANY'</span><span class="p">,</span><span class="w"> </span><span class="s1">'POS_GUEST_%'</span><span class="p">,</span><span class="w"> </span><span class="s1">'LIKE'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Anonymous store register tokens'</span><span class="p">);</span>
+</span></code></pre></div></li>
+<li><code>idr apply-config</code> preserves manually inserted warehouse rows unless <code>--reset</code> is explicitly passed.</li>
+</ol>
+<hr />
+<h2 id="4-manual-identity-stewardship-overrides-idr_metaidentity_override">4. Manual Identity Stewardship Overrides (<code>idr_meta.identity_override</code>)<a class="headerlink" href="#4-manual-identity-stewardship-overrides-idr_metaidentity_override" title="Permanent link">&para;</a></h2>
+<p>When automated rules need human-in-the-loop correction, stewards can define overrides via <strong>YAML (<code>overrides:</code>)</strong>, the <strong>Web UI Cluster Explorer</strong>, <strong>dbt seeds (<code>idr_overrides.csv</code>)</strong>, or <strong>direct SQL</strong>:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Override Type</th>
+<th style="text-align: left;">Effect on Graph Resolution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong><code>FORCE_LINK</code></strong></td>
+<td style="text-align: left;">Injects a synthetic edge between <code>entity_key_a</code> and <code>entity_key_b</code> so both records always resolve into the same cluster, even if they share zero identifiers.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><code>DO_NOT_LINK</code></strong></td>
+<td style="text-align: left;">Removes any direct edge between <code>entity_key_a</code> and <code>entity_key_b</code> <strong>and</strong> detaches the higher entity key from any shared identifier anchor group containing both records.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><code>ISOLATE</code></strong></td>
+<td style="text-align: left;">Strips all identifiers from <code>entity_key_a</code> prior to edge building so <code>entity_key_a</code> is guaranteed to remain a singleton cluster (<code>resolved_id = entity_key_a</code>).</td>
+</tr>
+</tbody>
+</table>
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">idr_meta</span><span class="p">.</span><span class="n">identity_override</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p">(</span><span class="n">override_id</span><span class="p">,</span><span class="w"> </span><span class="n">override_type</span><span class="p">,</span><span class="w"> </span><span class="n">entity_key_a</span><span class="p">,</span><span class="w"> </span><span class="n">entity_key_b</span><span class="p">,</span><span class="w"> </span><span class="n">reason</span><span class="p">,</span><span class="w"> </span><span class="n">created_by</span><span class="p">,</span><span class="w"> </span><span class="n">is_active</span><span class="p">)</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">VALUES</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="p">(</span><span class="s1">'ov_vip_1'</span><span class="p">,</span><span class="w"> </span><span class="s1">'FORCE_LINK'</span><span class="p">,</span><span class="w"> </span><span class="s1">'crm:1001'</span><span class="p">,</span><span class="w"> </span><span class="s1">'orders:8842'</span><span class="p">,</span><span class="w"> </span><span class="s1">'Confirmed same customer by support ticket #492'</span><span class="p">,</span><span class="w"> </span><span class="s1">'steward@company.com'</span><span class="p">,</span><span class="w"> </span><span class="k">TRUE</span><span class="p">);</span>
+</span></code></pre></div>
+<hr />
+<h2 id="5-gdpr-ccpa-right-to-be-forgotten-idr-privacy-forget">5. GDPR / CCPA Right-to-be-Forgotten (<code>idr privacy forget</code>)<a class="headerlink" href="#5-gdpr-ccpa-right-to-be-forgotten-idr-privacy-forget" title="Permanent link">&para;</a></h2>
+<p>To comply with data deletion requests (GDPR Article 17 / CCPA), <code>PrivacyManager</code> (<code>idr_core/privacy.py</code>) purges an entity (or all entities matching an identifier value) across every IDR output and work table and writes a permanent compliance receipt into <code>idr_meta.privacy_audit_log</code>.</p>
+<h3 id="cli-usage">CLI Usage<a class="headerlink" href="#cli-usage" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Forget a specific entity key across all IDR output &amp; work tables</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>idr<span class="w"> </span>privacy<span class="w"> </span>forget<span class="w"> </span>--platform<span class="w"> </span>duckdb<span class="w"> </span>--db<span class="w"> </span>demo.duckdb<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--entity-key<span class="w"> </span><span class="s2">"crm:10042"</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--reason<span class="w"> </span><span class="s2">"GDPR erasure request #REQ-2026-881"</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>--requested-by<span class="w"> </span><span class="s2">"privacy-team@company.com"</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Or forget all entities associated with an email/phone identifier value</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>idr<span class="w"> </span>privacy<span class="w"> </span>forget<span class="w"> </span>--platform<span class="w"> </span>duckdb<span class="w"> </span>--db<span class="w"> </span>demo.duckdb<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span>--identifier-value<span class="w"> </span><span class="s2">"alice@example.com"</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span>--identifier-type<span class="w"> </span>EMAIL<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">  </span>--reason<span class="w"> </span><span class="s2">"CCPA consumer deletion request"</span>
+</span></code></pre></div>
+<h3 id="what-gets-purged-logged">What Gets Purged &amp; Logged<a class="headerlink" href="#what-gets-purged-logged" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Resolves all target <code>entity_key</code> values and affected <code>resolved_id</code> clusters.</li>
+<li>Deletes matching rows from:</li>
+<li><code>idr_out.identity_resolved_membership_current</code></li>
+<li><code>idr_out.identity_identifiers_current</code></li>
+<li><code>idr_out.resolved_id_crosswalk</code></li>
+<li><code>idr_work.entities_delta</code>, <code>idr_work.identifiers_extracted</code>, <code>idr_work.identifiers_all</code>, <code>idr_work.entity_attributes</code>, <code>idr_work.edges_new</code>, <code>idr_work.lp_labels</code></li>
+<li>Recomputes or removes affected cluster summaries in <code>idr_out.identity_clusters_current</code> and <code>idr_out.golden_profile_current</code>.</li>
+<li>Inserts an immutable audit record (<code>request_id</code>, <code>request_type</code>, <code>target_value</code>, <code>affected_entities_count</code>, <code>affected_clusters_count</code>, <code>tables_purged</code>, <code>requested_by</code>, <code>reason</code>, <code>executed_at</code>, <code>status</code>) into <code>idr_meta.privacy_audit_log</code>.</li>
+</ol>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../concepts-and-architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Concepts &amp; Architecture">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Concepts & Architecture
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../interfaces-and-dbt/" class="md-footer__link md-footer__link--next" aria-label="Next: Interfaces &amp; dbt">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Interfaces & dbt
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["content.code.copy", "content.code.annotate", "content.tabs.link", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+      
+    
+  </body>
+</html>

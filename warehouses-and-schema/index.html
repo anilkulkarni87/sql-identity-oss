@@ -1,0 +1,1221 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Production-grade deterministic & probabilistic identity resolution for DuckDB, Snowflake, BigQuery, and Databricks">
+      
+      
+      
+        <link rel="canonical" href="https://anilkulkarni87.github.io/sql-identity-oss/warehouses-and-schema/">
+      
+      
+        <link rel="prev" href="../interfaces-and-dbt/">
+      
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.47">
+    
+    
+      
+        <title>Supported Warehouses, Schema & Operations - SQL Identity Resolution</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.6f8fc17f.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#supported-warehouses-schema-reference-operations" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="SQL Identity Resolution" class="md-header__button md-logo" aria-label="SQL Identity Resolution" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 6.5c-1.7 0-3 1.3-3 3v.2l-2 .7c-.6-1.2-1.8-2.1-3.2-2.3V5.9C14 5.6 15 4.4 15 3c0-1.7-1.3-3-3-3S9 1.3 9 3c0 1.4 1 2.6 2.2 2.9v2.2c-1.3.2-2.5 1.1-3.2 2.3l-2-.7v-.2c0-1.7-1.3-3-3-3s-3 1.3-3 3 1.3 3 3 3c1.1 0 2-.6 2.5-1.4l2 .7c-.2 1.3.2 2.7 1.1 3.7l-1.4 1.8Q6.6 17 6 17c-1.7 0-3 1.3-3 3s1.3 3 3 3 3-1.3 3-3q0-1.05-.6-1.8l1.4-1.8c1.4.8 3 .8 4.4 0l1.4 1.8q-.6.75-.6 1.8c0 1.7 1.3 3 3 3s3-1.3 3-3-1.3-3-3-3c-.4 0-.9.1-1.2.3l-1.4-1.8c.9-1 1.3-2.4 1.1-3.7l2-.7c.5.8 1.5 1.4 2.5 1.4 1.7 0 3-1.3 3-3s-1.3-3-3-3m-18 4c-.5 0-1-.4-1-1s.5-1 1-1 1 .4 1 1-.5 1-1 1M6 21c-.6 0-1-.5-1-1s.4-1 1-1 1 .5 1 1-.4 1-1 1m5-18c0-.5.4-1 1-1s1 .5 1 1-.4 1-1 1-1-.5-1-1m1 12c-1.4 0-2.5-1.1-2.5-2.5S10.6 10 12 10s2.5 1.1 2.5 2.5S13.4 15 12 15m6 4c.5 0 1 .5 1 1s-.5 1-1 1-1-.5-1-1 .5-1 1-1m3-8.5c-.5 0-1-.4-1-1s.5-1 1-1 1 .4 1 1-.5 1-1 1"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            SQL Identity Resolution
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Supported Warehouses, Schema & Operations
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    anilkulkarni87/sql-identity-oss
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../concepts-and-architecture/" class="md-tabs__link">
+        
+  
+    
+  
+  Concepts & Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration-and-governance/" class="md-tabs__link">
+        
+  
+    
+  
+  Configuration & Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../interfaces-and-dbt/" class="md-tabs__link">
+        
+  
+    
+  
+  Interfaces & dbt
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+    
+  
+  Warehouses & Schema
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="SQL Identity Resolution" class="md-nav__button md-logo" aria-label="SQL Identity Resolution" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 6.5c-1.7 0-3 1.3-3 3v.2l-2 .7c-.6-1.2-1.8-2.1-3.2-2.3V5.9C14 5.6 15 4.4 15 3c0-1.7-1.3-3-3-3S9 1.3 9 3c0 1.4 1 2.6 2.2 2.9v2.2c-1.3.2-2.5 1.1-3.2 2.3l-2-.7v-.2c0-1.7-1.3-3-3-3s-3 1.3-3 3 1.3 3 3 3c1.1 0 2-.6 2.5-1.4l2 .7c-.2 1.3.2 2.7 1.1 3.7l-1.4 1.8Q6.6 17 6 17c-1.7 0-3 1.3-3 3s1.3 3 3 3 3-1.3 3-3q0-1.05-.6-1.8l1.4-1.8c1.4.8 3 .8 4.4 0l1.4 1.8q-.6.75-.6 1.8c0 1.7 1.3 3 3 3s3-1.3 3-3-1.3-3-3-3c-.4 0-.9.1-1.2.3l-1.4-1.8c.9-1 1.3-2.4 1.1-3.7l2-.7c.5.8 1.5 1.4 2.5 1.4 1.7 0 3-1.3 3-3s-1.3-3-3-3m-18 4c-.5 0-1-.4-1-1s.5-1 1-1 1 .4 1 1-.5 1-1 1M6 21c-.6 0-1-.5-1-1s.4-1 1-1 1 .5 1 1-.4 1-1 1m5-18c0-.5.4-1 1-1s1 .5 1 1-.4 1-1 1-1-.5-1-1m1 12c-1.4 0-2.5-1.1-2.5-2.5S10.6 10 12 10s2.5 1.1 2.5 2.5S13.4 15 12 15m6 4c.5 0 1 .5 1 1s-.5 1-1 1-1-.5-1-1 .5-1 1-1m3-8.5c-.5 0-1-.4-1-1s.5-1 1-1 1 .4 1 1-.5 1-1 1"/></svg>
+
+    </a>
+    SQL Identity Resolution
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/anilkulkarni87/sql-identity-oss" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    anilkulkarni87/sql-identity-oss
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts-and-architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Concepts & Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration-and-governance/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration & Governance
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interfaces-and-dbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Interfaces & dbt
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Warehouses & Schema
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Warehouses & Schema
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-warehouse-connection-tuning-guide" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Warehouse Connection &amp; Tuning Guide
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-complete-warehouse-schema-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Complete Warehouse Schema Reference
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Complete Warehouse Schema Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#idr_meta-schema-configuration-state-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      idr_meta Schema (Configuration, State &amp; Governance)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idr_work-schema-ephemeral-pipeline-staging" class="md-nav__link">
+    <span class="md-ellipsis">
+      idr_work Schema (Ephemeral Pipeline Staging)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idr_out-schema-production-outputs-telemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      idr_out Schema (Production Outputs &amp; Telemetry)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-production-hardening-troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Production Hardening &amp; Troubleshooting
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Production Hardening & Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#recommended-incremental-scheduling-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recommended Incremental Scheduling Pattern
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting-common-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      Troubleshooting Common Scenarios
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-orchestration-deployment-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Orchestration, Deployment &amp; Observability
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Orchestration, Deployment & Observability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#apache-airflow-deploymentairflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      Apache Airflow (deployment/airflow/)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snowflake-tasks-streams-deploymentsnowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snowflake Tasks &amp; Streams (deployment/snowflake/)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bigquery-gcp-terraform-deploymentgcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      BigQuery / GCP Terraform (deployment/gcp/)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enterprise-compose-stack-with-keycloak-sso-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      Enterprise Compose Stack with Keycloak SSO &amp; Observability
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scale-testing-benchmarking-tools-toolsscale_test" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scale Testing &amp; Benchmarking Tools (tools/scale_test/)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-warehouse-connection-tuning-guide" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Warehouse Connection &amp; Tuning Guide
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-complete-warehouse-schema-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Complete Warehouse Schema Reference
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Complete Warehouse Schema Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#idr_meta-schema-configuration-state-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      idr_meta Schema (Configuration, State &amp; Governance)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idr_work-schema-ephemeral-pipeline-staging" class="md-nav__link">
+    <span class="md-ellipsis">
+      idr_work Schema (Ephemeral Pipeline Staging)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idr_out-schema-production-outputs-telemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      idr_out Schema (Production Outputs &amp; Telemetry)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-production-hardening-troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Production Hardening &amp; Troubleshooting
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Production Hardening & Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#recommended-incremental-scheduling-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recommended Incremental Scheduling Pattern
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting-common-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      Troubleshooting Common Scenarios
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-orchestration-deployment-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Orchestration, Deployment &amp; Observability
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Orchestration, Deployment & Observability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#apache-airflow-deploymentairflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      Apache Airflow (deployment/airflow/)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snowflake-tasks-streams-deploymentsnowflake" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snowflake Tasks &amp; Streams (deployment/snowflake/)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bigquery-gcp-terraform-deploymentgcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      BigQuery / GCP Terraform (deployment/gcp/)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enterprise-compose-stack-with-keycloak-sso-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      Enterprise Compose Stack with Keycloak SSO &amp; Observability
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scale-testing-benchmarking-tools-toolsscale_test" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scale Testing &amp; Benchmarking Tools (tools/scale_test/)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="supported-warehouses-schema-reference-operations">Supported Warehouses, Schema Reference &amp; Operations<a class="headerlink" href="#supported-warehouses-schema-reference-operations" title="Permanent link">&para;</a></h1>
+<p><code>sql-identity-resolution</code> supports <strong>DuckDB</strong>, <strong>Snowflake</strong>, <strong>BigQuery</strong>, and <strong>Databricks</strong> with 100% feature parity across all 8 pipeline stages.</p>
+<hr />
+<h2 id="1-warehouse-connection-tuning-guide">1. Warehouse Connection &amp; Tuning Guide<a class="headerlink" href="#1-warehouse-connection-tuning-guide" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:4"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">DuckDB</label><label for="__tabbed_1_2">Snowflake</label><label for="__tabbed_1_3">BigQuery</label><label for="__tabbed_1_4">Databricks</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Local file database</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>idr<span class="w"> </span>init<span class="w"> </span>--platform<span class="w"> </span>duckdb<span class="w"> </span>--db<span class="w"> </span>./my_warehouse.duckdb
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>idr<span class="w"> </span>apply-config<span class="w"> </span>--db<span class="w"> </span>./my_warehouse.duckdb<span class="w"> </span>--config<span class="w"> </span>config.yaml
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>idr<span class="w"> </span>run<span class="w"> </span>--db<span class="w"> </span>./my_warehouse.duckdb<span class="w"> </span>--mode<span class="w"> </span>FULL
+</span></code></pre></div>
+<ul>
+<li><strong>Best For</strong>: Local development, CI/CD testing, single-node analytics up to 50M+ rows.</li>
+<li><strong>Adapter</strong>: <code>idr_core/adapters/duckdb.py</code> (<code>DuckDBAdapter</code>).</li>
+</ul>
+</div>
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_ACCOUNT</span><span class="o">=</span><span class="s2">"xy12345.us-east-1"</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_USER</span><span class="o">=</span><span class="s2">"IDR_SERVICE_USER"</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_PASSWORD</span><span class="o">=</span><span class="s2">"..."</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_WAREHOUSE</span><span class="o">=</span><span class="s2">"COMPUTE_WH"</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_DATABASE</span><span class="o">=</span><span class="s2">"ANALYTICS"</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SNOWFLAKE_ROLE</span><span class="o">=</span><span class="s2">"IDR_ADMIN"</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>idr<span class="w"> </span>init<span class="w"> </span>--platform<span class="w"> </span>snowflake
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>idr<span class="w"> </span>apply-config<span class="w"> </span>--platform<span class="w"> </span>snowflake<span class="w"> </span>--config<span class="w"> </span>config.yaml
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span>snowflake<span class="w"> </span>--mode<span class="w"> </span>INCR
+</span></code></pre></div>
+<ul>
+<li><strong>Credential Auto-Discovery</strong>: Automatically reads <code>~/.snowflake/connections.toml</code> and <code>~/.snowflake/config</code>.</li>
+<li><strong>Adapter</strong>: <code>idr_core/adapters/snowflake.py</code> (<code>SnowflakeAdapter</code>).</li>
+</ul>
+</div>
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Authenticate via gcloud Application Default Credentials</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>gcloud<span class="w"> </span>auth<span class="w"> </span>application-default<span class="w"> </span>login
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>idr<span class="w"> </span>init<span class="w"> </span>--platform<span class="w"> </span>bigquery<span class="w"> </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span>--location<span class="w"> </span>US
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>idr<span class="w"> </span>apply-config<span class="w"> </span>--platform<span class="w"> </span>bigquery<span class="w"> </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span>--config<span class="w"> </span>config.yaml
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span>bigquery<span class="w"> </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span>--mode<span class="w"> </span>INCR
+</span></code></pre></div>
+<ul>
+<li><strong>Schema Mapping</strong>: Maps <code>idr_meta</code>, <code>idr_work</code>, and <code>idr_out</code> to BigQuery datasets in your target GCP project.</li>
+<li><strong>Adapter</strong>: <code>idr_core/adapters/bigquery.py</code> (<code>BigQueryAdapter</code>).</li>
+</ul>
+</div>
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">DATABRICKS_HOST</span><span class="o">=</span><span class="s2">"adb-123456789.12.azuredatabricks.net"</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">DATABRICKS_TOKEN</span><span class="o">=</span><span class="s2">"dapi..."</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">DATABRICKS_HTTP_PATH</span><span class="o">=</span><span class="s2">"/sql/1.0/warehouses/abcdef123456"</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">DATABRICKS_CATALOG</span><span class="o">=</span><span class="s2">"main"</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>idr<span class="w"> </span>init<span class="w"> </span>--platform<span class="w"> </span>databricks
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>idr<span class="w"> </span>apply-config<span class="w"> </span>--platform<span class="w"> </span>databricks<span class="w"> </span>--config<span class="w"> </span>config.yaml
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span>databricks<span class="w"> </span>--mode<span class="w"> </span>INCR
+</span></code></pre></div>
+<ul>
+<li><strong>Credential Auto-Discovery</strong>: Automatically reads <code>~/.databrickscfg</code> profiles.</li>
+<li><strong>Table Existence Checks</strong>: Uses <code>SHOW TABLES IN &lt;schema&gt; LIKE '&lt;table_name&gt;'</code> so Unity Catalog / SQL Warehouses never log <code>[TABLE_OR_VIEW_NOT_FOUND]</code> errors during preflight checks.</li>
+<li><strong>Adapter</strong>: <code>idr_core/adapters/databricks.py</code> (<code>DatabricksAdapter</code>).</li>
+</ul>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="2-complete-warehouse-schema-reference">2. Complete Warehouse Schema Reference<a class="headerlink" href="#2-complete-warehouse-schema-reference" title="Permanent link">&para;</a></h2>
+<p>All tables are defined in <code>idr_core/schema_defs.py</code> (<code>SYSTEM_TABLES</code>) and mirrored in <code>sql/ddl/{duckdb,snowflake,bigquery,databricks}.sql</code>. During <strong>Stage 1 (<code>preflight</code>)</strong>, <code>PreflightStage._ensure_schema_upgrades()</code> automatically creates any missing tables on existing deployments.</p>
+<h3 id="idr_meta-schema-configuration-state-governance"><code>idr_meta</code> Schema (Configuration, State &amp; Governance)<a class="headerlink" href="#idr_meta-schema-configuration-state-governance" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Table</th>
+<th style="text-align: left;">Primary Key / Purpose</th>
+<th style="text-align: left;">Key Columns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>idr_meta.source_table</code></td>
+<td style="text-align: left;">Registered source tables</td>
+<td style="text-align: left;"><code>table_id</code>, <code>table_fqn</code>, <code>entity_type</code>, <code>entity_key_expr</code>, <code>watermark_column</code>, <code>watermark_lookback_minutes</code>, <code>is_active</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.source_identifier</code></td>
+<td style="text-align: left;">Identifier extraction mappings</td>
+<td style="text-align: left;"><code>table_id</code>, <code>identifier_type</code>, <code>identifier_value_expr</code>, <code>is_hashed</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.entity_attribute_mapping</code></td>
+<td style="text-align: left;">Profile attribute mappings</td>
+<td style="text-align: left;"><code>table_id</code>, <code>attribute_name</code>, <code>attribute_expr</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.rule</code></td>
+<td style="text-align: left;">Deterministic matching rules</td>
+<td style="text-align: left;"><code>rule_id</code>, <code>identifier_type</code>, <code>canonicalize</code>, <code>max_group_size</code>, <code>priority</code>, <code>is_active</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.fuzzy_rule</code></td>
+<td style="text-align: left;">Blocking-based fuzzy rules</td>
+<td style="text-align: left;"><code>rule_id</code>, <code>rule_name</code>, <code>blocking_key_expr</code>, <code>score_expr</code>, <code>threshold</code>, <code>priority</code>, <code>is_active</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.survivorship_rule</code></td>
+<td style="text-align: left;">Golden profile attribute rules</td>
+<td style="text-align: left;"><code>attribute_name</code>, <code>strategy</code>, <code>source_priority_list</code>, <code>recency_field</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.identifier_exclusion</code></td>
+<td style="text-align: left;">Poison-pill blocklist</td>
+<td style="text-align: left;"><code>identifier_type</code> (<code>EMAIL</code>, <code>PHONE</code>, <code>ANY</code>), <code>identifier_value_pattern</code>, <code>match_type</code> (<code>EXACT</code>, <code>LIKE</code>), <code>reason</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.identity_override</code></td>
+<td style="text-align: left;">Manual stewardship overrides</td>
+<td style="text-align: left;"><code>override_id</code>, <code>override_type</code> (<code>FORCE_LINK</code>, <code>DO_NOT_LINK</code>, <code>ISOLATE</code>), <code>entity_key_a</code>, <code>entity_key_b</code>, <code>reason</code>, <code>created_by</code>, <code>is_active</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.privacy_audit_log</code></td>
+<td style="text-align: left;">GDPR / CCPA erasure ledger</td>
+<td style="text-align: left;"><code>request_id</code>, <code>request_type</code>, <code>target_value</code>, <code>affected_entities_count</code>, <code>affected_clusters_count</code>, <code>tables_purged</code>, <code>requested_by</code>, <code>reason</code>, <code>executed_at</code>, <code>status</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_meta.run_state</code></td>
+<td style="text-align: left;">Per-table incremental watermarks</td>
+<td style="text-align: left;"><code>table_id</code>, <code>last_watermark_value</code>, <code>last_run_id</code>, <code>last_run_ts</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="idr_work-schema-ephemeral-pipeline-staging"><code>idr_work</code> Schema (Ephemeral Pipeline Staging)<a class="headerlink" href="#idr_work-schema-ephemeral-pipeline-staging" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Table</th>
+<th style="text-align: left;">Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>idr_work.entities_delta</code></td>
+<td style="text-align: left;">New/updated entities extracted in the current run (<code>watermark_value IS NOT NULL</code>) plus candidate-expanded historical entities (<code>watermark_value IS NULL</code>).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_work.identifiers_extracted</code></td>
+<td style="text-align: left;">Canonicalized and exclusion-filtered identifiers for current delta entities.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_work.identifiers_all</code></td>
+<td style="text-align: left;">Full working set of identifiers across impacted entities used for anchor edge building.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_work.entity_attributes</code></td>
+<td style="text-align: left;">Extracted attributes for fuzzy blocking (skipped automatically when <code>0</code> active fuzzy rules exist).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_work.edges_new</code></td>
+<td style="text-align: left;">Anchor-based star edges ($N-1$ edges per group) after <code>ISOLATE</code>, <code>DO_NOT_LINK</code>, and <code>FORCE_LINK</code> overrides.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_work.lp_edges</code> / <code>idr_work.lp_labels</code></td>
+<td style="text-align: left;">Undirected graph edges and iterative Label Propagation labels (stabilized against historical <code>resolved_id</code>s).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="idr_out-schema-production-outputs-telemetry"><code>idr_out</code> Schema (Production Outputs &amp; Telemetry)<a class="headerlink" href="#idr_out-schema-production-outputs-telemetry" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Table</th>
+<th style="text-align: left;">Purpose</th>
+<th style="text-align: left;">Key Columns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>idr_out.identity_resolved_membership_current</code></td>
+<td style="text-align: left;">Canonical mapping of every <code>entity_key</code> to its persistent <code>resolved_id</code>.</td>
+<td style="text-align: left;"><code>entity_key</code>, <code>resolved_id</code>, <code>updated_at</code>, <code>super_cluster_id</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_out.identity_identifiers_current</code></td>
+<td style="text-align: left;">Current normalized identifiers per <code>entity_key</code> (powers candidate expansion &amp; no-watermark state-diffing).</td>
+<td style="text-align: left;"><code>entity_key</code>, <code>identifier_type</code>, <code>identifier_value_norm</code>, <code>is_hashed</code>, <code>updated_at</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_out.identity_clusters_current</code></td>
+<td style="text-align: left;">Cluster-level quality and confidence metrics.</td>
+<td style="text-align: left;"><code>resolved_id</code>, <code>cluster_size</code>, <code>confidence_score</code>, <code>edge_diversity</code>, <code>match_density</code>, <code>primary_reason</code>, <code>updated_at</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_out.golden_profile_current</code></td>
+<td style="text-align: left;">Consolidated 360° customer profile per <code>resolved_id</code>.</td>
+<td style="text-align: left;"><code>resolved_id</code>, <code>email_primary</code>, <code>phone_primary</code>, <code>first_name</code>, <code>last_name</code>, <code>&lt;dynamic_attributes&gt;</code>, <code>updated_at</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_out.resolved_id_crosswalk</code></td>
+<td style="text-align: left;">Historical ledger of cluster ID merges and splits across runs.</td>
+<td style="text-align: left;"><code>run_id</code>, <code>old_resolved_id</code>, <code>new_resolved_id</code>, <code>entity_key</code>, <code>change_type</code>, <code>changed_at</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_out.run_history</code> &amp; <code>idr_out.stage_metrics</code></td>
+<td style="text-align: left;">Run-level and stage-level execution telemetry.</td>
+<td style="text-align: left;"><code>run_id</code>, <code>run_mode</code>, <code>status</code>, <code>entities_processed</code>, <code>edges_created</code>, <code>clusters_Impacted</code>, <code>lp_iterations</code>, <code>duration_seconds</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_out.skipped_identifier_groups</code></td>
+<td style="text-align: left;">Identifier groups skipped for exceeding <code>max_group_size</code>.</td>
+<td style="text-align: left;"><code>run_id</code>, <code>identifier_type</code>, <code>identifier_value_norm</code>, <code>group_size</code>, <code>max_allowed</code>, <code>sample_entity_keys</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-production-hardening-troubleshooting">3. Production Hardening &amp; Troubleshooting<a class="headerlink" href="#3-production-hardening-troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="recommended-incremental-scheduling-pattern">Recommended Incremental Scheduling Pattern<a class="headerlink" href="#recommended-incremental-scheduling-pattern" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Hourly / Intra-day Runs</strong>: Run <code>idr run --mode INCR</code> every 15–60 minutes. Watermarked event/order tables only scan rows newer than <code>last_watermark_value</code>, while dimension tables without watermarks use fast identifier state-diffing against <code>idr_out.identity_identifiers_current</code> and short-circuit immediately if no identifiers changed.</li>
+<li><strong>Weekly Guardrail Audit</strong>: Query <code>idr_out.skipped_identifier_groups</code> to spot new placeholder values that exceeded <code>max_group_size</code> and promote them to <code>idr_meta.identifier_exclusion</code>.</li>
+</ul>
+<h3 id="troubleshooting-common-scenarios">Troubleshooting Common Scenarios<a class="headerlink" href="#troubleshooting-common-scenarios" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Symptom</th>
+<th style="text-align: left;">Root Cause &amp; Resolution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Authentication Error in Local Web UI</strong></td>
+<td style="text-align: left;">Always launch via <code>idr ui</code> (which sets <code>IDR_ALLOW_INSECURE_DEV_AUTH=true</code> on loopback hosts) or set <code>VITE_ALLOW_INSECURE_DEV_AUTH=true</code> if running Vite dev server directly.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Incremental Run Re-Processes Unchanged Rows</strong></td>
+<td style="text-align: left;">Ensure event/fact tables have a <code>watermark_column</code> mapped in <code>sources:</code>. For tables without a <code>watermark_column</code>, Stage 3 automatically diffs extracted identifiers against <code>idr_out.identity_identifiers_current</code> and prunes unchanged rows.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Oversized Cluster Formed (<code>cluster_size &gt; 1000</code>)</strong></td>
+<td style="text-align: left;">Enable <code>use_default_exclusions: true</code>, inspect <code>idr_out.skipped_identifier_groups</code>, add the offending shared identifier to <code>idr_meta.identifier_exclusion</code>, or apply an <code>ISOLATE</code> / <code>DO_NOT_LINK</code> override in <code>idr_meta.identity_override</code>.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-orchestration-deployment-observability">4. Orchestration, Deployment &amp; Observability<a class="headerlink" href="#4-orchestration-deployment-observability" title="Permanent link">&para;</a></h2>
+<h3 id="apache-airflow-deploymentairflow">Apache Airflow (<code>deployment/airflow/</code>)<a class="headerlink" href="#apache-airflow-deploymentairflow" title="Permanent link">&para;</a></h3>
+<p>Automate hourly incremental and weekly full graph executions with pre-run safety gates:
+- <strong>Safety Gate</strong>: Runs <code>idr run --mode INCR --dry-run</code> and inspects <code>idr_out.dry_run_summary</code> (<code>moved_entities</code>, <code>largest_proposed_cluster</code>). If changes stay within configured thresholds, branches to <code>live_incremental_run</code>; otherwise aborts and notifies on-call.
+- Reference implementation: <a href="https://github.com/anilkulkarni87/sql-identity-oss/blob/main/deployment/airflow/idr_dag.py"><code>deployment/airflow/idr_dag.py</code></a>.</p>
+<h3 id="snowflake-tasks-streams-deploymentsnowflake">Snowflake Tasks &amp; Streams (<code>deployment/snowflake/</code>)<a class="headerlink" href="#snowflake-tasks-streams-deploymentsnowflake" title="Permanent link">&para;</a></h3>
+<p>Schedule IDR and automate retention cleanup natively in Snowflake:
+- <strong>Incremental &amp; Full Tasks</strong>: Runs hourly or weekly via Snowflake Tasks.
+- <strong>Daily Retention Cleanup</strong>: Purges <code>idr_out.dry_run_results</code> (7-day retention), <code>idr_out.skipped_identifier_groups</code> (30-day retention), and truncates ephemeral <code>idr_work.*</code> staging tables when no run is active.
+- <strong>Failure Alert Stream</strong>: An active stream on <code>idr_out.run_history</code> alerts immediately when <code>status = 'FAILED'</code>.
+- Reference implementation: <a href="https://github.com/anilkulkarni87/sql-identity-oss/blob/main/deployment/snowflake/tasks.sql"><code>deployment/snowflake/tasks.sql</code></a>.</p>
+<h3 id="bigquery-gcp-terraform-deploymentgcp">BigQuery / GCP Terraform (<code>deployment/gcp/</code>)<a class="headerlink" href="#bigquery-gcp-terraform-deploymentgcp" title="Permanent link">&para;</a></h3>
+<p>Provision serverless IDR pipelines on Google Cloud:
+- Creates <code>idr_meta</code>, <code>idr_work</code>, and <code>idr_out</code> BigQuery datasets.
+- Configures IAM service account with minimal <code>roles/bigquery.jobUser</code> and dataset permissions.
+- Deploys Cloud Function (2nd Gen) and Cloud Scheduler triggers for hourly incremental runs.
+- Reference implementation: <a href="https://github.com/anilkulkarni87/sql-identity-oss/blob/main/deployment/gcp/main.tf"><code>deployment/gcp/main.tf</code></a>.</p>
+<h3 id="enterprise-compose-stack-with-keycloak-sso-observability">Enterprise Compose Stack with Keycloak SSO &amp; Observability<a class="headerlink" href="#enterprise-compose-stack-with-keycloak-sso-observability" title="Permanent link">&para;</a></h3>
+<p>Simulate or deploy production IDR with SSO, Redis session leasing, and metrics:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.enterprise.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+</span></code></pre></div>
+- <strong>Keycloak SSO</strong>: Bootstrapped via <code>deployment/keycloak/idr-realm.json</code> (<code>test</code> / <code>test</code> user).
+- <strong>Prometheus Metrics</strong>: Scrapes <code>http://api:8000/metrics</code> via <code>monitoring/prometheus/prometheus.yml</code>.
+- <strong>Grafana Dashboard</strong>: Pre-provisioned 6-panel dashboard (<code>monitoring/grafana/dashboards/idr_dashboard.json</code>) tracking entities processed, edges created, clusters impacted, and last run duration.</p>
+<h3 id="scale-testing-benchmarking-tools-toolsscale_test">Scale Testing &amp; Benchmarking Tools (<code>tools/scale_test/</code>)<a class="headerlink" href="#scale-testing-benchmarking-tools-toolsscale_test" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>End-to-End Benchmark</strong>: <code>python tools/scale_test/run_scale_and_mcp_benchmark.py --rows 250000 --incr-rows 10000</code> (runs resolution, verifies 4 mathematical graph invariants, and benchmarks all MCP server tools).</li>
+<li><strong>Synthetic Omni-Channel Retail Generator</strong>: <code>python tools/scale_test/generate_retail_idr_mimesis.py --config tools/scale_test/configs/retail_idr_5k.yaml</code> (generates Parquet files across CRM, POS, E-commerce, web events, app events, and support tickets).</li>
+<li><strong>Cloud Loaders</strong>: Fast Parquet loaders for DuckDB (<code>load_duckdb.py</code>), BigQuery (<code>load_bigquery.py</code>), Snowflake (<code>load_snowflake.py</code>), and Databricks (<code>load_databricks.py</code>).</li>
+</ul>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../interfaces-and-dbt/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Interfaces &amp; dbt">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Interfaces & dbt
+              </div>
+            </div>
+          </a>
+        
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["content.code.copy", "content.code.annotate", "content.tabs.link", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+      
+    
+  </body>
+</html>
