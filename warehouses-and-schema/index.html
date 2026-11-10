@@ -950,10 +950,11 @@
 </span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>idr<span class="w"> </span>run<span class="w"> </span>--platform<span class="w"> </span>databricks<span class="w"> </span>--mode<span class="w"> </span>INCR
 </span></code></pre></div>
 <ul>
-<li><strong>Credential Auto-Discovery</strong>: Automatically reads <code>~/.databrickscfg</code> profiles.</li>
+<li><strong>Credential Auto-Discovery</strong>: Automatically reads <code>~/.databrickscfg</code> profiles (including headless INI and named profiles).</li>
 <li><strong>Table Existence Checks</strong>: Uses <code>SHOW TABLES IN &lt;schema&gt; LIKE '&lt;table_name&gt;'</code> so Unity Catalog / SQL Warehouses never log <code>[TABLE_OR_VIEW_NOT_FOUND]</code> errors during preflight checks.</li>
 <li><strong>Adapter</strong>: <code>idr_core/adapters/databricks.py</code> (<code>DatabricksAdapter</code>).</li>
 </ul>
+<p><img alt="Databricks Full IDR Run" src="../assets/recordings/idr-databricks-run.gif" /></p>
 </div>
 </div>
 </div>
