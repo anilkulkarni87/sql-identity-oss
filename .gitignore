@@ -71,6 +71,7 @@ yarn-debug.log*
 yarn-error.log*
 idr_ui/dist/
 idr_ui/.env.local
+idr_api/static/
 
 # Benchmarks
 benchmarks/data/

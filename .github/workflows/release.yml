@@ -36,6 +36,19 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build React UI into idr_api/static
+        run: |
+          npm ci --ignore-scripts --no-audit
+          npm run build
+          rm -rf ../idr_api/static
+          cp -r dist ../idr_api/static
+        working-directory: idr_ui
+
       - name: Build and verify artifacts
         run: |
           python -m pip install --upgrade pip
@@ -60,6 +73,8 @@ jobs:
           python -m pip install dist/*.whl
           idr version
           idr quickstart --help
+          idr ui --help
+          idr dbt export --help
 
       - name: Attest Python artifacts
         uses: actions/attest-build-provenance@v2

@@ -8,55 +8,49 @@
 {#
   Intermediate model: Label propagation to find connected components.
 
-  Uses recursive CTE to propagate minimum labels through edges.
-  Each entity gets assigned to the minimum entity_key in its connected component.
+  Uses a linear, single-reference iterative CTE chain with self-edges and
+  per-hop GROUP BY deduplication to propagate the minimum entity_key across
+  each connected component without exponential CTE inlining or cycle blowup.
 
   Cross-platform compatible: Snowflake, BigQuery, Databricks, DuckDB
 #}
 
-with recursive
+{% set raw_iters = var('idr_max_lp_iterations', 10) | int %}
+{% set num_iters = 12 if raw_iters > 12 else (1 if raw_iters < 1 else raw_iters) %}
 
-all_nodes as (
+with all_nodes as (
     select distinct left_entity_key as entity_key from {{ ref('int_edges') }}
     union
     select distinct right_entity_key as entity_key from {{ ref('int_edges') }}
 ),
 
-undirected_edges as (
+undirected_edges_with_self as (
     select left_entity_key as src, right_entity_key as dst from {{ ref('int_edges') }}
     union
     select right_entity_key as src, left_entity_key as dst from {{ ref('int_edges') }}
+    union
+    select entity_key as src, entity_key as dst from all_nodes
 ),
 
-label_propagation as (
+lp_0 as (
     select
         entity_key,
-        entity_key as label,
-        0 as iteration
+        entity_key as label
     from all_nodes
-
-    union all
-
-    select
-        lp.entity_key,
-        least(lp.label, e.dst) as label,
-        lp.iteration + 1
-    from label_propagation lp
-    join undirected_edges e on e.src = lp.entity_key
-    where lp.iteration < {{ var('idr_max_lp_iterations', 30) }}
-      and e.dst < lp.label
-),
-
-final_labels as (
-    select
-        entity_key,
-        min(label) as label
-    from label_propagation
-    group by entity_key
 )
+{% for i in range(1, num_iters + 1) %}
+, lp_{{ i }} as (
+    select
+        e.dst as entity_key,
+        min(n.label) as label
+    from lp_{{ i - 1 }} n
+    inner join undirected_edges_with_self e on e.src = n.entity_key
+    group by e.dst
+)
+{% endfor %}
 
 select
     entity_key,
     label as resolved_id,
     current_timestamp as updated_at
-from final_labels
+from lp_{{ num_iters }}

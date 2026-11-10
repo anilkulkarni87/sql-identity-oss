@@ -50,8 +50,8 @@ Examples:
         "--platform",
         "-p",
         choices=["duckdb", "bigquery", "snowflake", "databricks"],
-        required=True,
-        help="Target platform",
+        required=False,
+        help="Target platform (auto-detected if omitted)",
     )
     run_parser.add_argument("--db", help="DuckDB database path")
     run_parser.add_argument("--project", help="GCP project ID (BigQuery)")
@@ -101,14 +101,59 @@ Examples:
         help="Target SQL dialect",
     )
 
+    export_dbt_parser = config_subparsers.add_parser(
+        "export-dbt", help="Export YAML or live metadata config to dbt_idr seed CSVs"
+    )
+    export_dbt_parser.add_argument("--file", "-f", help="YAML config file path")
+    export_dbt_parser.add_argument(
+        "--output-dir", "-o", default="dbt_idr/seeds", help="Target directory for dbt seed CSVs"
+    )
+    export_dbt_parser.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        help="Export from live warehouse metadata instead of YAML file",
+    )
+    export_dbt_parser.add_argument("--db", help="DuckDB database path")
+    export_dbt_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    export_dbt_parser.add_argument("--location", default="US", help="BigQuery location")
+    export_dbt_parser.add_argument(
+        "--meta-dataset", default="idr_meta", help="BigQuery metadata dataset"
+    )
+    export_dbt_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
+
+    # === idr dbt ===
+    dbt_parser = subparsers.add_parser("dbt", help="dbt_idr package utilities")
+    dbt_subparsers = dbt_parser.add_subparsers(dest="dbt_cmd")
+    dbt_export = dbt_subparsers.add_parser(
+        "export", help="Export YAML or live metadata config to dbt_idr seed CSVs"
+    )
+    dbt_export.add_argument("--file", "-f", help="YAML config file path")
+    dbt_export.add_argument(
+        "--output-dir", "-o", default="dbt_idr/seeds", help="Target directory for dbt seed CSVs"
+    )
+    dbt_export.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        help="Export from live warehouse metadata instead of YAML file",
+    )
+    dbt_export.add_argument("--db", help="DuckDB database path")
+    dbt_export.add_argument("--project", help="GCP project ID (BigQuery)")
+    dbt_export.add_argument("--location", default="US", help="BigQuery location")
+    dbt_export.add_argument(
+        "--meta-dataset", default="idr_meta", help="BigQuery metadata dataset"
+    )
+    dbt_export.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
+
     # === idr init ===
     init_parser = subparsers.add_parser("init", help="Initialize metadata tables")
     init_parser.add_argument(
         "--platform",
         "-p",
         choices=["duckdb", "bigquery", "snowflake", "databricks"],
-        required=True,
-        help="Target platform",
+        required=False,
+        help="Target platform (auto-detected if omitted)",
     )
     init_parser.add_argument("--db", help="DuckDB database path")
     init_parser.add_argument("--project", help="GCP project ID (BigQuery)")
@@ -125,8 +170,8 @@ Examples:
         "--platform",
         "-p",
         choices=["duckdb", "bigquery", "snowflake", "databricks"],
-        required=True,
-        help="Target platform",
+        required=False,
+        help="Target platform (auto-detected if omitted)",
     )
     apply_parser.add_argument("--db", help="DuckDB database path")
     apply_parser.add_argument("--project", help="GCP project ID (BigQuery)")
@@ -137,10 +182,24 @@ Examples:
     apply_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
 
     # === idr serve ===
-    serve_parser = subparsers.add_parser("serve", help="Start API server")
+    serve_parser = subparsers.add_parser("serve", help="Start API & UI server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     serve_parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    serve_parser.add_argument(
+        "--open", action="store_true", help="Open the UI in the default browser"
+    )
+
+    # === idr ui ===
+    ui_parser = subparsers.add_parser(
+        "ui", help="Launch the interactive IDR Studio UI & API server"
+    )
+    ui_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    ui_parser.add_argument("--port", type=int, default=8000, help="Port to bind to (default: 8000)")
+    ui_parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    ui_parser.add_argument(
+        "--no-browser", action="store_true", help="Do not automatically open the browser"
+    )
 
     # === idr mcp ===
     mcp_parser = subparsers.add_parser("mcp", help="Start MCP Server")
@@ -177,6 +236,12 @@ Examples:
     if parsed_args.command == "config":
         return handle_config(parsed_args)
 
+    if parsed_args.command == "dbt":
+        if getattr(parsed_args, "dbt_cmd", None) == "export":
+            return handle_dbt_export(parsed_args)
+        dbt_parser.print_help()
+        return 0
+
     if parsed_args.command == "init":
         return handle_init(parsed_args)
 
@@ -185,6 +250,9 @@ Examples:
 
     if parsed_args.command == "serve":
         return handle_serve(parsed_args)
+
+    if parsed_args.command == "ui":
+        return handle_ui(parsed_args)
 
     if parsed_args.command == "mcp":
         return handle_mcp(parsed_args)
@@ -195,9 +263,46 @@ Examples:
     return 0
 
 
+def _resolve_platform(args) -> str:
+    """Resolve target platform from CLI args, environment, or local credential discovery."""
+    platform = getattr(args, "platform", None)
+    if platform:
+        return platform
+
+    if getattr(args, "db", None):
+        return "duckdb"
+    if getattr(args, "project", None):
+        return "bigquery"
+
+    env_platform = os.environ.get("IDR_PLATFORM")
+    if env_platform:
+        return env_platform.lower()
+
+    if os.environ.get("IDR_DATABASE") or os.environ.get("IDR_DB_PATH"):
+        return "duckdb"
+
+    try:
+        from idr_core.credential_discovery import discover_all
+
+        discovered = discover_all()
+        for candidate in ("snowflake", "bigquery", "databricks", "duckdb"):
+            info = discovered.get(candidate, {})
+            if info.get("available"):
+                return candidate
+    except Exception:
+        pass
+
+    raise ValueError(
+        "Could not auto-detect warehouse platform. Pass --platform (-p) or set IDR_PLATFORM."
+    )
+
+
 def get_adapter(args):
     """Helper to create adapter from args."""
-    if args.platform == "duckdb":
+    platform = _resolve_platform(args)
+    args.platform = platform
+
+    if platform == "duckdb":
         db_path = args.db or os.environ.get("IDR_DATABASE") or os.environ.get("IDR_DB_PATH")
         if not db_path:
             raise ValueError("--db required for DuckDB (or set IDR_DATABASE / IDR_DB_PATH)")
@@ -345,7 +450,37 @@ def handle_config(args) -> int:
             print(f"❌ Failed to apply configuration: {e}")
             return 1
 
+    if args.config_cmd == "export-dbt":
+        return handle_dbt_export(args)
+
     return 0
+
+
+def handle_dbt_export(args) -> int:
+    """Export YAML configuration or active warehouse metadata into dbt_idr seed CSVs."""
+    from idr_core.config import config_to_dbt_seeds, load_config, sql_to_config
+
+    try:
+        if getattr(args, "file", None):
+            config = load_config(args.file)
+        else:
+            adapter = get_adapter(args)
+            try:
+                config = sql_to_config(adapter)
+            finally:
+                adapter.close()
+            if not config.get("sources"):
+                print("❌ No active sources found in warehouse metadata.")
+                return 1
+
+        written = config_to_dbt_seeds(config, output_dir=args.output_dir)
+        print(f"✅ Exported {len(written)} dbt_idr seed CSVs to {os.path.abspath(args.output_dir)}:")
+        for name, path in written.items():
+            print(f"   - {name} -> {path}")
+        return 0
+    except Exception as e:
+        print(f"❌ Failed to export dbt seeds: {e}")
+        return 1
 
 
 def handle_run(args) -> int:
@@ -431,8 +566,22 @@ def handle_serve(args) -> int:
         return 1
 
     print(f"🚀 Starting IDR API Server on {args.host}:{args.port}")
+    if getattr(args, "open", False):
+        import threading
+        import webbrowser
+
+        browse_host = "localhost" if args.host in ("0.0.0.0", "127.0.0.1") else args.host
+        url = f"http://{browse_host}:{args.port}"
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+
     uvicorn.run("idr_api.main:app", host=args.host, port=args.port, reload=args.reload)
     return 0
+
+
+def handle_ui(args) -> int:
+    """Handle ui command (starts server and opens browser by default)."""
+    args.open = not getattr(args, "no_browser", False)
+    return handle_serve(args)
 
 
 def handle_mcp(args) -> int:

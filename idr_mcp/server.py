@@ -823,6 +823,47 @@ def resolve_customer_360(identifier_value: str, identifier_type: str = None) -> 
         return {"error": f"Failed to resolve Customer 360 context: {str(e)}"}
 
 
+@mcp.tool()
+def export_dbt_seeds(
+    output_dir: str = "dbt_idr/seeds",
+    config_yaml: str = None,
+) -> Dict[str, Any]:
+    """
+    Export IDR configuration (either from a provided YAML string or from the active
+    warehouse's idr_meta tables) into the 6 standard `dbt_idr` seed CSV files.
+    Bridges interactive agent rule discovery & simulation with governed dbt production runs.
+    """
+    try:
+        from idr_core.config import config_to_dbt_seeds, sql_to_config, validate_config
+
+        if config_yaml:
+            import yaml
+
+            cfg = yaml.safe_load(config_yaml)
+            validate_config(cfg)
+        else:
+            adapter = get_adapter()
+            cfg = sql_to_config(adapter)
+            if not cfg.get("sources"):
+                return {
+                    "status": "ERROR",
+                    "error": "No active sources found in idr_meta tables and no config_yaml provided.",
+                    "hint": "Call apply_config(config_yaml=...) first or pass config_yaml directly to export_dbt_seeds.",
+                }
+
+        written = config_to_dbt_seeds(cfg, output_dir=output_dir)
+        return {
+            "status": "SUCCESS",
+            "output_dir": os.path.abspath(output_dir),
+            "files_written": written,
+            "sources_count": len(cfg.get("sources", [])),
+            "rules_count": len(cfg.get("rules", [])),
+            "next_step": f"Run `dbt seed && dbt run && dbt test` inside your dbt project using seeds from {os.path.abspath(output_dir)}.",
+        }
+    except Exception as e:
+        return {"status": "ERROR", "error": f"Failed to export dbt seeds: {str(e)}"}
+
+
 # --- Entry Point ---
 
 
@@ -917,6 +958,11 @@ def connect_from_env():
         print(f"⚠ Failed to connect to {platform}: {e}", file=sys.stderr)
 
 
-if __name__ == "__main__":
+def main():
+    """CLI entrypoint for `idr-mcp` binary."""
     connect_from_env()
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

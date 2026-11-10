@@ -136,7 +136,7 @@ cluster_entities as (
     {% set rule = ns.rule %}
     {% set order_clause = "record_updated_at desc" %}
 
-    {% if rule and rule['strategy'] == 'PRIORITY' %}
+    {% if rule and rule['strategy'] in ('PRIORITY', 'SOURCE_PRIORITY') %}
         {# Parse priority list (simplified comma-split) #}
         {% set priorities = rule['source_priority_list'].replace('[','').replace(']','').replace('"','').replace("'","").split(',') %}
         {% set case_parts = [] %}

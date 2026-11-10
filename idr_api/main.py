@@ -165,20 +165,6 @@ async def metrics_middleware(request, call_next):
         REQUEST_COUNT.labels(request.method, path_label, status_code).inc()
         REQUEST_LATENCY.labels(request.method, path_label).observe(duration)
 
-try:
-    from fastapi.staticfiles import StaticFiles
-
-    # Serve static files if "static" directory exists (e.g. built React app)
-    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-    if os.path.isdir(static_dir):
-        # Mount static assets
-        app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
-        print(f"INFO: Serving UI from {static_dir}")
-except ImportError:
-    pass  # fastapi.staticfiles might be missing if minimal install (unlikely with fastapi)
-except Exception as e:
-    print(f"WARNING: Failed to mount static UI: {e}")
-
 # CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
@@ -218,6 +204,44 @@ async def metrics():
     _manager = get_manager()
     DB_CONNECTED_GAUGE.set(1 if _manager.connection_count() > 0 else 0)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+# Mount built React UI AFTER all /api and /metrics routes so API paths are never shadowed
+try:
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    _api_dir = os.path.dirname(os.path.abspath(__file__))
+    _candidate_dirs = [
+        os.path.join(_api_dir, "static"),
+        os.path.abspath(os.path.join(_api_dir, "..", "idr_ui", "dist")),
+    ]
+    _static_dir = next(
+        (d for d in _candidate_dirs if os.path.isfile(os.path.join(d, "index.html"))),
+        None,
+    )
+    if _static_dir:
+        _assets_dir = os.path.join(_static_dir, "assets")
+        if os.path.isdir(_assets_dir):
+            app.mount("/assets", StaticFiles(directory=_assets_dir), name="static_assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(full_path: str):
+            """Serve static file if it exists, otherwise fallback to index.html for SPA routes."""
+            candidate = os.path.normpath(os.path.join(_static_dir, full_path))
+            if (
+                full_path
+                and candidate.startswith(_static_dir)
+                and os.path.isfile(candidate)
+            ):
+                return FileResponse(candidate)
+            return FileResponse(os.path.join(_static_dir, "index.html"))
+
+        print(f"INFO: Serving UI from {_static_dir}")
+except ImportError:
+    pass
+except Exception as e:
+    print(f"WARNING: Failed to mount static UI: {e}")
 
 
 if __name__ == "__main__":

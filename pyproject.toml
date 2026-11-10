@@ -76,6 +76,7 @@ dev = [
 
 [project.scripts]
 idr = "idr_core.cli:main"
+idr-mcp = "idr_mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/anilkulkarni87/sql-identity-resolution"
