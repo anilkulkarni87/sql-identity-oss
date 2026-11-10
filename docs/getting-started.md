@@ -100,8 +100,8 @@ idr run --platform duckdb --db demo.duckdb --mode FULL
 idr run --platform duckdb --db demo.duckdb --mode INCR
 ```
 
-> [!TIP]
-> **Dry Run Preview**: Add `--dry-run` to preview cluster merges, new entities, and largest cluster changes in `idr_out.dry_run_results` and `idr_out.dry_run_summary` without mutating production tables.
+!!! tip "Dry Run Preview"
+    Add `--dry-run` to preview cluster merges, new entities, and largest cluster changes in `idr_out.dry_run_results` and `idr_out.dry_run_summary` without mutating production tables.
 
 ### Step 4: Launch the Interactive Web UI
 
@@ -130,6 +130,6 @@ Both the CLI (`idr`) and the Web UI (`idr ui`) automatically discover local clou
 | **Snowflake** | `~/.snowflake/connections.toml` and `~/.snowflake/config` | `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE` |
 | **Databricks** | `~/.databrickscfg` profiles (`HOST`, `token`, `http_path`) | `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_HTTP_PATH`, `DATABRICKS_CATALOG` |
 
-> [!NOTE]
-> **Automatic `--platform` Detection**: If you pass `--db my_file.duckdb`, `--project my-gcp-project`, or set `IDR_PLATFORM`, the `idr` CLI automatically resolves `--platform` for you.
+!!! note "Automatic `--platform` Detection"
+    If you pass `--db my_file.duckdb`, `--project my-gcp-project`, or set `IDR_PLATFORM`, the `idr` CLI automatically resolves `--platform` for you.
 

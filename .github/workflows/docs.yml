@@ -5,6 +5,7 @@ on:
     branches: [main, feature/idr-enhancements]
     paths:
       - 'docs/**'
+      - 'overrides/**'
       - 'mkdocs.yml'
   workflow_dispatch:
 

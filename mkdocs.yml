@@ -9,6 +9,7 @@ exclude_docs: |
 
 theme:
   name: material
+  custom_dir: overrides
   icon:
     logo: material/hub-outline
     repo: fontawesome/brands/github
@@ -47,6 +48,10 @@ theme:
 extra_css:
   - stylesheets/extra.css
 
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
 plugins:
   - search
   - mermaid2:
@@ -78,6 +83,8 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.keys
   - pymdownx.inlinehilite
+  - pymdownx.arithmatex:
+      generic: true
   - admonition
   - tables
   - attr_list
