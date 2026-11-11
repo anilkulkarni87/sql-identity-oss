@@ -617,9 +617,27 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#exposed-mcp-tools-idr_mcpserverpy" class="md-nav__link">
+  <a href="#client-configuration-guides" class="md-nav__link">
     <span class="md-ellipsis">
-      Exposed MCP Tools (idr_mcp/server.py)
+      Client Configuration Guides
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exposed-mcp-tools-17-agentic-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exposed MCP Tools (17 Agentic Tools)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pii-safety-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      PII Safety Controls
     </span>
   </a>
   
@@ -806,9 +824,27 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#exposed-mcp-tools-idr_mcpserverpy" class="md-nav__link">
+  <a href="#client-configuration-guides" class="md-nav__link">
     <span class="md-ellipsis">
-      Exposed MCP Tools (idr_mcp/server.py)
+      Client Configuration Guides
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exposed-mcp-tools-17-agentic-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exposed MCP Tools (17 Agentic Tools)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pii-safety-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      PII Safety Controls
     </span>
   </a>
   
@@ -1043,35 +1079,124 @@
 </table>
 <hr />
 <h2 id="4-fastmcp-server-for-ai-agents-idr-mcp">4. FastMCP Server for AI Agents (<code>idr mcp</code>)<a class="headerlink" href="#4-fastmcp-server-for-ai-agents-idr-mcp" title="Permanent link">&para;</a></h2>
-<p>Expose your identity graph and configuration tools to Claude Desktop, Cursor, or any MCP client:</p>
+<p>Expose your identity graph and configuration tools to <strong>Antigravity</strong>, <strong>Codex</strong>, <strong>Cursor</strong>, <strong>Claude Desktop</strong>, and <strong>VS Code Copilot</strong>. The FastMCP server enables AI agents to query the identity graph, resolve Customer 360 profiles, explain edges, and simulate rules directly against your warehouse.</p>
+<h3 id="client-configuration-guides">Client Configuration Guides<a class="headerlink" href="#client-configuration-guides" title="Permanent link">&para;</a></h3>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:5"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><input id="__tabbed_1_5" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Antigravity</label><label for="__tabbed_1_2">OpenAI Codex</label><label for="__tabbed_1_3">Cursor</label><label for="__tabbed_1_4">Claude Desktop</label><label for="__tabbed_1_5">VS Code (Copilot)</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>Configure stdio transport in <code>.agents/mcp_config.json</code> (workspace) or <code>~/.gemini/config/mcp_config.json</code> (global):</p>
 <div class="language-json highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">"sql-identity-resolution"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">"idr-graph"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"idr"</span><span class="p">,</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"mcp"</span><span class="p">,</span><span class="w"> </span><span class="s2">"--platform"</span><span class="p">,</span><span class="w"> </span><span class="s2">"duckdb"</span><span class="p">,</span><span class="w"> </span><span class="s2">"--db"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/absolute/path/to/demo.duckdb"</span><span class="p">]</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="p">}</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="p">}</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"mcp"</span><span class="p">],</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">        </span><span class="nt">"IDR_PLATFORM"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bigquery"</span><span class="p">,</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">        </span><span class="nt">"IDR_PROJECT"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-gcp-project"</span><span class="p">,</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">        </span><span class="nt">"IDR_PII_ACCESS"</span><span class="p">:</span><span class="w"> </span><span class="s2">"masked"</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">      </span><span class="p">}</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="p">}</span>
 </span></code></pre></div>
-<h3 id="exposed-mcp-tools-idr_mcpserverpy">Exposed MCP Tools (<code>idr_mcp/server.py</code>)<a class="headerlink" href="#exposed-mcp-tools-idr_mcpserverpy" title="Permanent link">&para;</a></h3>
+</div>
+<div class="tabbed-block">
+<p>Add to <code>~/.codex/config.json</code> or <code>~/.codex/mcp.json</code>:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">"idr-graph"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"idr"</span><span class="p">,</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"mcp"</span><span class="p">],</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">        </span><span class="nt">"IDR_PLATFORM"</span><span class="p">:</span><span class="w"> </span><span class="s2">"duckdb"</span><span class="p">,</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">        </span><span class="nt">"IDR_DATABASE"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/absolute/path/to/demo.duckdb"</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="p">}</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="p">}</span>
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<p>Add to <code>.cursor/mcp.json</code> in your project root:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">"idr-graph"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"idr"</span><span class="p">,</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"mcp"</span><span class="p">],</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">        </span><span class="nt">"IDR_PLATFORM"</span><span class="p">:</span><span class="w"> </span><span class="s2">"duckdb"</span><span class="p">,</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">        </span><span class="nt">"IDR_DATABASE"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/absolute/path/to/demo.duckdb"</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">      </span><span class="p">}</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">}</span>
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<p>Add to <code>~/.config/claude/claude_desktop_config.json</code>:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">"idr-graph"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"idr"</span><span class="p">,</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"mcp"</span><span class="p">],</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">      </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">        </span><span class="nt">"IDR_PLATFORM"</span><span class="p">:</span><span class="w"> </span><span class="s2">"duckdb"</span><span class="p">,</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">        </span><span class="nt">"IDR_DATABASE"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/absolute/path/to/demo.duckdb"</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">      </span><span class="p">}</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="p">}</span>
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<p>Add to <code>.vscode/settings.json</code>:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">"mcp"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">"servers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">"idr-graph"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">        </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"idr"</span><span class="p">,</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">        </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"mcp"</span><span class="p">],</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">        </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">          </span><span class="nt">"IDR_PLATFORM"</span><span class="p">:</span><span class="w"> </span><span class="s2">"duckdb"</span><span class="p">,</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">          </span><span class="nt">"IDR_DATABASE"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/absolute/path/to/demo.duckdb"</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">        </span><span class="p">}</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">      </span><span class="p">}</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="p">}</span>
+</span></code></pre></div>
+</div>
+</div>
+</div>
+<blockquote>
+<p>[!TIP] Virtual Environments
+If <code>idr</code> is installed inside a virtual environment (e.g. <code>.venv</code>), set <code>"command"</code> to <code>/path/to/venv/bin/python</code> and <code>"args"</code> to <code>["-m", "idr_mcp.server"]</code>.</p>
+</blockquote>
+<h3 id="exposed-mcp-tools-17-agentic-tools">Exposed MCP Tools (17 Agentic Tools)<a class="headerlink" href="#exposed-mcp-tools-17-agentic-tools" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>get_ClusterView(resolved_id)</code> — Fetch cluster members, edges, confidence metrics, and golden profile attributes.</li>
-<li><code>search_entities(query, limit)</code> — Search entities across all identifier types and attributes.</li>
-<li><code>explain_edge(entity_a, entity_b)</code> — Explain which rules and normalized identifiers linked two entities.</li>
-<li><code>list_runs(limit)</code> &amp; <code>get_metrics()</code> — Inspect pipeline run history, skipped identifier groups, and cluster size distribution.</li>
-<li><code>configure_source(...)</code>, <code>add_rule(...)</code>, <code>run_pipeline(run_mode, dry_run)</code> — Configure and run the pipeline via natural language.</li>
-<li><code>export_dbt_seeds(output_dir, config_yaml)</code> — Compile YAML or live warehouse metadata into <code>dbt_idr</code> seed CSVs.</li>
+<li><code>resolve_customer_360(identifier_type, identifier_value)</code> — Single-call Customer 360 context grounding (canonical identity, golden profile, all linked accounts &amp; identifiers).</li>
+<li><code>discover_and_suggest_rules()</code> — Autonomous table profiling, PII detection, and suggested IDR YAML configuration.</li>
+<li><code>simulate_rule_impact(...)</code> — Non-destructive dry-run simulation of candidate matching rules with supernode risk alerting.</li>
+<li><code>explain_cluster(resolved_id)</code> — Complete cluster explanation (confidence reason, members, edges, and golden profile).</li>
+<li><code>explain_edge(entity_a, entity_b)</code> — View evidence for why two records matched (direct or transitive).</li>
+<li><code>search_identifier(identifier_type, value)</code> — Find clusters by email, phone, loyalty ID, etc.</li>
+<li><code>get_cluster(resolved_id)</code> &amp; <code>get_golden_profile(resolved_id)</code> — Fetch cluster details and surviving attributes.</li>
+<li><code>list_skipped_groups()</code> — Inspect oversized identifier groups flagged by <code>max_group_size</code>.</li>
+<li><code>get_metrics_summary()</code> &amp; <code>get_system_status()</code> — High-level identity graph KPIs and warehouse lifecycle status.</li>
+<li><code>dry_run_pipeline()</code> &amp; <code>run_history()</code> — Trigger dry runs and inspect stage execution telemetry.</li>
 </ul>
+<h3 id="pii-safety-controls">PII Safety Controls<a class="headerlink" href="#pii-safety-controls" title="Permanent link">&para;</a></h3>
+<p>By default, all sensitive PII (emails, phone numbers, exact match values) is masked in tool outputs (<code>jo***hn@example.com</code>). To grant the agent full unmasked values, explicitly pass <code>"IDR_PII_ACCESS": "full"</code> in the server <code>"env"</code>.</p>
 <hr />
 <h2 id="5-dbt_idr-package-integration">5. <code>dbt_idr</code> Package Integration<a class="headerlink" href="#5-dbt_idr-package-integration" title="Permanent link">&para;</a></h2>
 <p>For teams that orchestrate transformations strictly through <strong>dbt Core</strong> or <strong>dbt Cloud</strong>, <a href="https://github.com/anilkulkarni87/sql-identity-oss/tree/main/dbt_idr"><code>dbt_idr</code></a> provides a pure-Jinja SQL implementation compatible with <code>dbt-duckdb</code>, <code>dbt-snowflake</code>, <code>dbt-bigquery</code>, and <code>dbt-databricks</code>.</p>
 <h3 id="exporting-config-to-dbt-seeds-idr-dbt-export">Exporting Config to dbt Seeds (<code>idr dbt export</code>)<a class="headerlink" href="#exporting-config-to-dbt-seeds-idr-dbt-export" title="Permanent link">&para;</a></h3>
 <p>You can design your rules in YAML or the Web UI and export all <strong>7 standard <code>dbt_idr</code> seed CSVs</strong> in one command:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Export from YAML file</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>idr<span class="w"> </span>dbt<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--file<span class="w"> </span>examples/config_retail.yaml<span class="w"> </span>--output-dir<span class="w"> </span>dbt_idr/seeds
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Or export directly from a live warehouse's idr_meta.* tables</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>idr<span class="w"> </span>dbt<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--platform<span class="w"> </span>duckdb<span class="w"> </span>--db<span class="w"> </span>demo.duckdb<span class="w"> </span>--output-dir<span class="w"> </span>dbt_idr/seeds
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Export from YAML file</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>idr<span class="w"> </span>dbt<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--file<span class="w"> </span>examples/config_retail.yaml<span class="w"> </span>--output-dir<span class="w"> </span>dbt_idr/seeds
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Or export directly from a live warehouse's idr_meta.* tables</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>idr<span class="w"> </span>dbt<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--platform<span class="w"> </span>duckdb<span class="w"> </span>--db<span class="w"> </span>demo.duckdb<span class="w"> </span>--output-dir<span class="w"> </span>dbt_idr/seeds
 </span></code></pre></div>
 <h3 id="generated-seed-files-dbt_idrseeds">Generated Seed Files (<code>dbt_idr/seeds/</code>)<a class="headerlink" href="#generated-seed-files-dbt_idrseeds" title="Permanent link">&para;</a></h3>
 <ol>
@@ -1084,10 +1209,10 @@
 <li><code>idr_overrides.csv</code> — Manual stewardship overrides (<code>FORCE_LINK</code>, <code>DO_NOT_LINK</code>, <code>ISOLATE</code>).</li>
 </ol>
 <h3 id="running-dbt_idr">Running <code>dbt_idr</code><a class="headerlink" href="#running-dbt_idr" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">cd</span><span class="w"> </span>dbt_idr
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>dbt<span class="w"> </span>seed
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>dbt<span class="w"> </span>run
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>dbt<span class="w"> </span><span class="nb">test</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">cd</span><span class="w"> </span>dbt_idr
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>dbt<span class="w"> </span>seed
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>dbt<span class="w"> </span>run
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>dbt<span class="w"> </span><span class="nb">test</span>
 </span></code></pre></div>
 <h3 id="dbt_idr-model-dag"><code>dbt_idr</code> Model DAG<a class="headerlink" href="#dbt_idr-model-dag" title="Permanent link">&para;</a></h3>
 <pre class="mermaid"><code>flowchart LR
