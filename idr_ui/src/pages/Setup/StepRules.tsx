@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2, ShieldAlert, Link2 } from "lucide-react";
 import { ExclusionRule, IDRConfig, MatchingRule, OverrideRule } from '../../types';
 import { api } from '../../api/client';
@@ -44,20 +44,22 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     const [availableTypes, setAvailableTypes] = useState<string[]>([]);
     const [availableAttributes, setAvailableAttributes] = useState<string[]>([]);
     const [fuzzyTemplates, setFuzzyTemplates] = useState<FuzzyTemplate[]>([]);
+    const initializedRef = useRef(false);
 
     useEffect(() => {
-        // Initialize rules (combine exact and fuzzy)
-        const combined: MatchingRule[] = [
-            ...(config.rules || []),
-            ...(config.fuzzy_rules || []).map(f => ({ ...f, type: 'FUZZY' }))
-        ].sort((a, b) => a.priority - b.priority);
+        // Only initialize from parent config on first mount or when rules are empty
+        if (!initializedRef.current) {
+            const combined: MatchingRule[] = [
+                ...(config.rules || []),
+                ...(config.fuzzy_rules || []).map(f => ({ ...f, type: 'FUZZY' }))
+            ].sort((a, b) => a.priority - b.priority);
 
-        if (combined.length > 0) {
             setRules(combined);
+            setExclusions(config.exclusions || []);
+            setUseDefaultExclusions(!!config.use_default_exclusions);
+            setOverrides(config.overrides || []);
+            initializedRef.current = true;
         }
-        setExclusions(config.exclusions || []);
-        setUseDefaultExclusions(!!config.use_default_exclusions);
-        setOverrides(config.overrides || []);
 
         // Available match keys & attributes
         const typeSet = new Set<string>();
@@ -84,6 +86,11 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
             .catch(err => console.error("Failed to fetch templates", err));
 
     }, [config]);
+
+    const clearAllFuzzyRules = () => {
+        const remaining = rules.filter(r => r.type !== 'FUZZY');
+        updatePriorities(remaining);
+    };
 
     const resolveTemplateSql = (templateSql: string, colName: string) => {
         const safeCol = colName || availableAttributes[0] || availableTypes[0] || 'first_name';
@@ -408,6 +415,15 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                         <button onClick={addFuzzyRule} className="flex items-center gap-2 px-3 py-2 bg-purple-900/30 border border-purple-800 hover:border-purple-500 hover:text-purple-300 rounded-md text-sm text-purple-300 transition-all">
                             <Wand2 className="w-3 h-3" /> Add Fuzzy Rule
                         </button>
+                        {rules.some(r => r.type === 'FUZZY') && (
+                            <button
+                                onClick={clearAllFuzzyRules}
+                                className="flex items-center gap-1.5 px-3 py-2 bg-red-950/40 border border-red-800 hover:border-red-600 hover:text-red-300 rounded-md text-sm text-red-400 transition-all"
+                                title="Remove all fuzzy rules"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" /> Remove All Fuzzy Rules
+                            </button>
+                        )}
                     </div>
                 </div>
 

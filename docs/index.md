@@ -62,9 +62,13 @@ idr quickstart --rows 10000 --output demo.duckdb
 idr ui --db demo.duckdb
 ```
 
-### 🎬 Live Cloud Execution (Databricks Unity Catalog)
+### 🎬 Live Cloud Execution & Production Runtimes
 
-Zero-config credential discovery (`~/.databrickscfg`) and 8-stage execution against Databricks SQL Warehouse:
+- **Databricks SQL Warehouse**: 6.3M entities across 15 tables resolved into 1.54M clusters in **296s (4.9 min)**.
+- **Google BigQuery (Serverless)**: 6.3M entities across 15 tables resolved into 1.54M clusters in **306s (5.1 min)**.
+- **Snowflake**: *Testing in progress — benchmark results being published shortly.*
+
+👉 [View Full Stage-by-Stage Production Benchmark Breakdown →](warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes)
 
 ![IDR Full Pipeline Run on Databricks](assets/recordings/idr-databricks-run.gif)
 

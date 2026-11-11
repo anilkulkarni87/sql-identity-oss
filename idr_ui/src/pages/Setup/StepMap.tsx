@@ -256,8 +256,8 @@ export default function StepMap({ tables, initialConfig, onNext, onBack }: StepM
                 attributes: config[t].attributes || []
             })),
             rules: initialConfig?.rules && initialConfig.rules.length > 0 ? initialConfig.rules : dynamicRules,
-            fuzzy_rules: initialConfig?.fuzzy_rules,
-            survivorship: initialConfig?.survivorship,
+            fuzzy_rules: initialConfig?.fuzzy_rules || [],
+            survivorship: initialConfig?.survivorship || [],
         };
 
         onNext(finalConfig);

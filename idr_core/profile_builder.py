@@ -229,7 +229,8 @@ class ProfileBuilder:
                     mapped_cols.append(f"NULL AS {safe_attr}")
 
             cols_sql = ",\n                ".join(mapped_cols)
-            recency_expr = f"src.{wm_col}" if wm_col else "NULL"
+            ts_type = self.dialect.get("timestamp_type", "TIMESTAMP")
+            recency_expr = f"CAST(src.{wm_col} AS {ts_type})" if wm_col else f"CAST(NULL AS {ts_type})"
             where_clause = ""
             if is_incremental:
                 where_clause = "\n                WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)"

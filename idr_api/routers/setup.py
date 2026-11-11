@@ -330,6 +330,19 @@ async def save_config(
     try:
         from idr_core.config import config_to_sql, validate_config
 
+        # Sanitize config dictionary: normalize None values to empty collections
+        cfg = dict(request.config or {})
+        for key in ("sources", "rules", "fuzzy_rules", "survivorship", "exclusions", "overrides"):
+            if cfg.get(key) is None:
+                cfg[key] = []
+        for src in cfg.get("sources", []):
+            if isinstance(src, dict):
+                if src.get("identifiers") is None:
+                    src["identifiers"] = []
+                if src.get("attributes") is None:
+                    src["attributes"] = []
+        request.config = cfg
+
         # Validate config before generating SQL
         validate_config(request.config)
 
@@ -433,6 +446,8 @@ async def save_config(
         return {"status": "ok", "message": f"Configuration saved ({count} statements executed)"}
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, f"Failed to save configuration: {str(e)}")
 
 

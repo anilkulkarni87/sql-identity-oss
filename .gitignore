@@ -63,6 +63,8 @@ build.log
 .chat_history/
 site/
 CONTEXT_GRAPH.md
+*.tape
+*.mp4
 
 # React / Node.js
 node_modules/

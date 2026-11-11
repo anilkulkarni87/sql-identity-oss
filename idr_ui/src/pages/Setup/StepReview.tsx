@@ -4,7 +4,7 @@ import {
     Loader2, CheckCircle2, Settings, Play, Save, ClipboardList,
     ChevronDown, ChevronRight, Database, Shield, Layers, Code,
     Activity, Clock, Cpu, FileSpreadsheet, GitMerge, Network, Sparkles,
-    ArrowRight
+    ArrowRight, Copy, Check, Edit3, AlertCircle
 } from "lucide-react";
 import { IDRConfig } from '../../types';
 import { api } from '../../api/client';
@@ -16,20 +16,29 @@ export default function StepReview({
     onComplete,
     initialSaved = false,
     readOnly = false,
-    warningMessage = null
+    warningMessage = null,
+    onUpdateConfig
 }: {
     config: IDRConfig,
     onBack: () => void,
     onComplete: () => void,
     initialSaved?: boolean,
     readOnly?: boolean,
-    warningMessage?: string | null
+    warningMessage?: string | null,
+    onUpdateConfig?: (config: IDRConfig) => void
 }) {
     const navigate = useNavigate();
     type ReviewPhase = 'idle' | 'saving' | 'running' | 'success';
     const [phase, setPhase] = useState<ReviewPhase>('idle');
     const [error, setError] = useState<string | null>(null);
     const [configSaved, setConfigSaved] = useState(initialSaved);
+
+    // JSON Edit State
+    const [isEditingJson, setIsEditingJson] = useState(false);
+    const [jsonInput, setJsonInput] = useState('');
+    const [jsonError, setJsonError] = useState<string | null>(null);
+    const [jsonCopied, setJsonCopied] = useState(false);
+    const [jsonSuccess, setJsonSuccess] = useState<string | null>(null);
 
     // Run Configuration State
     const [runMode, setRunMode] = useState<'FULL' | 'INCREMENTAL'>('INCREMENTAL');
@@ -123,7 +132,16 @@ export default function StepReview({
         setPhase('saving');
         setError(null);
         try {
-            await api.saveSetupConfig(config);
+            const cleanConfig = {
+                ...config,
+                sources: config.sources || [],
+                rules: config.rules || [],
+                fuzzy_rules: config.fuzzy_rules || [],
+                survivorship: config.survivorship || [],
+                exclusions: config.exclusions || [],
+                overrides: config.overrides || [],
+            };
+            await api.saveSetupConfig(cleanConfig);
             setConfigSaved(true);
             setPhase('idle');
         } catch (err: any) {
@@ -743,13 +761,101 @@ export default function StepReview({
             )}
 
             {openSection === 'json' && (
-                <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 max-h-72 overflow-y-auto">
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                        JSON Configuration Manifest
-                    </h4>
-                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
-                        {JSON.stringify(config, null, 2)}
-                    </pre>
+                <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                            JSON Configuration Manifest
+                        </h4>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText(JSON.stringify(config, null, 2));
+                                    setJsonCopied(true);
+                                    setTimeout(() => setJsonCopied(false), 2000);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded border border-gray-700 transition-colors"
+                            >
+                                {jsonCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
+                                {jsonCopied ? 'Copied!' : 'Copy JSON'}
+                            </button>
+                            {!isEditingJson ? (
+                                <button
+                                    onClick={() => {
+                                        setJsonInput(JSON.stringify(config, null, 2));
+                                        setJsonError(null);
+                                        setJsonSuccess(null);
+                                        setIsEditingJson(true);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-blue-900/40 hover:bg-blue-800/60 text-blue-300 rounded border border-blue-700/60 transition-colors"
+                                >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                    Edit / Paste JSON
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => {
+                                        setIsEditingJson(false);
+                                        setJsonError(null);
+                                    }}
+                                    className="px-2.5 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 rounded border border-gray-700"
+                                >
+                                    Cancel
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {jsonError && (
+                        <div className="p-3 bg-red-950/50 border border-red-800 text-red-300 rounded-lg text-xs flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                            <span>{jsonError}</span>
+                        </div>
+                    )}
+
+                    {jsonSuccess && (
+                        <div className="p-3 bg-green-950/50 border border-green-800 text-green-300 rounded-lg text-xs flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4 shrink-0 text-green-400" />
+                            <span>{jsonSuccess}</span>
+                        </div>
+                    )}
+
+                    {isEditingJson ? (
+                        <div className="space-y-3">
+                            <textarea
+                                value={jsonInput}
+                                onChange={(e) => setJsonInput(e.target.value)}
+                                rows={14}
+                                className="w-full bg-gray-950 border border-blue-700/80 rounded-lg p-3 font-mono text-xs text-blue-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                placeholder="Paste your full IDR JSON configuration manifest here..."
+                            />
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    onClick={() => {
+                                        try {
+                                            const parsed = JSON.parse(jsonInput);
+                                            if (!parsed.sources || !Array.isArray(parsed.sources)) {
+                                                setJsonError("Configuration must include a 'sources' array.");
+                                                return;
+                                            }
+                                            setJsonError(null);
+                                            onUpdateConfig?.(parsed);
+                                            setIsEditingJson(false);
+                                            setJsonSuccess(`Successfully applied config with ${parsed.sources.length} sources and ${(parsed.rules || []).length} rules!`);
+                                        } catch (err: any) {
+                                            setJsonError(`Invalid JSON syntax: ${err.message}`);
+                                        }
+                                    }}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold shadow-sm transition-colors"
+                                >
+                                    Apply JSON Manifest
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <pre className="text-xs font-mono text-gray-300 overflow-x-auto max-h-72 p-2 bg-gray-950 rounded border border-gray-800">
+                            {JSON.stringify(config, null, 2)}
+                        </pre>
+                    )}
                 </div>
             )}
         </div>

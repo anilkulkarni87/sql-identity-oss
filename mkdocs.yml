@@ -47,26 +47,16 @@ theme:
 
 extra_css:
   - stylesheets/extra.css
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css
 
 extra_javascript:
-  - javascripts/mathjax.js
-  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/contrib/auto-render.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js
+  - javascripts/katex.js
 
 plugins:
   - search
-  - mermaid2:
-      arguments:
-        theme: 'base'
-        themeVariables:
-          primaryColor: '#1e293b'
-          primaryTextColor: '#f8fafc'
-          primaryBorderColor: '#38bdf8'
-          lineColor: '#64748b'
-          secondaryColor: '#0f172a'
-          tertiaryColor: '#1e293b'
-        flowchart:
-          useMaxWidth: true
-          htmlLabels: true
 
 markdown_extensions:
   - pymdownx.highlight:
