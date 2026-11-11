@@ -86,6 +86,81 @@ export IDR_PII_ACCESS=full
 
 ## Agent Configuration
 
+### Antigravity
+
+Antigravity natively discovers MCP servers configured in `mcp_config.json`.
+
+**Workspace-Level (Project Specific):**  
+Create or edit `.agents/mcp_config.json` (or `.agent/mcp_config.json`) in your project root:
+
+```json
+{
+  "mcpServers": {
+    "idr-graph": {
+      "command": "idr",
+      "args": ["mcp"],
+      "env": {
+        "IDR_PLATFORM": "duckdb",
+        "IDR_DATABASE": "/absolute/path/to/demo.duckdb",
+        "IDR_PII_ACCESS": "masked"
+      }
+    }
+  }
+}
+```
+
+*For BigQuery in Antigravity:*
+```json
+{
+  "mcpServers": {
+    "idr-graph": {
+      "command": "idr",
+      "args": ["mcp"],
+      "env": {
+        "IDR_PLATFORM": "bigquery",
+        "IDR_PROJECT": "your-gcp-project",
+        "IDR_PII_ACCESS": "masked"
+      }
+    }
+  }
+}
+```
+
+**Global Configuration:**  
+Add to `~/.gemini/config/mcp_config.json` to make `idr-graph` available across all Antigravity projects.
+
+> **Tip for Virtual Environments**: If `idr` is not in your global `PATH`, point directly to your virtual environment's Python binary:
+> ```json
+> {
+>   "command": "/absolute/path/to/venv/bin/python",
+>   "args": ["-m", "idr_mcp.server"],
+>   "env": { ... }
+> }
+> ```
+
+---
+
+### OpenAI Codex CLI
+
+Add to `~/.codex/config.json` or `~/.codex/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "idr-graph": {
+      "command": "idr",
+      "args": ["mcp"],
+      "env": {
+        "IDR_PLATFORM": "duckdb",
+        "IDR_DATABASE": "/absolute/path/to/demo.duckdb"
+      }
+    }
+  }
+}
+```
+
+---
+
 ### Claude Desktop
 
 Add to your `~/.config/claude/claude_desktop_config.json`:
@@ -105,6 +180,8 @@ Add to your `~/.config/claude/claude_desktop_config.json`:
 }
 ```
 
+---
+
 ### Cursor
 
 Add to your `.cursor/mcp.json` in the project root:
@@ -123,6 +200,8 @@ Add to your `.cursor/mcp.json` in the project root:
   }
 }
 ```
+
+---
 
 ### VS Code (Copilot)
 
