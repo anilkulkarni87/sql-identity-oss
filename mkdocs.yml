@@ -47,11 +47,12 @@ theme:
 
 extra_css:
   - stylesheets/extra.css
-  - https://unpkg.com/katex@0/dist/katex.min.css
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css
 
 extra_javascript:
-  - https://unpkg.com/katex@0/dist/katex.min.js
-  - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/contrib/auto-render.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js
   - javascripts/katex.js
 
 plugins:

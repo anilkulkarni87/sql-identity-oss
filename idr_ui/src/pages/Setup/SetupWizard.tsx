@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Database, Search, GitGraph, Play, Layers, Shield } from "lucide-react";
+import { useEffect, useState } from 'react';
+import { Database, Search, GitGraph, Play, Layers, Shield, FileCode2, X, AlertCircle } from "lucide-react";
 import { IDRConfig } from '../../types';
 import { api } from '../../api/client';
 import { useWizardMachine, WizardStage, WIZARD_STAGES } from './useWizardMachine';
@@ -13,6 +13,9 @@ import StepReview from './StepReview';
 
 export default function SetupWizard() {
     const machine = useWizardMachine();
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+    const [importText, setImportText] = useState('');
+    const [importError, setImportError] = useState<string | null>(null);
 
     const checkConfigAndNavigate = async () => {
         try {
@@ -77,10 +80,90 @@ export default function SetupWizard() {
 
     return (
         <div className="container mx-auto max-w-5xl py-10 space-y-8 text-gray-100">
-            <header className="text-center space-y-2">
-                <h1 className="text-3xl font-extrabold tracking-tight">Setup IDR</h1>
-                <p className="text-gray-400">Connect your data warehouse and configure identity resolution in minutes.</p>
+            <header className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="space-y-1 text-center sm:text-left">
+                    <h1 className="text-3xl font-extrabold tracking-tight">Setup IDR</h1>
+                    <p className="text-gray-400 text-sm">Connect your data warehouse and configure identity resolution in minutes.</p>
+                </div>
+                <button
+                    onClick={() => {
+                        setImportText(JSON.stringify(machine.mappingConfig, null, 2));
+                        setImportError(null);
+                        setIsImportModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 bg-gray-800 hover:bg-gray-700 text-blue-400 hover:text-blue-300 border border-gray-700 hover:border-blue-500 rounded-lg text-xs font-semibold shadow-sm transition-all"
+                >
+                    <FileCode2 className="w-4 h-4" />
+                    Import / Paste JSON
+                </button>
             </header>
+
+            {/* Import JSON Modal */}
+            {isImportModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+                    <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl max-w-2xl w-full p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <FileCode2 className="w-5 h-5 text-blue-400" />
+                                <h3 className="text-lg font-bold text-white">Import Configuration JSON</h3>
+                            </div>
+                            <button
+                                onClick={() => setIsImportModalOpen(false)}
+                                className="p-1 hover:bg-gray-800 rounded text-gray-400 hover:text-white"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <p className="text-xs text-gray-400">
+                            Paste an existing IDR JSON configuration manifest (e.g. from Databricks, BigQuery, or an exported YAML) to instantly load sources, identifiers, rules, and mappings.
+                        </p>
+
+                        {importError && (
+                            <div className="p-3 bg-red-950/60 border border-red-800 text-red-300 rounded-lg text-xs flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                                <span>{importError}</span>
+                            </div>
+                        )}
+
+                        <textarea
+                            value={importText}
+                            onChange={(e) => setImportText(e.target.value)}
+                            rows={15}
+                            className="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 font-mono text-xs text-gray-200 focus:outline-none focus:border-blue-500"
+                            placeholder='{"sources": [{"id": "...", "table": "...", "entity_key": "...", "identifiers": [...]}], "rules": [...]}'
+                        />
+
+                        <div className="flex justify-end gap-3 pt-2">
+                            <button
+                                onClick={() => setIsImportModalOpen(false)}
+                                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-md text-xs font-medium"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    try {
+                                        const parsed = JSON.parse(importText);
+                                        if (!parsed.sources || !Array.isArray(parsed.sources)) {
+                                            setImportError("JSON must contain a 'sources' array.");
+                                            return;
+                                        }
+                                        setImportError(null);
+                                        machine.hydrateFromSavedConfig(parsed);
+                                        machine.goToStage('review');
+                                        setIsImportModalOpen(false);
+                                    } catch (err: any) {
+                                        setImportError(`Invalid JSON: ${err.message}`);
+                                    }
+                                }}
+                                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold shadow-md transition-colors"
+                            >
+                                Apply & Go to Review
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Stepper with explicit State Machine transitions */}
             <div className="flex justify-center w-full mb-8 overflow-x-auto">
@@ -152,6 +235,9 @@ export default function SetupWizard() {
                             initialSaved={machine.isConfigured}
                             readOnly={!!machine.initWarning}
                             warningMessage={machine.initWarning}
+                            onUpdateConfig={(newConfig: IDRConfig) => {
+                                machine.hydrateFromSavedConfig(newConfig);
+                            }}
                         />
                     )}
                 </div>

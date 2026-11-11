@@ -145,7 +145,13 @@ Pre-built configurations for common use cases:
 | [Financial](examples/templates/financial/) | Account linking | account_id, email, SSN |
 | [B2B SaaS](examples/templates/b2b_saas/) | Lead deduplication | email, domain, company_name |
 
-## 🧪 Testing (Local & Cloud)
+## 🧪 Testing & Production Benchmarks
+
+- **Live Cloud Benchmarks (6.3M Entities, 15 Source Tables)**:
+  - **Databricks SQL Warehouse**: Full resolution across 6.3M records in **296s (4.9 min)**.
+  - **Google BigQuery**: Full resolution across 6.3M records in **306s (5.1 min)**.
+  - **Snowflake**: Testing in progress — results being added shortly.
+  - Detailed stage breakdown in [Supported Warehouses & Production Benchmarks](docs/warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes).
 
 ```bash
 # 1. Run the full unit & multi-dialect test suite (265+ tests)

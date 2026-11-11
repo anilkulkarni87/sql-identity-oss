@@ -1,0 +1,352 @@
+sources:
+  - id: ecommerce_synth_loyalty_transactions
+    table: ga4-134745.ecommerce_synth.loyalty_transactions
+    entity_type: PERSON
+    entity_key: loyalty_txn_id
+    watermark: transaction_date
+    identifiers:
+      - type: loyalty_txn_id
+        expr: loyalty_txn_id
+      - type: order_id
+        expr: source_order_id
+      - type: loyalty_id
+        expr: loyalty_id
+    attributes:
+      - name: transaction_type
+        expr: transaction_type
+      - name: transaction_date
+        expr: transaction_date
+      - name: points
+        expr: points
+
+  - id: ecommerce_synth_experiment_assignments
+    table: ga4-134745.ecommerce_synth.experiment_assignments
+    entity_type: PERSON
+    entity_key: assignment_id
+    watermark: assigned_at
+    identifiers:
+      - type: experiment_id
+        expr: experiment_id
+      - type: assignment_id
+        expr: assignment_id
+      - type: customer_id
+        expr: customer_id
+    attributes:
+      - name: conversion_order_id
+        expr: conversion_order_id
+      - name: conversion_value
+        expr: conversion_value
+      - name: converted
+        expr: converted
+      - name: variant
+        expr: variant
+
+  - id: ecommerce_synth_instore_accounts
+    table: ga4-134745.ecommerce_synth.instore_accounts
+    entity_type: PERSON
+    entity_key: instore_account_id
+    watermark: created_at
+    identifiers:
+      - type: instore_account_id
+        expr: instore_account_id
+      - type: customer_id
+        expr: customer_id
+      - type: phone
+        expr: phone_number
+    attributes:
+      - name: last_visit_date
+        expr: last_visit_date
+      - name: total_visits
+        expr: total_visits
+      - name: store_id
+        expr: store_id
+
+  - id: ecommerce_synth_orders_instore
+    table: ga4-134745.ecommerce_synth.orders_instore
+    entity_type: PERSON
+    entity_key: transaction_id
+    watermark: transaction_date
+    identifiers:
+      - type: instore_account_id
+        expr: instore_account_id
+      - type: transaction_id
+        expr: transaction_id
+      - type: customer_id
+        expr: customer_id
+    attributes:
+      - name: store_id
+        expr: store_id
+
+  - id: ecommerce_synth_email_events
+    table: ga4-134745.ecommerce_synth.email_events
+    entity_type: PERSON
+    entity_key: email_event_id
+    watermark: event_timestamp
+    identifiers:
+      - type: email
+        expr: email_address
+      - type: customer_id
+        expr: customer_id
+    attributes:
+      - name: link_clicked
+        expr: link_clicked
+      - name: device_type
+        expr: device_type
+      - name: campaign_id
+        expr: campaign_id
+      - name: event_type
+        expr: event_type
+
+  - id: ecommerce_synth_loyalty_members
+    table: ga4-134745.ecommerce_synth.loyalty_members
+    entity_type: PERSON
+    entity_key: loyalty_id
+    watermark: enrolled_date
+    identifiers:
+      - type: customer_id
+        expr: customer_id
+      - type: loyalty_id
+        expr: loyalty_id
+    attributes:
+      - name: preferred_store_id
+        expr: preferred_store_id
+      - name: tier_expiry_date
+        expr: tier_expiry_date
+      - name: lifetime_points
+        expr: lifetime_points
+      - name: points_balance
+        expr: points_balance
+      - name: enrolled_date
+        expr: enrolled_date
+      - name: tier
+        expr: tier
+
+  - id: ecommerce_synth_support_tickets
+    table: ga4-134745.ecommerce_synth.support_tickets
+    entity_type: PERSON
+    entity_key: ticket_id
+    watermark: created_at
+    identifiers:
+      - type: customer_id
+        expr: customer_id
+      - type: ticket_id
+        expr: ticket_id
+      - type: order_id
+        expr: order_id
+    attributes:
+      - name: satisfaction_score
+        expr: satisfaction_score
+      - name: is_fraud_related
+        expr: is_fraud_related
+      - name: category
+        expr: category
+      - name: priority
+        expr: priority
+      - name: channel
+        expr: channel
+      - name: status
+        expr: status
+
+  - id: ecommerce_synth_clickstream
+    table: ga4-134745.ecommerce_synth.clickstream
+    entity_type: PERSON
+    entity_key: event_id
+    watermark: event_timestamp
+    identifiers:
+      - type: customer_id
+        expr: customer_id
+      - type: session_id
+        expr: session_id
+      - type: event_id
+        expr: event_id
+    attributes:
+      - name: event_timestamp
+        expr: event_timestamp
+      - name: search_query
+        expr: search_query
+      - name: device_type
+        expr: device_type
+      - name: product_id
+        expr: product_id
+      - name: event_type
+        expr: event_type
+      - name: cart_value
+        expr: cart_value
+      - name: ip_address
+        expr: ip_address
+      - name: referrer
+        expr: referrer
+      - name: page_url
+        expr: page_url
+      - name: browser
+        expr: browser
+      - name: os
+        expr: os
+
+  - id: ecommerce_synth_orders_online
+    table: ga4-134745.ecommerce_synth.orders_online
+    entity_type: PERSON
+    entity_key: order_id
+    watermark: order_date
+    identifiers:
+      - type: address_id
+        expr: billing_address_id
+      - type: customer_id
+        expr: customer_id
+      - type: session_id
+        expr: session_id
+      - type: order_id
+        expr: order_id
+    attributes:
+      - name: discount_amount
+        expr: discount_amount
+      - name: payment_method
+        expr: payment_method
+      - name: shipping_cost
+        expr: shipping_cost
+      - name: total_amount
+        expr: total_amount
+      - name: device_type
+        expr: device_type
+      - name: coupon_code
+        expr: coupon_code
+      - name: tax_amount
+        expr: tax_amount
+      - name: subtotal
+        expr: subtotal
+      - name: status
+        expr: status
+
+  - id: ecommerce_synth_fraud_flags
+    table: ga4-134745.ecommerce_synth.fraud_flags
+    entity_type: PERSON
+    entity_key: flag_id
+    watermark: detected_at
+    identifiers:
+      - type: customer_id
+        expr: customer_id
+    attributes:
+      - name: is_confirmed_fraud
+        expr: is_confirmed_fraud
+      - name: entity_type
+        expr: entity_type
+      - name: risk_score
+        expr: risk_score
+      - name: fraud_type
+        expr: fraud_type
+      - name: details
+        expr: details
+
+  - id: ecommerce_synth_customers
+    table: ga4-134745.ecommerce_synth.customers
+    entity_type: PERSON
+    entity_key: customer_id
+    watermark: created_at
+    identifiers:
+      - type: customer_id
+        expr: customer_id
+      - type: phone
+        expr: phone
+      - type: email
+        expr: email
+    attributes:
+      - name: customer_segment
+        expr: customer_segment
+      - name: channel_acquired
+        expr: channel_acquired
+      - name: date_of_birth
+        expr: date_of_birth
+      - name: first_name
+        expr: first_name
+      - name: is_active
+        expr: is_active
+      - name: last_name
+        expr: last_name
+      - name: gender
+        expr: gender
+
+  - id: ecommerce_synth_reviews
+    table: ga4-134745.ecommerce_synth.reviews
+    entity_type: PERSON
+    entity_key: review_id
+    watermark: created_at
+    identifiers:
+      - type: customer_id
+        expr: customer_id
+      - type: review_id
+        expr: review_id
+      - type: order_id
+        expr: order_id
+    attributes:
+      - name: is_verified_purchase
+        expr: is_verified_purchase
+      - name: helpful_votes
+        expr: helpful_votes
+      - name: rating
+        expr: rating
+      - name: title
+        expr: title
+      - name: body
+        expr: body
+
+  - id: ecommerce_synth_addresses
+    table: ga4-134745.ecommerce_synth.addresses
+    entity_type: PERSON
+    entity_key: address_id
+    identifiers:
+      - type: customer_id
+        expr: customer_id
+      - type: address_id
+        expr: address_id
+    attributes:
+      - name: street_address
+        expr: street_address
+      - name: address_type
+        expr: address_type
+      - name: is_default
+        expr: is_default
+      - name: zip_code
+        expr: zip_code
+      - name: country
+        expr: country
+      - name: state
+        expr: state
+      - name: city
+        expr: city
+
+rules:
+  - id: "104"
+    type: EXACT
+    match_keys: [email]
+    priority: 1
+    canonicalize: EMAIL_STANDARD
+
+  - id: "105"
+    type: EXACT
+    match_keys: [phone]
+    priority: 2
+    canonicalize: PHONE_DIGITS
+
+  - id: "108"
+    type: EXACT
+    match_keys: [loyalty_id]
+    priority: 3
+    canonicalize: LOWERCASE
+
+  - id: "100"
+    type: EXACT
+    match_keys: [customer_id]
+    priority: 4
+    canonicalize: LOWERCASE
+
+  - id: "101"
+    type: EXACT
+    match_keys: [address_id]
+    priority: 5
+    canonicalize: LOWERCASE
+
+  - id: "109"
+    type: EXACT
+    match_keys: [instore_account_id]
+    priority: 6
+    canonicalize: LOWERCASE

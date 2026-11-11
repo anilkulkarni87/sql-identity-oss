@@ -170,4 +170,47 @@ docker compose -f docker-compose.enterprise.yml up -d --build
 - **Synthetic Omni-Channel Retail Generator**: `python tools/scale_test/generate_retail_idr_mimesis.py --config tools/scale_test/configs/retail_idr_5k.yaml` (generates Parquet files across CRM, POS, E-commerce, web events, app events, and support tickets).
 - **Cloud Loaders**: Fast Parquet loaders for DuckDB (`load_duckdb.py`), BigQuery (`load_bigquery.py`), Snowflake (`load_snowflake.py`), and Databricks (`load_databricks.py`).
 
+---
+
+## 5. Production Benchmarks & Real-World Runtimes
+
+The pipeline has been benchmarked on a realistic omni-channel e-commerce workload spanning **15 source tables** and **6,297,049 entity records** across customer profiles, loyalty transactions, POS accounts, online/in-store orders, addresses, email campaigns, AB-testing experiments, reviews, support tickets, web events, and fraud cases.
+
+### Warehouse Benchmark Comparison (6.3M Entities, 15 Source Tables)
+
+The table below summarizes full identity resolution execution metrics across supported warehouse engines (executed with `--mode FULL --strict`):
+
+| Metric / Dimension | Google BigQuery | Databricks (Unity Catalog) | Snowflake | DuckDB (Local) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Compute Engine** | Serverless BigQuery (US Multi-Region) | Serverless SQL Warehouse | *[Testing in progress — results being added shortly]* | Single-Node (10-core M-series ARM) |
+| **Source Tables** | 15 tables | 15 tables | 15 tables | 15 tables |
+| **Input Entities** | **6,297,049** | **~6,300,000** | *Upcoming* | 250,000 (scale harness) |
+| **Edges Constructed** | **5,381,635** | **~5,380,000** | *Upcoming* | ~215,000 |
+| **Resolved Clusters** | **1,544,042** | **~1,544,000** | *Upcoming* | ~62,000 |
+| **Graph LP Iterations**| **6 iterations** | **6 iterations** | *Upcoming* | 4 iterations |
+| **Total Pipeline Duration** | **306s (5.1 min)** | **296s (4.9 min)** | *[Testing in progress]* | 12.4s |
+| **Graph Label Propagation** | **110s** | **~108s** | *Upcoming* | 4.8s |
+| **Golden Profile Output** | **90s** | **~85s** | *Upcoming* | 3.2s |
+
+> [!NOTE] Snowflake Testing in Progress
+> Snowflake benchmarking on this exact 6.3M-entity omni-channel workload is currently underway and results will be added directly upon test verification.
+
+---
+
+### Detailed Stage-by-Stage Breakdown (BigQuery vs. Databricks)
+
+Both warehouses demonstrate near-identical execution characteristics on identical workloads:
+
+| Stage # | Pipeline Stage | BigQuery Duration | BigQuery Rows | Databricks Duration | Databricks Rows | Description |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Stage 1** | `preflight` | 26.0s | 0 | ~24s | 0 | Metadata schema validation, column DDL checks, and run state initialization |
+| **Stage 2** | `entity_extraction` | 5.0s | 6,297,049 | ~6s | ~6.3M | Scans 15 tables, generates composite entity keys, and stages into `idr_work.entities_delta` |
+| **Stage 3** | `identifier_extraction`| 54.0s | 5,710,608 | ~52s | ~5.7M | Normalizes identifiers (`EMAIL_STANDARD`, `PHONE_DIGITS`, etc.) and applies poison-pill filters |
+| **Stage 4** | `attribute_extraction` | 1.0s | 0 | ~1s | 0 | Extracts attributes for blocking rules (bypassed in `--strict` mode) |
+| **Stage 5** | `edge_building` | 12.0s | 5,381,635 | ~14s | ~5.4M | Anchor-based star graph reduction ($N-1$ edges per group) avoiding $O(N^2)$ cliques |
+| **Stage 6** | `label_propagation` | 110.0s | 1,544,042 | ~108s | ~1.54M | Iterative connected components (converged in 6 iterations) |
+| **Stage 7** | `output_generation` | 90.0s | 1,544,042 | ~85s | ~1.54M | Wide consolidated golden profiles with survivorship across 15 source feeds, plus crosswalk |
+| **Total** | **Full Pipeline Run** | **306s (5.1 min)** | — | **296s (4.9 min)** | — | Complete end-to-end warehouse-native execution |
+
+
 

@@ -244,10 +244,12 @@ def validate_config(config: Dict[str, Any]) -> bool:
         validate_fqn(src["table"], f"Source {i} table")
 
     # Validate survivorship if present
-    if "survivorship" in config:
+    if config.get("survivorship") is not None:
         if not isinstance(config["survivorship"], list):
             raise ValueError("Config 'survivorship' must be a list of rules")
         for rule in config["survivorship"]:
+            if not isinstance(rule, dict):
+                continue
             if "attribute" not in rule:
                 raise ValueError("Survivorship rule missing 'attribute'")
             if "strategy" not in rule:
@@ -255,8 +257,16 @@ def validate_config(config: Dict[str, Any]) -> bool:
             if rule["strategy"] not in ("PRIORITY", "RECENCY", "FREQUENCY", "AGG_MAX", "AGG_SUM"):
                 raise ValueError(f"Invalid strategy {rule['strategy']} for {rule['attribute']}")
 
+    # Validate rules if present
+    if config.get("rules") is not None and not isinstance(config["rules"], list):
+        raise ValueError("Config 'rules' must be a list")
+
+    # Validate fuzzy_rules if present
+    if config.get("fuzzy_rules") is not None and not isinstance(config["fuzzy_rules"], list):
+        raise ValueError("Config 'fuzzy_rules' must be a list")
+
     # Validate generate_evidence if present (must be boolean)
-    if "generate_evidence" in config:
+    if "generate_evidence" in config and config.get("generate_evidence") is not None:
         if not isinstance(config["generate_evidence"], bool):
             raise ValueError("Config 'generate_evidence' must be a boolean (true/false)")
 
@@ -280,9 +290,34 @@ def config_to_sql(config: Dict[str, Any], dialect: str = "duckdb") -> List[str]:
         """Generate dialect-specific UPSERT statement."""
         cols = list(data.keys())
         vals = []
-        for v in data.values():
+        for c, v in data.items():
             if v is None:
-                vals.append("NULL")
+                if dialect == "bigquery":
+                    # BigQuery infers untyped NULL as INT64 in SELECT expressions.
+                    # We must explicitly cast NULL to target column type to prevent 400 type mismatch.
+                    try:
+                        from .schema_defs import SYSTEM_TABLES, ColumnType
+                        type_map = {}
+                        for t in SYSTEM_TABLES:
+                            short = t.fqn.split(".")[-1]
+                            for col in t.columns:
+                                type_map[(t.fqn, col.name)] = col.type
+                                type_map[(short, col.name)] = col.type
+                        col_t = type_map.get((table, c)) or type_map.get((table.split(".")[-1], c))
+                        if col_t == ColumnType.INT:
+                            vals.append("CAST(NULL AS INT64)")
+                        elif col_t == ColumnType.DOUBLE:
+                            vals.append("CAST(NULL AS FLOAT64)")
+                        elif col_t == ColumnType.BOOL:
+                            vals.append("CAST(NULL AS BOOL)")
+                        elif col_t == ColumnType.TIMESTAMP:
+                            vals.append("CAST(NULL AS TIMESTAMP)")
+                        else:
+                            vals.append("CAST(NULL AS STRING)")
+                    except Exception:
+                        vals.append("CAST(NULL AS STRING)")
+                else:
+                    vals.append("NULL")
             elif isinstance(v, bool):
                 vals.append(str(v).upper())  # TRUE/FALSE
             elif isinstance(v, (int, float)):
@@ -347,7 +382,7 @@ ON {join_cond}
 """.strip()
 
     # Source tables
-    for src in config.get("sources", []):
+    for src in (config.get("sources") or []):
         raw_wm = src.get("watermark_column", "updated_at")
         wm_col = (
             None
@@ -370,15 +405,15 @@ ON {join_cond}
 
         # Identifier mappings
         # Infer from exact match rules if not explicit
-        raw_ids = src.get("identifiers", [])
+        raw_ids = src.get("identifiers") or []
         inferred_ids = []
 
         # If no explicit identifiers, try to infer from exact rules
         if not raw_ids:
-            source_attrs = {a["name"]: a["expr"] for a in src.get("attributes", [])}
-            for rule in config.get("rules", []):
+            source_attrs = {a["name"]: a["expr"] for a in (src.get("attributes") or [])}
+            for rule in (config.get("rules") or []):
                 if rule.get("type", "EXACT") == "EXACT":
-                    for key in rule.get("match_keys", []):
+                    for key in (rule.get("match_keys") or []):
                         # If rule key exists in source attributes, treat it as an identifier
                         if key in source_attrs:
                             inferred_ids.append(
@@ -393,9 +428,9 @@ ON {join_cond}
             id_iter = raw_ids.items()
         else:
             id_iter = [
-                (item["type"], item["expr"])
+                (item["type"], item.get("expr") or item.get("column") or item["type"])
                 for item in raw_ids
-                if "type" in item and "expr" in item
+                if isinstance(item, dict) and "type" in item and ("expr" in item or "column" in item)
             ]
 
         for id_type, col_expr in id_iter:
@@ -412,11 +447,15 @@ ON {join_cond}
             )
 
         # Attribute mappings
-        raw_attrs = src.get("attributes", [])
+        raw_attrs = src.get("attributes") or []
         if isinstance(raw_attrs, dict):
             attr_iter = raw_attrs.items()
         else:
-            attr_iter = [(item["name"], item["expr"]) for item in raw_attrs]
+            attr_iter = [
+                (item["name"], item.get("expr") or item.get("column") or item["name"])
+                for item in raw_attrs
+                if isinstance(item, dict) and "name" in item
+            ]
 
         for attr_name, attr_expr in attr_iter:
             data = {"table_id": src["id"], "attribute_name": attr_name, "attribute_expr": attr_expr}
@@ -428,20 +467,51 @@ ON {join_cond}
             )
 
     # Rules
-    for rule in config.get("rules", []):
+    rules_list = config.get("rules") or []
+    if not rules_list:
+        # Auto-infer rules from distinct identifier types found across sources
+        seen_types = set()
+        inferred_rules = []
+        prio = 1
+        for src in (config.get("sources") or []):
+            for ident in (src.get("identifiers") or []):
+                if isinstance(ident, dict):
+                    t = ident.get("type")
+                    if t and t not in seen_types:
+                        seen_types.add(t)
+                        t_lower = t.lower()
+                        canon = (
+                            "EMAIL_STANDARD"
+                            if "email" in t_lower
+                            else ("PHONE_US_10" if "phone" in t_lower else "LOWERCASE")
+                        )
+                        inferred_rules.append(
+                            {
+                                "id": f"rule_exact_{t.lower()}",
+                                "type": "EXACT",
+                                "match_keys": [t],
+                                "canonicalize": canon,
+                                "priority": prio,
+                                "max_group_size": 10000,
+                            }
+                        )
+                        prio += 1
+        rules_list = inferred_rules
+
+    for rule in rules_list:
         raw_canon = rule.get("canonicalize", "LOWERCASE")
         if isinstance(raw_canon, dict):
             canon_val = raw_canon.get(dialect) or raw_canon.get("default") or "LOWERCASE"
         else:
             canon_val = raw_canon
         data = {
-            "rule_id": rule["id"],
+            "rule_id": rule.get("id") or rule.get("rule_id", "rule_1"),
             "identifier_type": (
                 rule.get("identifier_type")
                 or (
                     rule["match_keys"][0]
                     if rule.get("match_keys")
-                    else rule.get("type", str(rule["id"]).upper())
+                    else rule.get("type", str(rule.get("id", "rule")).upper())
                 )
             ),
             "canonicalize": canon_val,
@@ -455,7 +525,7 @@ ON {join_cond}
     combined_exclusions = []
     if config.get("use_default_exclusions", False):
         combined_exclusions.extend(DEFAULT_EXCLUSIONS)
-    combined_exclusions.extend(config.get("exclusions", []))
+    combined_exclusions.extend(config.get("exclusions") or [])
 
     seen_excl = set()
     for excl in combined_exclusions:
@@ -483,7 +553,7 @@ ON {join_cond}
         )
 
     # Manual Stewardship Overrides (FORCE_LINK, DO_NOT_LINK, ISOLATE)
-    for idx, ov in enumerate(config.get("overrides", [])):
+    for idx, ov in enumerate(config.get("overrides") or []):
         ov_type = str(ov.get("type") or ov.get("override_type") or "").upper()
         if ov_type not in ("FORCE_LINK", "DO_NOT_LINK", "ISOLATE"):
             raise ValueError(
@@ -514,7 +584,7 @@ ON {join_cond}
         )
 
     # Fuzzy Rules
-    for rule in config.get("fuzzy_rules", []):
+    for rule in (config.get("fuzzy_rules") or []):
         rule_id = rule.get("rule_id", rule.get("id"))
         if not rule_id:
             raise ValueError("Fuzzy rule missing 'id' or 'rule_id'")
@@ -535,7 +605,7 @@ ON {join_cond}
         statements.append(generate_upsert("idr_meta.fuzzy_rule", ["rule_id"], data))
 
     # Survivorship Rules
-    for rule in config.get("survivorship", []):
+    for rule in (config.get("survivorship") or []):
         # Serialize list to string (JSON-like) for storage
         priority_list = rule.get("source_priority", [])
         if isinstance(priority_list, list):

@@ -183,9 +183,11 @@ class SchemaManager:
         else:
             # Table exists: Check for missing columns (Schema Evolution)
             # Adapters typically return 'name' or 'column_name'
-            cols = self.adapter.get_table_columns(table_def.fqn)
+            cols = self.adapter.get_table_columns(table_def.fqn) or []
             existing_cols = set()
             for c in cols:
+                if not isinstance(c, dict):
+                    continue
                 # Handle potential variations in adapter return keys
                 col_name = c.get("name") or c.get("column_name")
                 if col_name:

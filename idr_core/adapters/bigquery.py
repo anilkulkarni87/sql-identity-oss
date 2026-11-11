@@ -185,8 +185,13 @@ class BigQueryAdapter(IDRAdapter):
         else:
             table_ref = table_fqn
 
-        table = self.client.get_table(table_ref)
-        return [{"name": field.name.lower(), "type": field.field_type} for field in table.schema]
+        try:
+            table = self.client.get_table(table_ref)
+            if not table or not table.schema:
+                return []
+            return [{"name": field.name.lower(), "type": field.field_type} for field in table.schema]
+        except Exception:
+            return []
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
         """List tables in a dataset, or all datasets if schema is None."""

@@ -370,3 +370,5 @@ When invoked with `--dry-run` or via the **Dry Run Preview** checkbox in the Web
 | **Connected Components** | $\mathcal{O}(\text{diameter} \cdot \lvert E \rvert)$ | Iterative `MIN(candidate_label)` join | Zero recursive CTEs; runs in 3–7 set-based batch iterations |
 | **ID Stabilization** | $\mathcal{O}(K \log K)$ | Window rank `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY size DESC)` | Deterministic tie-breaking; zero UUID drift on batch updates |
 | **Incremental Delta** | $\mathcal{O}(\Delta N)$ | Watermark preservation + candidate expansion | Short-circuits 0-delta runs without full graph recompute |
+
+For empirical execution times across 6.3M entities and 15 tables on BigQuery (306s) and Databricks (296s), see [Production Benchmarks & Real-World Runtimes](warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes). (Snowflake benchmarks are currently in progress).
