@@ -635,6 +635,24 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#production-preflight-health-check-idr-doctor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Production Preflight Health Check (idr doctor)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#autonomous-configuration-bootstrapper-idr-bootstrap-auto" class="md-nav__link">
+    <span class="md-ellipsis">
+      Autonomous Configuration Bootstrapper (idr bootstrap --auto)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#troubleshooting-common-scenarios" class="md-nav__link">
     <span class="md-ellipsis">
       Troubleshooting Common Scenarios
@@ -840,6 +858,24 @@
   <a href="#recommended-incremental-scheduling-pattern" class="md-nav__link">
     <span class="md-ellipsis">
       Recommended Incremental Scheduling Pattern
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#production-preflight-health-check-idr-doctor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Production Preflight Health Check (idr doctor)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#autonomous-configuration-bootstrapper-idr-bootstrap-auto" class="md-nav__link">
+    <span class="md-ellipsis">
+      Autonomous Configuration Bootstrapper (idr bootstrap --auto)
     </span>
   </a>
   
@@ -1190,6 +1226,24 @@
 <li><strong>Hourly / Intra-day Runs</strong>: Run <code>idr run --mode INCR</code> every 15–60 minutes. Watermarked event/order tables only scan rows newer than <code>last_watermark_value</code>, while dimension tables without watermarks use fast identifier state-diffing against <code>idr_out.identity_identifiers_current</code> and short-circuit immediately if no identifiers changed.</li>
 <li><strong>Weekly Guardrail Audit</strong>: Query <code>idr_out.skipped_identifier_groups</code> to spot new placeholder values that exceeded <code>max_group_size</code> and promote them to <code>idr_meta.identifier_exclusion</code>.</li>
 </ul>
+<h3 id="production-preflight-health-check-idr-doctor">Production Preflight Health Check (<code>idr doctor</code>)<a class="headerlink" href="#production-preflight-health-check-idr-doctor" title="Permanent link">&para;</a></h3>
+<p>Run automated preflight diagnostics across connectivity, IAM permissions, schema initialization, active rules, and guardrails:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>idr<span class="w"> </span>doctor<span class="w"> </span>--platform<span class="w"> </span>bigquery<span class="w"> </span>--project<span class="w"> </span>my-project
+</span></code></pre></div>
+Verifies:
+1. <strong>Connectivity &amp; Latency</strong>: Measures live warehouse ping.
+2. <strong>Schema &amp; System Tables</strong>: Checks presence of all 7 core tables across <code>idr_meta</code>, <code>idr_work</code>, and <code>idr_out</code>.
+3. <strong>DDL/DML Staging Probe</strong>: Probes <code>idr_work</code> with non-destructive temporary table creation and drop to certify write permissions.
+4. <strong>Configuration &amp; Watermarks</strong>: Validates registered sources, watermarks vs. dimension tables, and matching rules.
+5. <strong>Poison-Pill Guardrails</strong>: Verifies active exclusion lists and warns if dangerous supernode rules exist.</p>
+<h3 id="autonomous-configuration-bootstrapper-idr-bootstrap-auto">Autonomous Configuration Bootstrapper (<code>idr bootstrap --auto</code>)<a class="headerlink" href="#autonomous-configuration-bootstrapper-idr-bootstrap-auto" title="Permanent link">&para;</a></h3>
+<p>Profile warehouse tables, discover customer identifiers, and synthesize a production YAML manifest in seconds:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Profile dataset and write to idr_config.yaml</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>idr<span class="w"> </span>bootstrap<span class="w"> </span>--platform<span class="w"> </span>bigquery<span class="w"> </span>--project<span class="w"> </span>my-project<span class="w"> </span>--schema<span class="w"> </span>ecommerce_synth<span class="w"> </span>--output<span class="w"> </span>idr_config.yaml
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Or profile and immediately apply to warehouse metadata tables</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>idr<span class="w"> </span>bootstrap<span class="w"> </span>--platform<span class="w"> </span>bigquery<span class="w"> </span>--project<span class="w"> </span>my-project<span class="w"> </span>--schema<span class="w"> </span>ecommerce_synth<span class="w"> </span>--apply
+</span></code></pre></div></p>
 <h3 id="troubleshooting-common-scenarios">Troubleshooting Common Scenarios<a class="headerlink" href="#troubleshooting-common-scenarios" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1233,7 +1287,7 @@
 - Reference implementation: <a href="https://github.com/anilkulkarni87/sql-identity-oss/blob/main/deployment/gcp/main.tf"><code>deployment/gcp/main.tf</code></a>.</p>
 <h3 id="enterprise-compose-stack-with-keycloak-sso-observability">Enterprise Compose Stack with Keycloak SSO &amp; Observability<a class="headerlink" href="#enterprise-compose-stack-with-keycloak-sso-observability" title="Permanent link">&para;</a></h3>
 <p>Simulate or deploy production IDR with SSO, Redis session leasing, and metrics:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.enterprise.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.enterprise.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
 </span></code></pre></div>
 - <strong>Keycloak SSO</strong>: Bootstrapped via <code>deployment/keycloak/idr-realm.json</code> (<code>test</code> / <code>test</code> user).
 - <strong>Prometheus Metrics</strong>: Scrapes <code>http://api:8000/metrics</code> via <code>monitoring/prometheus/prometheus.yml</code>.
