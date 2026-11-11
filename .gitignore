@@ -77,3 +77,6 @@ idr_api/static/
 
 # Benchmarks
 benchmarks/data/
+
+#Docs
+frontier_model.md

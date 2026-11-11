@@ -269,6 +269,57 @@ Examples:
     )
     qs_parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
+    # === idr bootstrap ===
+    bootstrap_parser = subparsers.add_parser(
+        "bootstrap",
+        help="Auto-profile warehouse tables and synthesize production YAML configuration",
+    )
+    bootstrap_parser.add_argument(
+        "--auto", action="store_true", default=True, help="Automatically profile and infer all rules (default: true)"
+    )
+    bootstrap_parser.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        required=False,
+        help="Target platform (auto-detected if omitted)",
+    )
+    bootstrap_parser.add_argument("--db", help="DuckDB database path")
+    bootstrap_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    bootstrap_parser.add_argument("--location", default="US", help="BigQuery location")
+    bootstrap_parser.add_argument(
+        "--schema", "--dataset", dest="schema", help="Source schema or dataset to profile (e.g. ecommerce_synth)"
+    )
+    bootstrap_parser.add_argument("--tables", help="Comma-separated list of candidate tables to profile")
+    bootstrap_parser.add_argument(
+        "--output", "-o", default="idr_config.yaml", help="Path to write the generated YAML manifest"
+    )
+    bootstrap_parser.add_argument(
+        "--sample-size", type=int, default=500, help="Number of rows to sample per table (default: 500)"
+    )
+    bootstrap_parser.add_argument(
+        "--apply", action="store_true", help="Immediately apply the generated configuration to idr_meta.* tables"
+    )
+
+    # === idr doctor ===
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Run production readiness diagnostic and health checks"
+    )
+    doctor_parser.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        required=False,
+        help="Target platform (auto-detected if omitted)",
+    )
+    doctor_parser.add_argument("--db", help="DuckDB database path")
+    doctor_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    doctor_parser.add_argument("--location", default="US", help="BigQuery location")
+    doctor_parser.add_argument("--dataset", default="idr_out", help="BigQuery output dataset")
+    doctor_parser.add_argument("--meta-dataset", default="idr_meta", help="BigQuery metadata dataset")
+    doctor_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
+    doctor_parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed diagnostic output")
+
     # Parse arguments
     parsed_args = parser.parse_args(args)
 
@@ -311,6 +362,12 @@ Examples:
 
     if parsed_args.command == "quickstart":
         return handle_quickstart(parsed_args)
+
+    if parsed_args.command == "bootstrap":
+        return handle_bootstrap(parsed_args)
+
+    if parsed_args.command == "doctor":
+        return handle_doctor(parsed_args)
 
     return 0
 
@@ -752,6 +809,98 @@ def handle_quickstart(args) -> int:
         rows=args.rows,
         seed=args.seed,
     )
+
+
+def handle_doctor(args) -> int:
+    """Execute IDR Doctor production readiness diagnostics."""
+    adapter = get_adapter(args)
+    from idr_core.doctor import CheckStatus, IDRDoctor
+
+    doctor = IDRDoctor(adapter)
+    print("=" * 70)
+    print(f"🩺  SQL Identity Resolution — Production Doctor ({doctor.platform.upper()})")
+    print("=" * 70)
+
+    report = doctor.run_diagnostics(verbose=getattr(args, "verbose", False))
+
+    current_cat = None
+    for check in report.checks:
+        if check.category != current_cat:
+            current_cat = check.category
+            print(f"\n[{current_cat}]")
+
+        if check.status == CheckStatus.PASS:
+            icon = "✓"
+        elif check.status == CheckStatus.WARN:
+            icon = "!"
+        elif check.status == CheckStatus.INFO:
+            icon = "ℹ"
+        else:
+            icon = "✗"
+
+        print(f"  {icon} {check.name:<32} {check.message}")
+        if check.remediation and (check.status in (CheckStatus.WARN, CheckStatus.FAIL) or getattr(args, "verbose", False)):
+            for line in check.remediation.split("\n"):
+                print(f"    👉 {line}")
+
+    print("\n" + "-" * 70)
+    print(f"Status: {report.overall_status.value} ({report.passed_count} passed, {report.warn_count} warnings, {report.fail_count} failed)")
+    if report.overall_status == CheckStatus.PASS:
+        print(f"🎉 {report.summary}")
+        return 0
+    elif report.overall_status == CheckStatus.WARN:
+        print(f"⚠️  {report.summary}")
+        return 0
+    else:
+        print(f"❌ {report.summary}")
+        return 1
+
+
+def handle_bootstrap(args) -> int:
+    """Execute autonomous dataset profiling and YAML manifest generation."""
+    adapter = get_adapter(args)
+    from idr_core.bootstrap import AutoBootstrapper
+
+    print("=" * 70)
+    print(f"⚡  SQL Identity Resolution — Autonomous Bootstrapper")
+    print("=" * 70)
+
+    schema = getattr(args, "schema", None)
+    tables_arg = getattr(args, "tables", None)
+    candidate_tables = [t.strip() for t in tables_arg.split(",")] if tables_arg else None
+
+    target_display = f"schema/dataset '{schema}'" if schema else "warehouse catalog"
+    print(f"Profiling {target_display} via {getattr(adapter, 'dialect', 'warehouse').upper()}...")
+
+    bootstrapper = AutoBootstrapper(adapter)
+    res = bootstrapper.bootstrap(
+        schema=schema,
+        candidate_tables=candidate_tables,
+        sample_size=getattr(args, "sample_size", 500),
+        output_path=getattr(args, "output", "idr_config.yaml"),
+        apply_to_warehouse=getattr(args, "apply", False),
+    )
+
+    if res["status"] != "SUCCESS":
+        print(f"\n❌ Bootstrap halted: {res.get('message', res['status'])}")
+        return 1
+
+    print(f"\n✓ Scanned {res['tables_scanned']} candidate tables")
+    print(f"✓ Configured {res['sources_configured']} source tables with detected customer identifiers")
+    print(f"✓ Synthesized {res['rules_generated']} deterministic matching rules")
+    print(f"✓ Generated {res['survivorship_rules']} attribute survivorship rules")
+    if res.get("exclusions_discovered"):
+        print(f"✓ Discovered {res['exclusions_discovered']} high-frequency poison-pill exclusions")
+
+    print(f"\n📁 Manifest written to: {res['output_path']}")
+    if res.get("applied_to_warehouse"):
+        print("🚀 Successfully applied configuration directly to idr_meta.* tables!")
+    elif res.get("apply_error"):
+        print(f"⚠️  Failed to apply to warehouse: {res['apply_error']}")
+    else:
+        print("💡 Next step: Run 'idr run --dry-run' to preview cluster resolutions.")
+
+    return 0
 
 
 if __name__ == "__main__":

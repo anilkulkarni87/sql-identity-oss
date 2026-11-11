@@ -125,6 +125,28 @@ All tables are defined in `idr_core/schema_defs.py` (`SYSTEM_TABLES`) and mirror
 - **Hourly / Intra-day Runs**: Run `idr run --mode INCR` every 15–60 minutes. Watermarked event/order tables only scan rows newer than `last_watermark_value`, while dimension tables without watermarks use fast identifier state-diffing against `idr_out.identity_identifiers_current` and short-circuit immediately if no identifiers changed.
 - **Weekly Guardrail Audit**: Query `idr_out.skipped_identifier_groups` to spot new placeholder values that exceeded `max_group_size` and promote them to `idr_meta.identifier_exclusion`.
 
+### Production Preflight Health Check (`idr doctor`)
+Run automated preflight diagnostics across connectivity, IAM permissions, schema initialization, active rules, and guardrails:
+```bash
+idr doctor --platform bigquery --project my-project
+```
+Verifies:
+1. **Connectivity & Latency**: Measures live warehouse ping.
+2. **Schema & System Tables**: Checks presence of all 7 core tables across `idr_meta`, `idr_work`, and `idr_out`.
+3. **DDL/DML Staging Probe**: Probes `idr_work` with non-destructive temporary table creation and drop to certify write permissions.
+4. **Configuration & Watermarks**: Validates registered sources, watermarks vs. dimension tables, and matching rules.
+5. **Poison-Pill Guardrails**: Verifies active exclusion lists and warns if dangerous supernode rules exist.
+
+### Autonomous Configuration Bootstrapper (`idr bootstrap --auto`)
+Profile warehouse tables, discover customer identifiers, and synthesize a production YAML manifest in seconds:
+```bash
+# Profile dataset and write to idr_config.yaml
+idr bootstrap --platform bigquery --project my-project --schema ecommerce_synth --output idr_config.yaml
+
+# Or profile and immediately apply to warehouse metadata tables
+idr bootstrap --platform bigquery --project my-project --schema ecommerce_synth --apply
+```
+
 ### Troubleshooting Common Scenarios
 
 | Symptom | Root Cause & Resolution |
