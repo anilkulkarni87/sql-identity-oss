@@ -269,6 +269,90 @@ Examples:
     )
     qs_parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
+    # === idr bootstrap ===
+    bootstrap_parser = subparsers.add_parser(
+        "bootstrap",
+        help="Auto-profile warehouse tables and synthesize production YAML configuration",
+    )
+    bootstrap_parser.add_argument(
+        "--auto", action="store_true", default=True, help="Automatically profile and infer all rules (default: true)"
+    )
+    bootstrap_parser.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        required=False,
+        help="Target platform (auto-detected if omitted)",
+    )
+    bootstrap_parser.add_argument("--db", help="DuckDB database path")
+    bootstrap_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    bootstrap_parser.add_argument("--location", default="US", help="BigQuery location")
+    bootstrap_parser.add_argument(
+        "--schema", "--dataset", dest="schema", help="Source schema or dataset to profile (e.g. ecommerce_synth)"
+    )
+    bootstrap_parser.add_argument("--tables", help="Comma-separated list of candidate tables to profile")
+    bootstrap_parser.add_argument(
+        "--output", "-o", default="idr_config.yaml", help="Path to write the generated YAML manifest"
+    )
+    bootstrap_parser.add_argument(
+        "--sample-size", type=int, default=500, help="Number of rows to sample per table (default: 500)"
+    )
+    bootstrap_parser.add_argument(
+        "--apply", action="store_true", help="Immediately apply the generated configuration to idr_meta.* tables"
+    )
+
+    # === idr doctor ===
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Run production readiness diagnostic and health checks"
+    )
+    doctor_parser.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        required=False,
+        help="Target platform (auto-detected if omitted)",
+    )
+    doctor_parser.add_argument("--db", help="DuckDB database path")
+    doctor_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    doctor_parser.add_argument("--location", default="US", help="BigQuery location")
+    doctor_parser.add_argument("--dataset", default="idr_out", help="BigQuery output dataset")
+    doctor_parser.add_argument("--meta-dataset", default="idr_meta", help="BigQuery metadata dataset")
+    doctor_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
+    doctor_parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed diagnostic output")
+
+    # === idr evaluate ===
+    eval_parser = subparsers.add_parser(
+        "evaluate", help="Evaluate entity resolution Precision/Recall or generate stratified audit samples"
+    )
+    eval_parser.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        required=False,
+        help="Target platform (auto-detected if omitted)",
+    )
+    eval_parser.add_argument("--db", help="DuckDB database path")
+    eval_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    eval_parser.add_argument("--location", default="US", help="BigQuery location")
+    eval_parser.add_argument("--dataset", default="idr_out", help="BigQuery output dataset")
+    eval_parser.add_argument("--meta-dataset", default="idr_meta", help="BigQuery metadata dataset")
+    eval_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
+    eval_parser.add_argument(
+        "--ground-truth-table", help="FQN of ground-truth table for Pairwise Precision/Recall/F1"
+    )
+    eval_parser.add_argument(
+        "--entity-key-col", default="entity_key", help="Entity key column in ground truth table"
+    )
+    eval_parser.add_argument(
+        "--truth-id-col", default="truth_id", help="Ground truth cluster/person ID column"
+    )
+    eval_parser.add_argument(
+        "--sample-size", type=int, default=20, help="Number of pairs to extract per audit stratum"
+    )
+    eval_parser.add_argument(
+        "--no-persist", action="store_true", help="Do not write sampled pairs to idr_out.evaluation_sample"
+    )
+
     # Parse arguments
     parsed_args = parser.parse_args(args)
 
@@ -311,6 +395,15 @@ Examples:
 
     if parsed_args.command == "quickstart":
         return handle_quickstart(parsed_args)
+
+    if parsed_args.command == "bootstrap":
+        return handle_bootstrap(parsed_args)
+
+    if parsed_args.command == "doctor":
+        return handle_doctor(parsed_args)
+
+    if parsed_args.command == "evaluate":
+        return handle_evaluate(parsed_args)
 
     return 0
 
@@ -752,6 +845,156 @@ def handle_quickstart(args) -> int:
         rows=args.rows,
         seed=args.seed,
     )
+
+
+def handle_doctor(args) -> int:
+    """Execute IDR Doctor production readiness diagnostics."""
+    adapter = get_adapter(args)
+    from idr_core.doctor import CheckStatus, IDRDoctor
+
+    doctor = IDRDoctor(adapter)
+    print("=" * 70)
+    print(f"🩺  SQL Identity Resolution — Production Doctor ({doctor.platform.upper()})")
+    print("=" * 70)
+
+    report = doctor.run_diagnostics(verbose=getattr(args, "verbose", False))
+
+    current_cat = None
+    for check in report.checks:
+        if check.category != current_cat:
+            current_cat = check.category
+            print(f"\n[{current_cat}]")
+
+        if check.status == CheckStatus.PASS:
+            icon = "✓"
+        elif check.status == CheckStatus.WARN:
+            icon = "!"
+        elif check.status == CheckStatus.INFO:
+            icon = "ℹ"
+        else:
+            icon = "✗"
+
+        print(f"  {icon} {check.name:<32} {check.message}")
+        if check.remediation and (check.status in (CheckStatus.WARN, CheckStatus.FAIL) or getattr(args, "verbose", False)):
+            for line in check.remediation.split("\n"):
+                print(f"    👉 {line}")
+
+    print("\n" + "-" * 70)
+    print(f"Status: {report.overall_status.value} ({report.passed_count} passed, {report.warn_count} warnings, {report.fail_count} failed)")
+    if report.overall_status == CheckStatus.PASS:
+        print(f"🎉 {report.summary}")
+        return 0
+    elif report.overall_status == CheckStatus.WARN:
+        print(f"⚠️  {report.summary}")
+        return 0
+    else:
+        print(f"❌ {report.summary}")
+        return 1
+
+
+def handle_bootstrap(args) -> int:
+    """Execute autonomous dataset profiling and YAML manifest generation."""
+    adapter = get_adapter(args)
+    from idr_core.bootstrap import AutoBootstrapper
+
+    print("=" * 70)
+    print(f"⚡  SQL Identity Resolution — Autonomous Bootstrapper")
+    print("=" * 70)
+
+    schema = getattr(args, "schema", None)
+    tables_arg = getattr(args, "tables", None)
+    candidate_tables = [t.strip() for t in tables_arg.split(",")] if tables_arg else None
+
+    target_display = f"schema/dataset '{schema}'" if schema else "warehouse catalog"
+    print(f"Profiling {target_display} via {getattr(adapter, 'dialect', 'warehouse').upper()}...")
+
+    bootstrapper = AutoBootstrapper(adapter)
+    res = bootstrapper.bootstrap(
+        schema=schema,
+        candidate_tables=candidate_tables,
+        sample_size=getattr(args, "sample_size", 500),
+        output_path=getattr(args, "output", "idr_config.yaml"),
+        apply_to_warehouse=getattr(args, "apply", False),
+    )
+
+    if res["status"] != "SUCCESS":
+        print(f"\n❌ Bootstrap halted: {res.get('message', res['status'])}")
+        return 1
+
+    print(f"\n✓ Scanned {res['tables_scanned']} candidate tables")
+    print(f"✓ Configured {res['sources_configured']} source tables with detected customer identifiers")
+    print(f"✓ Synthesized {res['rules_generated']} deterministic matching rules")
+    print(f"✓ Generated {res['survivorship_rules']} attribute survivorship rules")
+    if res.get("exclusions_discovered"):
+        print(f"✓ Discovered {res['exclusions_discovered']} high-frequency poison-pill exclusions")
+
+    print(f"\n📁 Manifest written to: {res['output_path']}")
+    if res.get("applied_to_warehouse"):
+        print("🚀 Successfully applied configuration directly to idr_meta.* tables!")
+    elif res.get("apply_error"):
+        print(f"⚠️  Failed to apply to warehouse: {res['apply_error']}")
+    else:
+        print("💡 Next step: Run 'idr run --dry-run' to preview cluster resolutions.")
+
+    return 0
+
+
+def handle_evaluate(args) -> int:
+    """Execute entity resolution quality evaluation or stratified audit sampling."""
+    adapter = get_adapter(args)
+    from idr_core.evaluator import IDREvaluator
+
+    evaluator = IDREvaluator(adapter)
+    print("=" * 70)
+    print(f"📊  SQL Identity Resolution — Quality Evaluation ({evaluator.dialect_name.upper()})")
+    print("=" * 70)
+
+    gt_table = getattr(args, "ground_truth_table", None)
+    if gt_table:
+        res = evaluator.evaluate_ground_truth(
+            ground_truth_table=gt_table,
+            entity_key_col=getattr(args, "entity_key_col", "entity_key"),
+            truth_id_col=getattr(args, "truth_id_col", "truth_id"),
+        )
+        if res.get("status") != "SUCCESS":
+            print(f"❌ Evaluation failed: {res.get('message')}")
+            return 1
+
+        print(f"Evaluated Entities : {res['evaluated_entities']:,}")
+        print(f"Predicted Clusters : {res['predicted_clusters']:,}")
+        print(f"True Clusters      : {res['true_clusters']:,}")
+        print("-" * 70)
+        print(f"Pairwise Precision : {res['precision']:.4f}  (TP={res['tp_pairs']:,}, FP={res['fp_pairs']:,})")
+        print(f"Pairwise Recall    : {res['recall']:.4f}  (FN={res['fn_pairs']:,})")
+        print(f"Pairwise F1 Score  : {res['f1']:.4f}")
+        if res.get("top_overmerged_clusters"):
+            print(f"\n⚠️  Top Over-Merged Clusters ({len(res['top_overmerged_clusters'])} shown):")
+            for c in res["top_overmerged_clusters"][:5]:
+                print(f"   - {c['resolved_id']}: {c['distinct_truth_ids']} truth IDs merged across {c['cluster_entities']} rows")
+        if res.get("top_split_entities"):
+            print(f"\n⚠️  Top Split Entities ({len(res['top_split_entities'])} shown):")
+            for s in res["top_split_entities"][:5]:
+                print(f"   - {s['truth_id']}: fractured into {s['split_into_clusters']} clusters")
+        return 0
+
+    # Unsupervised Stratified Audit Mode
+    res = evaluator.audit_quality_and_sample(
+        sample_per_stratum=getattr(args, "sample_size", 20),
+        persist_sample=not getattr(args, "no_persist", False),
+    )
+    d = res["distribution"]
+    print(f"Total Clusters             : {int(d.get('total_clusters') or 0):,}")
+    print(f"Singleton Rate             : {float(d.get('singleton_rate') or 0) * 100:.1f}% ({int(d.get('singleton_clusters') or 0):,} singletons)")
+    print(f"Multi-Entity Clusters      : {int(d.get('multi_entity_clusters') or 0):,}")
+    print(f"  ├─ Corroborated (2+ keys): {int(d.get('corroborated_clusters') or 0):,}")
+    print(f"  ├─ Single-Key Deterministic: {int(d.get('single_key_clusters') or 0):,}")
+    print(f"  └─ Low-Confidence Risk     : {int(d.get('low_confidence_risk_clusters') or 0):,}")
+    print(f"Avg Multi-Entity Conf      : {d.get('avg_multi_entity_confidence') or 'N/A'}")
+    print(f"Edge Evidence Rows         : {int(d.get('edge_evidence_rows') or 0):,}")
+    print(f"Near-Miss Singletons Found : {res['near_miss_candidates_found']:,}")
+    print("-" * 70)
+    print(f"Stratified Audit Samples   : {res['samples_extracted']} pairs extracted ({res['samples_persisted']} saved to idr_out.evaluation_sample)")
+    return 0
 
 
 if __name__ == "__main__":

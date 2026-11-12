@@ -101,6 +101,12 @@ class ProfileBuilder:
 
             # Step B: Upsert delta profiles into production table
             if self.dialect_name in ("duckdb", "postgres"):
+                try:
+                    self.adapter.execute(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_golden_profiles_pk ON idr_out.golden_profiles (resolved_id)"
+                    )
+                except Exception:
+                    pass
                 keys_sql = "resolved_id"
                 inserts_sql = ", ".join(all_cols)
                 updates_sql = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_cols])
@@ -159,6 +165,13 @@ class ProfileBuilder:
 
             print("Generating Golden Profiles...")
             self.adapter.execute(final_sql)
+            if self.dialect_name in ("duckdb", "postgres"):
+                try:
+                    self.adapter.execute(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_golden_profiles_pk ON idr_out.golden_profiles (resolved_id)"
+                    )
+                except Exception:
+                    pass
             print("✅ Golden Profiles generated.")
 
     def _build_staging_cte(self, rules, mappings, sources, is_incremental: bool = False) -> str:
@@ -260,14 +273,20 @@ class ProfileBuilder:
         # DuckDB / BigQuery / Snowflake / Databricks syntax differences handled here
 
         if strategy == "RECENCY":
-            # ARG_MAX(attr, recency_ts)
-            # DuckDB: arg_max(val, ts)
-            # BigQuery: ARRAY_AGG(x ORDER BY ts DESC LIMIT 1)[OFFSET(0)]
-            # Snowflake / Databricks: MAX_BY(val, ts)
+            # ARG_MAX(attr, recency_ts) with fallback sentinel timestamp for un-watermarked dimension tables
+            # DuckDB: arg_max(val, ts) ignores NULL weights; coalesce NULL recency_ts so dimension values survive
+            # BigQuery: ARRAY_AGG(x IGNORE NULLS ORDER BY ts DESC LIMIT 1)[SAFE_OFFSET(0)]
+            # Snowflake / Databricks: MAX_BY(val, ts) ignores NULL weights; coalesce NULL recency_ts
             if self.dialect_name == "duckdb":
-                return f"arg_max({attr}, recency_ts) AS {attr}"
+                return (
+                    f"arg_max({attr}, CASE WHEN {attr} IS NOT NULL "
+                    f"THEN COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00') ELSE NULL END) AS {attr}"
+                )
             elif self.dialect_name in ("snowflake", "databricks"):
-                return f"MAX_BY({attr}, CASE WHEN {attr} IS NOT NULL THEN recency_ts ELSE NULL END) AS {attr}"
+                return (
+                    f"MAX_BY({attr}, CASE WHEN {attr} IS NOT NULL "
+                    f"THEN COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00') ELSE NULL END) AS {attr}"
+                )
             elif self.dialect_name == "bigquery":
                 return f"ARRAY_AGG({attr} IGNORE NULLS ORDER BY recency_ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
 

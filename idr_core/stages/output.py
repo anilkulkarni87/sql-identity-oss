@@ -56,18 +56,25 @@ class OutputStage(BaseStage):
         float_type = self._dialect.get("float_type", "DOUBLE")
         str_type = self._dialect["string_type"]
 
-        # 0. Calculate cluster sizes for impacted clusters
-        self.adapter.execute("""
+        source_prefix_expr = (
+            "SPLIT(entity_key, ':')[SAFE_OFFSET(0)]"
+            if self.adapter.dialect == "bigquery"
+            else "SPLIT_PART(entity_key, ':', 1)"
+        )
+
+        # 0. Calculate cluster sizes and source diversity for impacted clusters
+        self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_sizes_updates AS
             SELECT
                 resolved_id,
-                COUNT(*) as cluster_size
+                COUNT(*) AS cluster_size,
+                COUNT(DISTINCT {source_prefix_expr}) AS source_diversity
             FROM idr_out.identity_resolved_membership_current
             WHERE resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
             GROUP BY resolved_id
         """)
 
-        # 1. Edge stats per cluster with identifier fidelity & diversity
+        # 1. Edge stats per cluster with calibrated identifier fidelity & diversity
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_edge_stats AS
             SELECT
@@ -76,15 +83,18 @@ class OutputStage(BaseStage):
                 COUNT(*) AS edge_count,
                 MAX(
                     CASE
-                        WHEN LOWER(e.identifier_type) IN ('ssn', 'tax_id', 'national_id') THEN 1.00
+                        WHEN LOWER(e.identifier_type) IN ('ssn', 'tax_id', 'national_id') THEN 0.85
                         WHEN LOWER(e.identifier_type) LIKE '%customer%'
                           OR LOWER(e.identifier_type) LIKE '%account%'
-                          OR LOWER(e.identifier_type) LIKE '%loyalty%' THEN 0.98
-                        WHEN LOWER(e.identifier_type) LIKE '%email%' THEN 0.96
-                        WHEN LOWER(e.identifier_type) LIKE '%phone%' THEN 0.93
+                          OR LOWER(e.identifier_type) LIKE '%loyalty%' THEN 0.80
+                        WHEN LOWER(e.identifier_type) LIKE '%email%' THEN 0.76
+                        WHEN LOWER(e.identifier_type) LIKE '%phone%' THEN 0.72
                         WHEN LOWER(e.identifier_type) LIKE '%device%'
-                          OR LOWER(e.identifier_type) LIKE '%session%' THEN 0.85
-                        ELSE 0.78
+                          OR LOWER(e.identifier_type) LIKE '%cookie%' THEN 0.62
+                        WHEN LOWER(e.identifier_type) LIKE '%address%'
+                          OR LOWER(e.identifier_type) LIKE '%ip%'
+                          OR LOWER(e.identifier_type) LIKE '%session%' THEN 0.45
+                        ELSE 0.55
                     END
                 ) AS max_fidelity,
                 MAX(
@@ -108,16 +118,41 @@ class OutputStage(BaseStage):
             GROUP BY m.resolved_id
         """)
 
-        # 2. Spanning Tree Connectivity & Multi-Edge Redundancy
-        # In identity graphs, clusters are hub-and-spoke / trees where E >= V - 1, NOT cliques!
+        # 1b. Single-value fanout per cluster (detects mega-star hubs regardless of edge_diversity)
+        self.adapter.execute("""
+            CREATE OR REPLACE TABLE idr_work.cluster_value_fanout AS
+            SELECT
+                resolved_id,
+                MAX(value_fanout) AS max_fanout
+            FROM (
+                SELECT
+                    m.resolved_id,
+                    e.identifier_type,
+                    e.identifier_value_norm,
+                    COUNT(DISTINCT e.left_entity_key) + 1 AS value_fanout
+                FROM idr_out.identity_edges_current e
+                JOIN idr_out.identity_resolved_membership_current m
+                  ON e.left_entity_key = m.entity_key
+                JOIN idr_out.identity_resolved_membership_current m2
+                  ON e.right_entity_key = m2.entity_key
+                 AND m.resolved_id = m2.resolved_id
+                WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
+                GROUP BY m.resolved_id, e.identifier_type, e.identifier_value_norm
+            ) vf
+            GROUP BY resolved_id
+        """)
+
+        # 2. Spanning Tree Connectivity, Source Diversity & Max Fanout
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_density AS
             SELECT
                 c.resolved_id,
                 c.cluster_size,
+                c.source_diversity,
                 COALESCE(es.edge_diversity, 0) AS edge_diversity,
                 COALESCE(es.edge_count, 0) AS edge_count,
-                COALESCE(es.max_fidelity, 0.78) AS max_fidelity,
+                LEAST(c.cluster_size, COALESCE(vf.max_fanout, 1)) AS max_fanout,
+                COALESCE(es.max_fidelity, 0.55) AS max_fidelity,
                 COALESCE(es.has_strong_key, 0) AS has_strong_key,
                 COALESCE(es.has_email, 0) AS has_email,
                 COALESCE(es.has_phone, 0) AS has_phone,
@@ -131,37 +166,43 @@ class OutputStage(BaseStage):
                 END AS connectivity_ratio
             FROM idr_work.cluster_sizes_updates c
             LEFT JOIN idr_work.cluster_edge_stats es ON es.resolved_id = c.resolved_id
+            LEFT JOIN idr_work.cluster_value_fanout vf ON vf.resolved_id = c.resolved_id
         """)
 
-        # 3. Final Confidence Score & Reason (dialect-safe string and float types)
-        # Grounded on deterministic identifier fidelity + multi-identifier corroboration
+        # 3. Continuous Confidence Ranking: Corroboration Base (Noisy-OR + Source Diversity) * Fan-out Damping (2/sqrt(max_fanout))
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_confidence AS
             SELECT
                 cd.resolved_id,
                 cd.cluster_size,
                 cd.edge_diversity,
+                cd.edge_count,
+                cd.max_fanout,
                 cd.connectivity_ratio,
                 CASE
                     WHEN cd.cluster_size = 1 THEN 1.0
                     ELSE ROUND(
-                        LEAST(
-                            1.0,
-                            GREATEST(
-                                0.50,
-                                -- Base fidelity scaled by connectivity
-                                (cd.max_fidelity * cd.connectivity_ratio) +
-                                -- Corroboration bonus for multi-identifier confirmation
-                                CASE
-                                    WHEN cd.edge_diversity >= 3 THEN 0.04
-                                    WHEN cd.edge_diversity = 2 THEN 0.02
-                                    ELSE 0.0
-                                END -
-                                -- Runaway cluster penalty if huge cluster merged on only 1 identifier
-                                CASE
-                                    WHEN cd.cluster_size > 250 AND cd.edge_diversity <= 1 THEN 0.12
-                                    ELSE 0.0
-                                END
+                        GREATEST(
+                            0.05,
+                            LEAST(
+                                0.995,
+                                (
+                                    CASE
+                                        WHEN cd.edge_diversity >= 6 THEN 0.980 + 0.015 * LEAST(1.0, CAST(GREATEST(0, cd.source_diversity - 1) AS {float_type}) / 8.0)
+                                        WHEN cd.edge_diversity = 5 THEN 0.960 + 0.015 * LEAST(1.0, CAST(GREATEST(0, cd.source_diversity - 1) AS {float_type}) / 8.0)
+                                        WHEN cd.edge_diversity = 4 THEN 0.930 + 0.020 * LEAST(1.0, CAST(GREATEST(0, cd.source_diversity - 1) AS {float_type}) / 8.0)
+                                        WHEN cd.edge_diversity = 3 THEN 0.895 + 0.025 * LEAST(1.0, CAST(GREATEST(0, cd.source_diversity - 1) AS {float_type}) / 6.0)
+                                        WHEN cd.edge_diversity = 2 THEN 0.840 + 0.035 * LEAST(1.0, CAST(GREATEST(0, cd.source_diversity - 1) AS {float_type}) / 5.0)
+                                        ELSE (cd.max_fidelity * cd.connectivity_ratio)
+                                    END +
+                                    CASE
+                                        WHEN cd.edge_count > cd.cluster_size - 1 THEN 0.005
+                                        ELSE 0.0
+                                    END
+                                ) * LEAST(
+                                    1.0,
+                                    2.0 / SQRT(GREATEST(4.0, CAST(cd.max_fanout AS {float_type})))
+                                )
                             )
                         ),
                         3
@@ -169,18 +210,16 @@ class OutputStage(BaseStage):
                 END AS confidence_score,
                 CASE
                     WHEN cd.cluster_size = 1 THEN 'SINGLETON_NO_MATCH_REQUIRED'
-                    WHEN cd.cluster_size > 250 AND cd.edge_diversity <= 1 THEN
-                        CONCAT('Large cluster via single identifier (', CAST(cd.cluster_size AS {str_type}), ' entities)')
-                    WHEN cd.edge_diversity >= 3 THEN
-                        CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types (High Confidence Corroboration)')
-                    WHEN cd.edge_diversity = 2 THEN
-                        CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types (High Confidence Corroboration)')
+                    WHEN cd.max_fanout >= 20 THEN
+                        CONCAT('High fan-out over-merge risk (max_fanout=', CAST(cd.max_fanout AS {str_type}), ', ', CAST(cd.edge_diversity AS {str_type}), ' identifier types)')
+                    WHEN cd.edge_diversity >= 2 THEN
+                        CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types across ', CAST(cd.source_diversity AS {str_type}), ' sources (High Confidence Corroboration)')
                     WHEN cd.has_strong_key = 1 THEN
-                        'Deterministic account/customer key match (High Confidence)'
+                        'Deterministic account/customer key match (Single Key)'
                     WHEN cd.has_email = 1 THEN
-                        'Deterministic exact email match'
+                        'Deterministic exact email match (Single Key)'
                     WHEN cd.has_phone = 1 THEN
-                        'Deterministic exact phone match'
+                        'Deterministic exact phone match (Single Key)'
                     ELSE
                         CONCAT('Deterministic match via ', CAST(cd.edge_diversity AS {str_type}), ' identifier type(s)')
                 END AS primary_reason
@@ -346,7 +385,7 @@ class OutputStage(BaseStage):
         # 4. Compute Confidence Scores
         self.compute_confidence_scores()
 
-        # 5. Update clusters table (Now with confidence scores)
+        # 5. Update clusters table (Now with calibrated confidence, fanout, & corroboration signals)
         self.upsert(
             target_table="idr_out.identity_clusters_current",
             source_query=f"""
@@ -356,12 +395,24 @@ class OutputStage(BaseStage):
                     {current_ts} AS updated_at,
                     '{self.run_id}' AS run_id,
                     COALESCE(fr.super_cluster_id, l.label) AS super_cluster_id,
-                    COALESCE(cc.confidence_score, 1.0) as confidence_score,
-                    COALESCE(cc.primary_reason, 'Single-node cluster') as primary_reason
+                    COALESCE(cc.confidence_score, 1.0) AS confidence_score,
+                    COALESCE(cc.edge_diversity, 0) AS edge_diversity,
+                    COALESCE(cc.edge_count, 0) AS edge_count,
+                    COALESCE(cc.max_fanout, 1) AS max_fanout,
+                    COALESCE(cc.connectivity_ratio, 1.0) AS match_density,
+                    COALESCE(cc.primary_reason, 'Single-node cluster') AS primary_reason
                 FROM idr_work.lp_labels l
                 LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
                 LEFT JOIN idr_work.cluster_confidence cc ON l.label = cc.resolved_id
-                GROUP BY label, COALESCE(fr.super_cluster_id, l.label), cc.confidence_score, cc.primary_reason
+                GROUP BY
+                    l.label,
+                    COALESCE(fr.super_cluster_id, l.label),
+                    cc.confidence_score,
+                    cc.edge_diversity,
+                    cc.edge_count,
+                    cc.max_fanout,
+                    cc.connectivity_ratio,
+                    cc.primary_reason
             """,
             key_cols=["resolved_id"],
             update_cols=[
@@ -370,6 +421,10 @@ class OutputStage(BaseStage):
                 "run_id",
                 "super_cluster_id",
                 "confidence_score",
+                "edge_diversity",
+                "edge_count",
+                "max_fanout",
+                "match_density",
                 "primary_reason",
             ],
             insert_cols=[
@@ -379,6 +434,10 @@ class OutputStage(BaseStage):
                 "run_id",
                 "super_cluster_id",
                 "confidence_score",
+                "edge_diversity",
+                "edge_count",
+                "max_fanout",
+                "match_density",
                 "primary_reason",
             ],
         )

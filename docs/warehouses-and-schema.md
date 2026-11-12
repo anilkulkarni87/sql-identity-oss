@@ -111,7 +111,9 @@ All tables are defined in `idr_core/schema_defs.py` (`SYSTEM_TABLES`) and mirror
 | :--- | :--- | :--- |
 | `idr_out.identity_resolved_membership_current` | Canonical mapping of every `entity_key` to its persistent `resolved_id`. | `entity_key`, `resolved_id`, `updated_at`, `super_cluster_id` |
 | `idr_out.identity_identifiers_current` | Current normalized identifiers per `entity_key` (powers candidate expansion & no-watermark state-diffing). | `entity_key`, `identifier_type`, `identifier_value_norm`, `is_hashed`, `updated_at` |
-| `idr_out.identity_clusters_current` | Cluster-level quality and confidence metrics. | `resolved_id`, `cluster_size`, `confidence_score`, `edge_diversity`, `match_density`, `primary_reason`, `updated_at` |
+| `idr_out.identity_clusters_current` | Cluster-level quality and confidence metrics. | `resolved_id`, `cluster_size`, `confidence_score`, `edge_diversity`, `edge_count`, `max_fanout`, `match_density`, `primary_reason`, `updated_at` |
+| `idr_out.edge_evidence` | Granular match evidence trail for every edge ("why did A match B"). | `run_id`, `entity_key_a`, `entity_key_b`, `rule_id`, `identifier_type`, `match_value`, `score` |
+| `idr_out.evaluation_sample` | Stratified pair sample for Precision/Recall audit & human/LLM labeling. | `sample_id`, `stratum`, `entity_key_a`, `entity_key_b`, `identifier_type`, `confidence_score`, `human_label` |
 | `idr_out.golden_profile_current` | Consolidated 360° customer profile per `resolved_id`. | `resolved_id`, `email_primary`, `phone_primary`, `first_name`, `last_name`, `<dynamic_attributes>`, `updated_at` |
 | `idr_out.resolved_id_crosswalk` | Historical ledger of cluster ID merges and splits across runs. | `run_id`, `old_resolved_id`, `new_resolved_id`, `entity_key`, `change_type`, `changed_at` |
 | `idr_out.run_history` & `idr_out.stage_metrics` | Run-level and stage-level execution telemetry. | `run_id`, `run_mode`, `status`, `entities_processed`, `edges_created`, `clusters_Impacted`, `lp_iterations`, `duration_seconds` |
@@ -124,6 +126,28 @@ All tables are defined in `idr_core/schema_defs.py` (`SYSTEM_TABLES`) and mirror
 ### Recommended Incremental Scheduling Pattern
 - **Hourly / Intra-day Runs**: Run `idr run --mode INCR` every 15–60 minutes. Watermarked event/order tables only scan rows newer than `last_watermark_value`, while dimension tables without watermarks use fast identifier state-diffing against `idr_out.identity_identifiers_current` and short-circuit immediately if no identifiers changed.
 - **Weekly Guardrail Audit**: Query `idr_out.skipped_identifier_groups` to spot new placeholder values that exceeded `max_group_size` and promote them to `idr_meta.identifier_exclusion`.
+
+### Production Preflight Health Check (`idr doctor`)
+Run automated preflight diagnostics across connectivity, IAM permissions, schema initialization, active rules, and guardrails:
+```bash
+idr doctor --platform bigquery --project my-project
+```
+Verifies:
+1. **Connectivity & Latency**: Measures live warehouse ping.
+2. **Schema & System Tables**: Checks presence of all 7 core tables across `idr_meta`, `idr_work`, and `idr_out`.
+3. **DDL/DML Staging Probe**: Probes `idr_work` with non-destructive temporary table creation and drop to certify write permissions.
+4. **Configuration & Watermarks**: Validates registered sources, watermarks vs. dimension tables, and matching rules.
+5. **Poison-Pill Guardrails**: Verifies active exclusion lists and warns if dangerous supernode rules exist.
+
+### Autonomous Configuration Bootstrapper (`idr bootstrap --auto`)
+Profile warehouse tables, discover customer identifiers, and synthesize a production YAML manifest in seconds:
+```bash
+# Profile dataset and write to idr_config.yaml
+idr bootstrap --platform bigquery --project my-project --schema ecommerce_synth --output idr_config.yaml
+
+# Or profile and immediately apply to warehouse metadata tables
+idr bootstrap --platform bigquery --project my-project --schema ecommerce_synth --apply
+```
 
 ### Troubleshooting Common Scenarios
 

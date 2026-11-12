@@ -100,7 +100,7 @@ idr ui --db demo.duckdb
 
 ### Option 2: AI Agent (MCP)
 
-Enable your AI assistant (Claude, Cursor) to understand and query your identity graph.
+Enable your AI assistant (Antigravity, Codex, Cursor, Claude) to understand and query your identity graph.
 
 ```bash
 # Start MCP Server
@@ -109,7 +109,7 @@ export IDR_DATABASE=./my_data.duckdb
 idr mcp
 ```
 
-See [MCP Documentation](idr_mcp/README.md) for setup details.
+See [MCP Documentation](idr_mcp/README.md) or [Interfaces & MCP Guide](docs/interfaces-and-dbt.md#4-fastmcp-server-for-ai-agents-idr-mcp) for Antigravity, Codex, Cursor, and Claude setup guides.
 
 ### Option 3: Web UI
 

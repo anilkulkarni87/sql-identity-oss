@@ -208,15 +208,15 @@ class IDRRunner:
         graph = GraphStage(ctx, config=config)
         output = OutputStage(ctx, config=config)
 
-        # Check for optional evidence generation
-        self._generate_evidence = preflight.load_evidence_flag()
-        ctx.generate_evidence = self._generate_evidence
-
         try:
             # 1. Preflight validation (before recording run to avoid self-detection)
             self._start_stage("preflight")
             preflight.run()
             self._end_stage("preflight")
+
+            # Check for optional evidence generation after preflight schema checks
+            self._generate_evidence = preflight.load_evidence_flag()
+            ctx.generate_evidence = self._generate_evidence
 
             # Record run start (after preflight passes)
             self._record_run_start(config)

@@ -206,29 +206,39 @@ class GraphStage(BaseStage):
 
         count = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.edges_new")
 
-        # Generate edge evidence if enabled
-        if self._generate_evidence and count and count > 0:
+        # Generate edge evidence if enabled (audit trail for why edges matched)
+        if self._generate_evidence and count and count > 0 and not (self.config and self.config.dry_run):
             try:
+                if self.run_mode == "FULL":
+                    self.adapter.execute("DELETE FROM idr_out.edge_evidence WHERE 1=1")
+
                 # Use CONCAT for BigQuery/Databricks, || for DuckDB/Snowflake
                 if self.adapter.dialect in ("bigquery", "databricks"):
-                    rule_id_expr = "CONCAT('exact_', identifier_type)"
+                    fallback_rule_expr = "CONCAT('exact_', e.identifier_type)"
                 else:
-                    rule_id_expr = "'exact_' || identifier_type"
+                    fallback_rule_expr = "'exact_' || e.identifier_type"
 
+                float_type = self._dialect.get("float_type", "DOUBLE")
                 self.adapter.execute(f"""
                     INSERT INTO idr_out.edge_evidence
                     (run_id, entity_key_a, entity_key_b, rule_id, identifier_type,
                      match_value, score, created_at)
                     SELECT
                         '{self.run_id}' as run_id,
-                        left_entity_key as entity_key_a,
-                        right_entity_key as entity_key_b,
-                        {rule_id_expr} as rule_id,
-                        identifier_type,
-                        identifier_value_norm as match_value,
-                        1.0 as score,
+                        e.left_entity_key as entity_key_a,
+                        e.right_entity_key as entity_key_b,
+                        COALESCE(r.rule_id, {fallback_rule_expr}) as rule_id,
+                        e.identifier_type,
+                        e.identifier_value_norm as match_value,
+                        CAST(1.0 AS {float_type}) as score,
                         {self._dialect["current_timestamp"]} as created_at
-                    FROM idr_work.edges_new
+                    FROM idr_work.edges_new e
+                    LEFT JOIN (
+                        SELECT identifier_type, MIN(rule_id) AS rule_id
+                        FROM idr_meta.rule
+                        WHERE is_active = TRUE
+                        GROUP BY identifier_type
+                    ) r ON LOWER(e.identifier_type) = LOWER(r.identifier_type)
                 """)
             except Exception as e:
                 self._warnings.append(f"Edge evidence generation failed: {e}")

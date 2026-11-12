@@ -314,6 +314,8 @@ sources:
       - name: city
         expr: city
 
+use_default_exclusions: true
+
 rules:
   - id: "104"
     type: EXACT
@@ -344,6 +346,7 @@ rules:
     match_keys: [address_id]
     priority: 5
     canonicalize: LOWERCASE
+    max_group_size: 25
 
   - id: "109"
     type: EXACT

@@ -383,7 +383,9 @@ ON {join_cond}
 
     # Source tables
     for src in (config.get("sources") or []):
-        raw_wm = src.get("watermark_column", "updated_at")
+        raw_wm = src.get("watermark_column")
+        if raw_wm is None:
+            raw_wm = src.get("watermark")
         wm_col = (
             None
             if raw_wm is None or str(raw_wm).strip().lower() in ("", "none", "null")

@@ -13,6 +13,9 @@ title: Interfaces, Web UI, MCP & dbt
 | Command | Description | Example |
 | :--- | :--- | :--- |
 | `idr quickstart` | Generate synthetic retail data and run a complete local DuckDB resolution pipeline. | `idr quickstart --rows 10000 --output demo.duckdb` |
+| `idr bootstrap` | Auto-profile warehouse tables and synthesize production YAML configuration (`--apply` loads to warehouse). | `idr bootstrap --platform bigquery --schema ecommerce_synth --output idr_config.yaml --apply` |
+| `idr doctor` | Run production readiness diagnostics (connectivity, permissions, schemas, watermarks, guardrails). | `idr doctor --platform bigquery --project my-project` |
+| `idr evaluate` | Compute Pairwise Precision/Recall/F1 against ground truth or build stratified audit samples (`idr_out.evaluation_sample`). | `idr evaluate --platform bigquery --project my-project` |
 | `idr init` | Initialize `idr_meta`, `idr_work`, and `idr_out` schemas and tables (`--reset` recreates them). | `idr init --platform duckdb --db demo.duckdb` |
 | `idr apply-config` | Compile and load a declarative YAML manifest into `idr_meta.*` tables. | `idr apply-config --db demo.duckdb --config config.yaml` |
 | `idr run` | Execute the 8-stage resolution pipeline (`--mode FULL` or `--mode INCR`, `--dry-run`, `--strict`). | `idr run --db demo.duckdb --mode INCR --max-iters 30` |
@@ -79,26 +82,125 @@ idr ui --db demo.duckdb
 
 ## 4. FastMCP Server for AI Agents (`idr mcp`)
 
-Expose your identity graph and configuration tools to Claude Desktop, Cursor, or any MCP client:
+Expose your identity graph and configuration tools to **Antigravity**, **Codex**, **Cursor**, **Claude Desktop**, and **VS Code Copilot**. The FastMCP server enables AI agents to query the identity graph, resolve Customer 360 profiles, explain edges, and simulate rules directly against your warehouse.
 
-```json
-{
-  "mcpServers": {
-    "sql-identity-resolution": {
-      "command": "idr",
-      "args": ["mcp", "--platform", "duckdb", "--db", "/absolute/path/to/demo.duckdb"]
+### Client Configuration Guides
+
+=== "Antigravity"
+
+    Configure stdio transport in `.agents/mcp_config.json` (workspace) or `~/.gemini/config/mcp_config.json` (global):
+
+    ```json
+    {
+      "mcpServers": {
+        "idr-graph": {
+          "command": "idr",
+          "args": ["mcp"],
+          "env": {
+            "IDR_PLATFORM": "bigquery",
+            "IDR_PROJECT": "your-gcp-project",
+            "IDR_PII_ACCESS": "masked"
+          }
+        }
+      }
     }
-  }
-}
-```
+    ```
 
-### Exposed MCP Tools (`idr_mcp/server.py`)
-- `get_ClusterView(resolved_id)` — Fetch cluster members, edges, confidence metrics, and golden profile attributes.
-- `search_entities(query, limit)` — Search entities across all identifier types and attributes.
-- `explain_edge(entity_a, entity_b)` — Explain which rules and normalized identifiers linked two entities.
-- `list_runs(limit)` & `get_metrics()` — Inspect pipeline run history, skipped identifier groups, and cluster size distribution.
-- `configure_source(...)`, `add_rule(...)`, `run_pipeline(run_mode, dry_run)` — Configure and run the pipeline via natural language.
-- `export_dbt_seeds(output_dir, config_yaml)` — Compile YAML or live warehouse metadata into `dbt_idr` seed CSVs.
+=== "OpenAI Codex"
+
+    Add to `~/.codex/config.json` or `~/.codex/mcp.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "idr-graph": {
+          "command": "idr",
+          "args": ["mcp"],
+          "env": {
+            "IDR_PLATFORM": "duckdb",
+            "IDR_DATABASE": "/absolute/path/to/demo.duckdb"
+          }
+        }
+      }
+    }
+    ```
+
+=== "Cursor"
+
+    Add to `.cursor/mcp.json` in your project root:
+
+    ```json
+    {
+      "mcpServers": {
+        "idr-graph": {
+          "command": "idr",
+          "args": ["mcp"],
+          "env": {
+            "IDR_PLATFORM": "duckdb",
+            "IDR_DATABASE": "/absolute/path/to/demo.duckdb"
+          }
+        }
+      }
+    }
+    ```
+
+=== "Claude Desktop"
+
+    Add to `~/.config/claude/claude_desktop_config.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "idr-graph": {
+          "command": "idr",
+          "args": ["mcp"],
+          "env": {
+            "IDR_PLATFORM": "duckdb",
+            "IDR_DATABASE": "/absolute/path/to/demo.duckdb"
+          }
+        }
+      }
+    }
+    ```
+
+=== "VS Code (Copilot)"
+
+    Add to `.vscode/settings.json`:
+
+    ```json
+    {
+      "mcp": {
+        "servers": {
+          "idr-graph": {
+            "command": "idr",
+            "args": ["mcp"],
+            "env": {
+              "IDR_PLATFORM": "duckdb",
+              "IDR_DATABASE": "/absolute/path/to/demo.duckdb"
+            }
+          }
+        }
+      }
+    }
+    ```
+
+> [!TIP] Virtual Environments
+> If `idr` is installed inside a virtual environment (e.g. `.venv`), set `"command"` to `/path/to/venv/bin/python` and `"args"` to `["-m", "idr_mcp.server"]`.
+
+### Exposed MCP Tools (17 Agentic Tools)
+- `resolve_customer_360(identifier_type, identifier_value)` — Single-call Customer 360 context grounding (canonical identity, golden profile, all linked accounts & identifiers).
+- `discover_and_suggest_rules()` — Autonomous table profiling, PII detection, and suggested IDR YAML configuration.
+- `simulate_rule_impact(...)` — Non-destructive dry-run simulation of candidate matching rules with supernode risk alerting.
+- `explain_cluster(resolved_id)` — Complete cluster explanation (confidence reason, members, edges, and golden profile).
+- `explain_edge(entity_a, entity_b)` — View evidence for why two records matched (direct or transitive).
+- `search_identifier(identifier_type, value)` — Find clusters by email, phone, loyalty ID, etc.
+- `get_cluster(resolved_id)` & `get_golden_profile(resolved_id)` — Fetch cluster details and surviving attributes.
+- `list_skipped_groups()` — Inspect oversized identifier groups flagged by `max_group_size`.
+- `get_metrics_summary()` & `get_system_status()` — High-level identity graph KPIs and warehouse lifecycle status.
+- `dry_run_pipeline()` & `run_history()` — Trigger dry runs and inspect stage execution telemetry.
+
+### PII Safety Controls
+By default, all sensitive PII (emails, phone numbers, exact match values) is masked in tool outputs (`jo***hn@example.com`). To grant the agent full unmasked values, explicitly pass `"IDR_PII_ACCESS": "full"` in the server `"env"`.
 
 ---
 
