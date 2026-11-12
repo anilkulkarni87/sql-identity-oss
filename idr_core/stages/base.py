@@ -48,7 +48,14 @@ class BaseStage:
         self.run_id = ctx.run_id
         self.logger = ctx.logger
         self._warnings = ctx.warnings
-        self._generate_evidence = ctx.generate_evidence
+
+    @property
+    def _generate_evidence(self) -> bool:
+        return bool(self.ctx.generate_evidence)
+
+    @_generate_evidence.setter
+    def _generate_evidence(self, value: bool) -> None:
+        self.ctx.generate_evidence = bool(value)
 
     def _validate_metadata_value(self, value, value_type: str, field_name: str):
         """

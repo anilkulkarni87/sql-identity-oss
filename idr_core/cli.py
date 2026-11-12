@@ -320,6 +320,39 @@ Examples:
     doctor_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
     doctor_parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed diagnostic output")
 
+    # === idr evaluate ===
+    eval_parser = subparsers.add_parser(
+        "evaluate", help="Evaluate entity resolution Precision/Recall or generate stratified audit samples"
+    )
+    eval_parser.add_argument(
+        "--platform",
+        "-p",
+        choices=["duckdb", "bigquery", "snowflake", "databricks"],
+        required=False,
+        help="Target platform (auto-detected if omitted)",
+    )
+    eval_parser.add_argument("--db", help="DuckDB database path")
+    eval_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    eval_parser.add_argument("--location", default="US", help="BigQuery location")
+    eval_parser.add_argument("--dataset", default="idr_out", help="BigQuery output dataset")
+    eval_parser.add_argument("--meta-dataset", default="idr_meta", help="BigQuery metadata dataset")
+    eval_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
+    eval_parser.add_argument(
+        "--ground-truth-table", help="FQN of ground-truth table for Pairwise Precision/Recall/F1"
+    )
+    eval_parser.add_argument(
+        "--entity-key-col", default="entity_key", help="Entity key column in ground truth table"
+    )
+    eval_parser.add_argument(
+        "--truth-id-col", default="truth_id", help="Ground truth cluster/person ID column"
+    )
+    eval_parser.add_argument(
+        "--sample-size", type=int, default=20, help="Number of pairs to extract per audit stratum"
+    )
+    eval_parser.add_argument(
+        "--no-persist", action="store_true", help="Do not write sampled pairs to idr_out.evaluation_sample"
+    )
+
     # Parse arguments
     parsed_args = parser.parse_args(args)
 
@@ -368,6 +401,9 @@ Examples:
 
     if parsed_args.command == "doctor":
         return handle_doctor(parsed_args)
+
+    if parsed_args.command == "evaluate":
+        return handle_evaluate(parsed_args)
 
     return 0
 
@@ -900,6 +936,64 @@ def handle_bootstrap(args) -> int:
     else:
         print("💡 Next step: Run 'idr run --dry-run' to preview cluster resolutions.")
 
+    return 0
+
+
+def handle_evaluate(args) -> int:
+    """Execute entity resolution quality evaluation or stratified audit sampling."""
+    adapter = get_adapter(args)
+    from idr_core.evaluator import IDREvaluator
+
+    evaluator = IDREvaluator(adapter)
+    print("=" * 70)
+    print(f"📊  SQL Identity Resolution — Quality Evaluation ({evaluator.dialect_name.upper()})")
+    print("=" * 70)
+
+    gt_table = getattr(args, "ground_truth_table", None)
+    if gt_table:
+        res = evaluator.evaluate_ground_truth(
+            ground_truth_table=gt_table,
+            entity_key_col=getattr(args, "entity_key_col", "entity_key"),
+            truth_id_col=getattr(args, "truth_id_col", "truth_id"),
+        )
+        if res.get("status") != "SUCCESS":
+            print(f"❌ Evaluation failed: {res.get('message')}")
+            return 1
+
+        print(f"Evaluated Entities : {res['evaluated_entities']:,}")
+        print(f"Predicted Clusters : {res['predicted_clusters']:,}")
+        print(f"True Clusters      : {res['true_clusters']:,}")
+        print("-" * 70)
+        print(f"Pairwise Precision : {res['precision']:.4f}  (TP={res['tp_pairs']:,}, FP={res['fp_pairs']:,})")
+        print(f"Pairwise Recall    : {res['recall']:.4f}  (FN={res['fn_pairs']:,})")
+        print(f"Pairwise F1 Score  : {res['f1']:.4f}")
+        if res.get("top_overmerged_clusters"):
+            print(f"\n⚠️  Top Over-Merged Clusters ({len(res['top_overmerged_clusters'])} shown):")
+            for c in res["top_overmerged_clusters"][:5]:
+                print(f"   - {c['resolved_id']}: {c['distinct_truth_ids']} truth IDs merged across {c['cluster_entities']} rows")
+        if res.get("top_split_entities"):
+            print(f"\n⚠️  Top Split Entities ({len(res['top_split_entities'])} shown):")
+            for s in res["top_split_entities"][:5]:
+                print(f"   - {s['truth_id']}: fractured into {s['split_into_clusters']} clusters")
+        return 0
+
+    # Unsupervised Stratified Audit Mode
+    res = evaluator.audit_quality_and_sample(
+        sample_per_stratum=getattr(args, "sample_size", 20),
+        persist_sample=not getattr(args, "no_persist", False),
+    )
+    d = res["distribution"]
+    print(f"Total Clusters             : {int(d.get('total_clusters') or 0):,}")
+    print(f"Singleton Rate             : {float(d.get('singleton_rate') or 0) * 100:.1f}% ({int(d.get('singleton_clusters') or 0):,} singletons)")
+    print(f"Multi-Entity Clusters      : {int(d.get('multi_entity_clusters') or 0):,}")
+    print(f"  ├─ Corroborated (2+ keys): {int(d.get('corroborated_clusters') or 0):,}")
+    print(f"  ├─ Single-Key Deterministic: {int(d.get('single_key_clusters') or 0):,}")
+    print(f"  └─ Low-Confidence Risk     : {int(d.get('low_confidence_risk_clusters') or 0):,}")
+    print(f"Avg Multi-Entity Conf      : {d.get('avg_multi_entity_confidence') or 'N/A'}")
+    print(f"Edge Evidence Rows         : {int(d.get('edge_evidence_rows') or 0):,}")
+    print(f"Near-Miss Singletons Found : {res['near_miss_candidates_found']:,}")
+    print("-" * 70)
+    print(f"Stratified Audit Samples   : {res['samples_extracted']} pairs extracted ({res['samples_persisted']} saved to idr_out.evaluation_sample)")
     return 0
 
 

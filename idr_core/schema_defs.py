@@ -341,7 +341,25 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef(
                 "confidence_score",
                 ColumnType.DOUBLE,
-                description="Confidence score (0.0-1.0) of the cluster quality",
+                description="Calibrated confidence score (0.0-1.0) of the cluster quality",
+            ),
+            ColumnDef(
+                "edge_diversity",
+                ColumnType.INT,
+                default="0",
+                description="Number of distinct identifier types linking entities in this cluster",
+            ),
+            ColumnDef(
+                "edge_count",
+                ColumnType.INT,
+                default="0",
+                description="Total number of edges connecting entities in this cluster",
+            ),
+            ColumnDef(
+                "match_density",
+                ColumnType.DOUBLE,
+                default="1.0",
+                description="Graph connectivity ratio (edges / (cluster_size - 1))",
             ),
             ColumnDef(
                 "primary_reason",
@@ -433,6 +451,25 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("entities_moved", ColumnType.INT),
             ColumnDef("run_id", ColumnType.STRING),
             ColumnDef("updated_at", ColumnType.TIMESTAMP),
+        ],
+    ),
+    TableDef(
+        schema="idr_out",
+        name="evaluation_sample",
+        description="Stratified pair sample for precision/recall auditing and human/LLM labeling.",
+        columns=[
+            ColumnDef("sample_id", ColumnType.STRING, is_pk=True),
+            ColumnDef("stratum", ColumnType.STRING),
+            ColumnDef("resolved_id_a", ColumnType.STRING),
+            ColumnDef("resolved_id_b", ColumnType.STRING),
+            ColumnDef("entity_key_a", ColumnType.STRING),
+            ColumnDef("entity_key_b", ColumnType.STRING),
+            ColumnDef("identifier_type", ColumnType.STRING),
+            ColumnDef("match_value", ColumnType.STRING),
+            ColumnDef("confidence_score", ColumnType.DOUBLE),
+            ColumnDef("cluster_size", ColumnType.INT),
+            ColumnDef("human_label", ColumnType.STRING),
+            ColumnDef("sampled_at", ColumnType.TIMESTAMP),
         ],
     ),
 ]

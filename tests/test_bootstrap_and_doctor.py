@@ -153,3 +153,4 @@ def test_cli_bootstrap_and_doctor_integration(test_db_path, tmp_path):
     # 3. Run CLI doctor
     doctor_ret = main(["doctor", "--platform", "duckdb", "--db", test_db_path])
     assert doctor_ret == 0
+

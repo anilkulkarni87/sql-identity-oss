@@ -386,25 +386,41 @@ class IDRDataProfiler:
         for id_type in sorted_id_types:
             observed_max = all_detected_identifiers.get(id_type, 1)
             adaptive_max = max(15, min(500, observed_max * 10))
+            # Tighter household / shared network guardrail to prevent apartment/office over-merges
+            if any(w in id_type.lower() for w in ("address", "ip", "session")):
+                adaptive_max = min(adaptive_max, 25)
+
+            canon = "EXACT"
+            if "email" in id_type.lower():
+                canon = "EMAIL_STANDARD"
+            elif "phone" in id_type.lower():
+                canon = "PHONE_DIGITS"
+
             rules.append({
                 "id": f"exact_{id_type}",
                 "type": "EXACT",
                 "match_keys": [id_type],
-                "canonicalize": "LOWERCASE" if id_type == "email" else "EXACT",
+                "canonicalize": canon,
                 "priority": priority,
                 "max_group_size": adaptive_max,
             })
             priority += 1
 
-        # 8. Adaptive Survivorship Strategies based on watermark presence
+        # 8. Adaptive Survivorship Strategies per attribute based on source watermark presence
         survivorship = []
-        has_watermark = any(s.get("watermark_column") for s in sources)
+        attr_sources_map: Dict[str, List[Dict[str, Any]]] = {}
+        for s in sources:
+            for attr_obj in s.get("attributes", []):
+                attr_name = attr_obj["name"]
+                attr_sources_map.setdefault(attr_name, []).append(s)
 
         for attr in sorted(all_detected_attributes):
-            strategy = "RECENCY" if has_watermark else "PRIORITY"
-            rule_entry = {"attribute": attr, "strategy": strategy}
-            if strategy == "PRIORITY" and sources:
-                rule_entry["source_priority"] = [s["table"] for s in sources]
+            contributing = attr_sources_map.get(attr, [])
+            attr_has_wm = any(s.get("watermark_column") for s in contributing)
+            strategy = "RECENCY" if attr_has_wm else "PRIORITY"
+            rule_entry: Dict[str, Any] = {"attribute": attr, "strategy": strategy}
+            if strategy == "PRIORITY" and contributing:
+                rule_entry["source_priority"] = [s["table"] for s in contributing]
             survivorship.append(rule_entry)
 
         # Deduplicate discovered exclusions
@@ -417,6 +433,7 @@ class IDRDataProfiler:
                 unique_exclusions.append(excl)
 
         suggested_config = {
+            "use_default_exclusions": True,
             "sources": sources,
             "rules": rules,
             "survivorship": survivorship,

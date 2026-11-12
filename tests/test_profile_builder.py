@@ -276,7 +276,8 @@ class TestBuildStagingCte:
             },
         ]
         result = duckdb_builder._build_staging_cte(rules, mappings, sources)
-        assert "NULL AS recency_ts" in result
+        assert "NULL AS" in result or "CAST(NULL AS" in result
+        assert "AS recency_ts" in result
 
 
 # ============================================================

@@ -111,7 +111,9 @@ All tables are defined in `idr_core/schema_defs.py` (`SYSTEM_TABLES`) and mirror
 | :--- | :--- | :--- |
 | `idr_out.identity_resolved_membership_current` | Canonical mapping of every `entity_key` to its persistent `resolved_id`. | `entity_key`, `resolved_id`, `updated_at`, `super_cluster_id` |
 | `idr_out.identity_identifiers_current` | Current normalized identifiers per `entity_key` (powers candidate expansion & no-watermark state-diffing). | `entity_key`, `identifier_type`, `identifier_value_norm`, `is_hashed`, `updated_at` |
-| `idr_out.identity_clusters_current` | Cluster-level quality and confidence metrics. | `resolved_id`, `cluster_size`, `confidence_score`, `edge_diversity`, `match_density`, `primary_reason`, `updated_at` |
+| `idr_out.identity_clusters_current` | Cluster-level quality and confidence metrics. | `resolved_id`, `cluster_size`, `confidence_score`, `edge_diversity`, `edge_count`, `match_density`, `primary_reason`, `updated_at` |
+| `idr_out.edge_evidence` | Granular match evidence trail for every edge ("why did A match B"). | `run_id`, `entity_key_a`, `entity_key_b`, `rule_id`, `identifier_type`, `match_value`, `score` |
+| `idr_out.evaluation_sample` | Stratified pair sample for Precision/Recall audit & human/LLM labeling. | `sample_id`, `stratum`, `entity_key_a`, `entity_key_b`, `identifier_type`, `confidence_score`, `human_label` |
 | `idr_out.golden_profile_current` | Consolidated 360° customer profile per `resolved_id`. | `resolved_id`, `email_primary`, `phone_primary`, `first_name`, `last_name`, `<dynamic_attributes>`, `updated_at` |
 | `idr_out.resolved_id_crosswalk` | Historical ledger of cluster ID merges and splits across runs. | `run_id`, `old_resolved_id`, `new_resolved_id`, `entity_key`, `change_type`, `changed_at` |
 | `idr_out.run_history` & `idr_out.stage_metrics` | Run-level and stage-level execution telemetry. | `run_id`, `run_mode`, `status`, `entities_processed`, `edges_created`, `clusters_Impacted`, `lp_iterations`, `duration_seconds` |

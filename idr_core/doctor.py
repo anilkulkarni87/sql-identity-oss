@@ -308,6 +308,11 @@ class IDRDoctor:
             else:
                 # Check for risky supernode thresholds
                 oversized_rules = [r for r in rules if (r.get("max_group_size") or 0) > 25000]
+                household_risks = [
+                    r for r in rules
+                    if any(w in str(r.get("identifier_type", "")).lower() for w in ("address", "ip", "session"))
+                    and (r.get("max_group_size") or 10000) > 50
+                ]
                 if oversized_rules:
                     items.append(
                         CheckItem(
@@ -316,6 +321,20 @@ class IDRDoctor:
                             status=CheckStatus.WARN,
                             message=f"{rule_count} rules active ({len(oversized_rules)} have max_group_size > 25,000)",
                             remediation="Consider lowering max_group_size on broad rules to prevent graph mega-clusters.",
+                        )
+                    )
+                elif household_risks:
+                    risk_types = ", ".join(str(r.get("identifier_type")) for r in household_risks)
+                    items.append(
+                        CheckItem(
+                            category="Configuration",
+                            name="Deterministic Matching Rules",
+                            status=CheckStatus.WARN,
+                            message=f"{rule_count} rules active, but shared key(s) [{risk_types}] allow > 50 links",
+                            remediation=(
+                                "Single-key matching on address/IP with high max_group_size risks apartment or household over-merges. "
+                                "Lower max_group_size <= 25 or switch entity_type to HOUSEHOLD."
+                            ),
                         )
                     )
                 else:

@@ -129,6 +129,28 @@ class PreflightStage(BaseStage):
         except Exception as e:
             self.logger.warning(f"Schema migration check failed: {e}")
 
+        try:
+            # Ensure corroboration columns exist on idr_out.identity_clusters_current
+            cluster_cols = self.adapter.get_table_columns("idr_out.identity_clusters_current")
+            cluster_col_names = [c["name"].lower() for c in cluster_cols] if cluster_cols else []
+            if cluster_col_names:
+                int_type = "INT64" if self.adapter.dialect == "bigquery" else ("INTEGER" if self.adapter.dialect in ("duckdb", "snowflake") else "INT")
+                float_type = "FLOAT64" if self.adapter.dialect == "bigquery" else "DOUBLE"
+                for col_name, col_type in [
+                    ("edge_diversity", int_type),
+                    ("edge_count", int_type),
+                    ("match_density", float_type),
+                ]:
+                    if col_name not in cluster_col_names:
+                        self.logger.info(
+                            f"Migrating schema: Adding {col_name} to idr_out.identity_clusters_current"
+                        )
+                        self.adapter.execute(
+                            f"ALTER TABLE idr_out.identity_clusters_current ADD COLUMN {col_name} {col_type}"
+                        )
+        except Exception as e:
+            self.logger.warning(f"Cluster corroboration schema migration failed: {e}")
+
     def load_evidence_flag(self) -> bool:
         """Load the generate_evidence flag from run config or DB.
 

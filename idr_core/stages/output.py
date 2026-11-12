@@ -67,7 +67,7 @@ class OutputStage(BaseStage):
             GROUP BY resolved_id
         """)
 
-        # 1. Edge stats per cluster with identifier fidelity & diversity
+        # 1. Edge stats per cluster with calibrated identifier fidelity & diversity
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_edge_stats AS
             SELECT
@@ -76,15 +76,18 @@ class OutputStage(BaseStage):
                 COUNT(*) AS edge_count,
                 MAX(
                     CASE
-                        WHEN LOWER(e.identifier_type) IN ('ssn', 'tax_id', 'national_id') THEN 1.00
+                        WHEN LOWER(e.identifier_type) IN ('ssn', 'tax_id', 'national_id') THEN 0.85
                         WHEN LOWER(e.identifier_type) LIKE '%customer%'
                           OR LOWER(e.identifier_type) LIKE '%account%'
-                          OR LOWER(e.identifier_type) LIKE '%loyalty%' THEN 0.98
-                        WHEN LOWER(e.identifier_type) LIKE '%email%' THEN 0.96
-                        WHEN LOWER(e.identifier_type) LIKE '%phone%' THEN 0.93
+                          OR LOWER(e.identifier_type) LIKE '%loyalty%' THEN 0.80
+                        WHEN LOWER(e.identifier_type) LIKE '%email%' THEN 0.76
+                        WHEN LOWER(e.identifier_type) LIKE '%phone%' THEN 0.72
                         WHEN LOWER(e.identifier_type) LIKE '%device%'
-                          OR LOWER(e.identifier_type) LIKE '%session%' THEN 0.85
-                        ELSE 0.78
+                          OR LOWER(e.identifier_type) LIKE '%cookie%' THEN 0.62
+                        WHEN LOWER(e.identifier_type) LIKE '%address%'
+                          OR LOWER(e.identifier_type) LIKE '%ip%'
+                          OR LOWER(e.identifier_type) LIKE '%session%' THEN 0.45
+                        ELSE 0.55
                     END
                 ) AS max_fidelity,
                 MAX(
@@ -117,7 +120,7 @@ class OutputStage(BaseStage):
                 c.cluster_size,
                 COALESCE(es.edge_diversity, 0) AS edge_diversity,
                 COALESCE(es.edge_count, 0) AS edge_count,
-                COALESCE(es.max_fidelity, 0.78) AS max_fidelity,
+                COALESCE(es.max_fidelity, 0.55) AS max_fidelity,
                 COALESCE(es.has_strong_key, 0) AS has_strong_key,
                 COALESCE(es.has_email, 0) AS has_email,
                 COALESCE(es.has_phone, 0) AS has_phone,
@@ -134,32 +137,41 @@ class OutputStage(BaseStage):
         """)
 
         # 3. Final Confidence Score & Reason (dialect-safe string and float types)
-        # Grounded on deterministic identifier fidelity + multi-identifier corroboration
+        # Calibrated to separate weak single-key fanout, single-key deterministic, and multi-key corroborated clusters
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_confidence AS
             SELECT
                 cd.resolved_id,
                 cd.cluster_size,
                 cd.edge_diversity,
+                cd.edge_count,
                 cd.connectivity_ratio,
                 CASE
                     WHEN cd.cluster_size = 1 THEN 1.0
                     ELSE ROUND(
                         LEAST(
-                            1.0,
+                            0.99,
                             GREATEST(
-                                0.50,
-                                -- Base fidelity scaled by connectivity
+                                0.10,
+                                -- Base fidelity scaled by spanning tree connectivity
                                 (cd.max_fidelity * cd.connectivity_ratio) +
                                 -- Corroboration bonus for multi-identifier confirmation
                                 CASE
-                                    WHEN cd.edge_diversity >= 3 THEN 0.04
-                                    WHEN cd.edge_diversity = 2 THEN 0.02
+                                    WHEN cd.edge_diversity >= 4 THEN 0.18
+                                    WHEN cd.edge_diversity = 3 THEN 0.14
+                                    WHEN cd.edge_diversity = 2 THEN 0.09
+                                    ELSE 0.0
+                                END +
+                                -- Edge redundancy bonus when clusters have extra confirming cycles beyond minimal tree
+                                CASE
+                                    WHEN cd.edge_count > cd.cluster_size - 1 THEN 0.02
                                     ELSE 0.0
                                 END -
-                                -- Runaway cluster penalty if huge cluster merged on only 1 identifier
+                                -- Runaway cluster & household over-merge fan-out penalties
                                 CASE
-                                    WHEN cd.cluster_size > 250 AND cd.edge_diversity <= 1 THEN 0.12
+                                    WHEN cd.cluster_size > 250 AND cd.edge_diversity <= 1 THEN 0.35
+                                    WHEN cd.cluster_size > 15 AND cd.edge_diversity <= 1 THEN 0.15
+                                    WHEN cd.cluster_size > 5 AND cd.max_fidelity < 0.60 AND cd.edge_diversity <= 1 THEN 0.10
                                     ELSE 0.0
                                 END
                             )
@@ -170,17 +182,17 @@ class OutputStage(BaseStage):
                 CASE
                     WHEN cd.cluster_size = 1 THEN 'SINGLETON_NO_MATCH_REQUIRED'
                     WHEN cd.cluster_size > 250 AND cd.edge_diversity <= 1 THEN
-                        CONCAT('Large cluster via single identifier (', CAST(cd.cluster_size AS {str_type}), ' entities)')
+                        CONCAT('Over-merge risk: large cluster via single identifier (', CAST(cd.cluster_size AS {str_type}), ' entities)')
                     WHEN cd.edge_diversity >= 3 THEN
                         CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types (High Confidence Corroboration)')
                     WHEN cd.edge_diversity = 2 THEN
                         CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types (High Confidence Corroboration)')
                     WHEN cd.has_strong_key = 1 THEN
-                        'Deterministic account/customer key match (High Confidence)'
+                        'Deterministic account/customer key match (Single Key)'
                     WHEN cd.has_email = 1 THEN
-                        'Deterministic exact email match'
+                        'Deterministic exact email match (Single Key)'
                     WHEN cd.has_phone = 1 THEN
-                        'Deterministic exact phone match'
+                        'Deterministic exact phone match (Single Key)'
                     ELSE
                         CONCAT('Deterministic match via ', CAST(cd.edge_diversity AS {str_type}), ' identifier type(s)')
                 END AS primary_reason
@@ -346,7 +358,7 @@ class OutputStage(BaseStage):
         # 4. Compute Confidence Scores
         self.compute_confidence_scores()
 
-        # 5. Update clusters table (Now with confidence scores)
+        # 5. Update clusters table (Now with calibrated confidence & corroboration signals)
         self.upsert(
             target_table="idr_out.identity_clusters_current",
             source_query=f"""
@@ -356,12 +368,22 @@ class OutputStage(BaseStage):
                     {current_ts} AS updated_at,
                     '{self.run_id}' AS run_id,
                     COALESCE(fr.super_cluster_id, l.label) AS super_cluster_id,
-                    COALESCE(cc.confidence_score, 1.0) as confidence_score,
-                    COALESCE(cc.primary_reason, 'Single-node cluster') as primary_reason
+                    COALESCE(cc.confidence_score, 1.0) AS confidence_score,
+                    COALESCE(cc.edge_diversity, 0) AS edge_diversity,
+                    COALESCE(cc.edge_count, 0) AS edge_count,
+                    COALESCE(cc.connectivity_ratio, 1.0) AS match_density,
+                    COALESCE(cc.primary_reason, 'Single-node cluster') AS primary_reason
                 FROM idr_work.lp_labels l
                 LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
                 LEFT JOIN idr_work.cluster_confidence cc ON l.label = cc.resolved_id
-                GROUP BY label, COALESCE(fr.super_cluster_id, l.label), cc.confidence_score, cc.primary_reason
+                GROUP BY
+                    l.label,
+                    COALESCE(fr.super_cluster_id, l.label),
+                    cc.confidence_score,
+                    cc.edge_diversity,
+                    cc.edge_count,
+                    cc.connectivity_ratio,
+                    cc.primary_reason
             """,
             key_cols=["resolved_id"],
             update_cols=[
@@ -370,6 +392,9 @@ class OutputStage(BaseStage):
                 "run_id",
                 "super_cluster_id",
                 "confidence_score",
+                "edge_diversity",
+                "edge_count",
+                "match_density",
                 "primary_reason",
             ],
             insert_cols=[
@@ -379,6 +404,9 @@ class OutputStage(BaseStage):
                 "run_id",
                 "super_cluster_id",
                 "confidence_score",
+                "edge_diversity",
+                "edge_count",
+                "match_density",
                 "primary_reason",
             ],
         )
