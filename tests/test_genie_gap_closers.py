@@ -273,3 +273,76 @@ def test_recency_sql_handles_null_watermark_across_all_dialects(dialect):
     else:
         assert "COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00')" in sql
     assert "city" in sql
+
+
+def test_fanout_damping_separates_giant_hub_from_healthy_clusters(tmp_path):
+    """
+    Verify Genie's showcase test:
+    - 30-member cluster with fanout=30, 3 types ranks MUCH LOWER than normal 3-member cluster
+    - High fanout clusters (>20) get 'High fan-out over-merge risk' reason even with 3+ identifier types
+    """
+    db_file = str(tmp_path / "fanout_test.duckdb")
+    conn = duckdb.connect(db_file)
+    conn.execute("CREATE TABLE events (id VARCHAR, email VARCHAR, phone VARCHAR, loyalty VARCHAR, updated_at TIMESTAMP)")
+
+    # Cluster 1: Normal 3-member corroborated cluster (fanout <= 3, 3 types)
+    conn.execute("""
+        INSERT INTO events VALUES
+        ('n1', 'norm@acme-retail.com', '5550001111', 'LOY_NORM', '2026-01-01'),
+        ('n2', 'norm@acme-retail.com', '5550001111', NULL, '2026-01-02'),
+        ('n3', NULL, '5550001111', 'LOY_NORM', '2026-01-03')
+    """)
+
+    # Cluster 2: 30-member hub sharing ONE email + ONE phone + ONE loyalty (max_fanout=30, 3 types)
+    rows = [
+        (f"h{i}", "sharedhub@acme-retail.com", "5559990000", "LOY_SHARED", "2026-01-01")
+        for i in range(30)
+    ]
+    conn.executemany("INSERT INTO events VALUES (?, ?, ?, ?, ?)", rows)
+    conn.close()
+
+    ad = DuckDBAdapter(db_file)
+    SchemaManager(ad).initialize(reset=True)
+    cfg = {
+        "sources": [
+            {
+                "id": "ev",
+                "table": "events",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [
+                    {"type": "email", "expr": "email"},
+                    {"type": "phone", "expr": "phone"},
+                    {"type": "loyalty", "expr": "loyalty"},
+                ],
+            }
+        ],
+        "rules": [
+            {"id": "r1", "type": "EXACT", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD", "priority": 1, "max_group_size": 1000},
+            {"id": "r2", "type": "EXACT", "match_keys": ["phone"], "canonicalize": "PHONE_DIGITS", "priority": 2, "max_group_size": 1000},
+            {"id": "r3", "type": "EXACT", "match_keys": ["loyalty"], "canonicalize": "LOWERCASE", "priority": 3, "max_group_size": 1000},
+        ],
+    }
+    for s in config_to_sql(cfg, "duckdb"):
+        ad.execute(s)
+
+    res = IDRRunner(ad).run(RunConfig(run_mode="FULL", strict=True))
+    assert res.status == "SUCCESS"
+
+    norm_rid = ad.query_one("SELECT resolved_id FROM idr_out.identity_resolved_membership_current WHERE entity_key = 'ev:n1'")
+    hub_rid = ad.query_one("SELECT resolved_id FROM idr_out.identity_resolved_membership_current WHERE entity_key = 'ev:h0'")
+
+    clusters = {r["resolved_id"]: r for r in ad.query("SELECT * FROM idr_out.identity_clusters_current")}
+    norm_c = clusters[norm_rid]
+    hub_c = clusters[hub_rid]
+
+    assert norm_c["edge_diversity"] == 3
+    assert hub_c["edge_diversity"] == 3
+    assert hub_c["max_fanout"] == 30
+    assert norm_c["max_fanout"] <= 3
+    # Fanout=30 score = ~0.90 * (2 / sqrt(30)) = ~0.33, whereas norm score >= 0.89!
+    assert hub_c["confidence_score"] < 0.40
+    assert norm_c["confidence_score"] > 0.88
+    assert "High fan-out over-merge risk" in hub_c["primary_reason"]
+    ad.close()
+

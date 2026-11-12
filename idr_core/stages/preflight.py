@@ -139,6 +139,7 @@ class PreflightStage(BaseStage):
                 for col_name, col_type in [
                     ("edge_diversity", int_type),
                     ("edge_count", int_type),
+                    ("max_fanout", int_type),
                     ("match_density", float_type),
                 ]:
                     if col_name not in cluster_col_names:

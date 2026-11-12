@@ -356,6 +356,12 @@ SYSTEM_TABLES: List[TableDef] = [
                 description="Total number of edges connecting entities in this cluster",
             ),
             ColumnDef(
+                "max_fanout",
+                ColumnType.INT,
+                default="1",
+                description="Maximum single-value fanout (entities sharing one identifier value) in this cluster",
+            ),
+            ColumnDef(
                 "match_density",
                 ColumnType.DOUBLE,
                 default="1.0",
