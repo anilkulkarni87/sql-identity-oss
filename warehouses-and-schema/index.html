@@ -1195,7 +1195,17 @@
 <tr>
 <td style="text-align: left;"><code>idr_out.identity_clusters_current</code></td>
 <td style="text-align: left;">Cluster-level quality and confidence metrics.</td>
-<td style="text-align: left;"><code>resolved_id</code>, <code>cluster_size</code>, <code>confidence_score</code>, <code>edge_diversity</code>, <code>match_density</code>, <code>primary_reason</code>, <code>updated_at</code></td>
+<td style="text-align: left;"><code>resolved_id</code>, <code>cluster_size</code>, <code>confidence_score</code>, <code>edge_diversity</code>, <code>edge_count</code>, <code>match_density</code>, <code>primary_reason</code>, <code>updated_at</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_out.edge_evidence</code></td>
+<td style="text-align: left;">Granular match evidence trail for every edge ("why did A match B").</td>
+<td style="text-align: left;"><code>run_id</code>, <code>entity_key_a</code>, <code>entity_key_b</code>, <code>rule_id</code>, <code>identifier_type</code>, <code>match_value</code>, <code>score</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>idr_out.evaluation_sample</code></td>
+<td style="text-align: left;">Stratified pair sample for Precision/Recall audit &amp; human/LLM labeling.</td>
+<td style="text-align: left;"><code>sample_id</code>, <code>stratum</code>, <code>entity_key_a</code>, <code>entity_key_b</code>, <code>identifier_type</code>, <code>confidence_score</code>, <code>human_label</code></td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>idr_out.golden_profile_current</code></td>
