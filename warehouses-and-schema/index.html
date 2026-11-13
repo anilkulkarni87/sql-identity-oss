@@ -817,15 +817,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#scale-testing-benchmarking-tools-toolsscale_test" class="md-nav__link">
-    <span class="md-ellipsis">
-      Scale Testing &amp; Benchmarking Tools (tools/scale_test/)
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -999,15 +990,6 @@
   <a href="#enterprise-compose-stack-with-keycloak-sso-observability" class="md-nav__link">
     <span class="md-ellipsis">
       Enterprise Compose Stack with Keycloak SSO &amp; Observability
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#scale-testing-benchmarking-tools-toolsscale_test" class="md-nav__link">
-    <span class="md-ellipsis">
-      Scale Testing &amp; Benchmarking Tools (tools/scale_test/)
     </span>
   </a>
   
@@ -1363,12 +1345,6 @@ Verifies:
 - <strong>Keycloak SSO</strong>: Bootstrapped via <code>deployment/keycloak/idr-realm.json</code> (<code>test</code> / <code>test</code> user).
 - <strong>Prometheus Metrics</strong>: Scrapes <code>http://api:8000/metrics</code> via <code>monitoring/prometheus/prometheus.yml</code>.
 - <strong>Grafana Dashboard</strong>: Pre-provisioned 6-panel dashboard (<code>monitoring/grafana/dashboards/idr_dashboard.json</code>) tracking entities processed, edges created, clusters impacted, and last run duration.</p>
-<h3 id="scale-testing-benchmarking-tools-toolsscale_test">Scale Testing &amp; Benchmarking Tools (<code>tools/scale_test/</code>)<a class="headerlink" href="#scale-testing-benchmarking-tools-toolsscale_test" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>End-to-End Benchmark</strong>: <code>python tools/scale_test/run_scale_and_mcp_benchmark.py --rows 250000 --incr-rows 10000</code> (runs resolution, verifies 4 mathematical graph invariants, and benchmarks all MCP server tools).</li>
-<li><strong>Synthetic Omni-Channel Retail Generator</strong>: <code>python tools/scale_test/generate_retail_idr_mimesis.py --config tools/scale_test/configs/retail_idr_5k.yaml</code> (generates Parquet files across CRM, POS, E-commerce, web events, app events, and support tickets).</li>
-<li><strong>Cloud Loaders</strong>: Fast Parquet loaders for DuckDB (<code>load_duckdb.py</code>), BigQuery (<code>load_bigquery.py</code>), Snowflake (<code>load_snowflake.py</code>), and Databricks (<code>load_databricks.py</code>).</li>
-</ul>
 <hr />
 <h2 id="5-production-benchmarks-real-world-runtimes">5. Production Benchmarks &amp; Real-World Runtimes<a class="headerlink" href="#5-production-benchmarks-real-world-runtimes" title="Permanent link">&para;</a></h2>
 <p>The pipeline has been benchmarked on a realistic omni-channel e-commerce workload spanning <strong>15 source tables</strong> and <strong>6,297,049 entity records</strong> across customer profiles, loyalty transactions, POS accounts, online/in-store orders, addresses, email campaigns, AB-testing experiments, reviews, support tickets, web events, and fraud cases.</p>

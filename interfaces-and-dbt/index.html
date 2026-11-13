@@ -740,9 +740,27 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#exposed-mcp-tools-17-agentic-tools" class="md-nav__link">
+  <a href="#remote-mcp-transport-streamable-http-agent-self-discovery" class="md-nav__link">
     <span class="md-ellipsis">
-      Exposed MCP Tools (17 Agentic Tools)
+      Remote MCP Transport (streamable-http) &amp; Agent Self-Discovery
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exposed-mcp-tools-23-agentic-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exposed MCP Tools (23 Agentic Tools)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-webhooks-for-autonomous-ops-headless" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event Webhooks for Autonomous Ops (Headless)
     </span>
   </a>
   
@@ -976,9 +994,27 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#exposed-mcp-tools-17-agentic-tools" class="md-nav__link">
+  <a href="#remote-mcp-transport-streamable-http-agent-self-discovery" class="md-nav__link">
     <span class="md-ellipsis">
-      Exposed MCP Tools (17 Agentic Tools)
+      Remote MCP Transport (streamable-http) &amp; Agent Self-Discovery
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exposed-mcp-tools-23-agentic-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exposed MCP Tools (23 Agentic Tools)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-webhooks-for-autonomous-ops-headless" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event Webhooks for Autonomous Ops (Headless)
     </span>
   </a>
   
@@ -1330,19 +1366,30 @@
 <p class="admonition-title">Virtual Environments</p>
 <p>If <code>idr</code> is installed inside a virtual environment (e.g. <code>.venv</code>), set <code>"command"</code> to <code>/path/to/venv/bin/python</code> and <code>"args"</code> to <code>["-m", "idr_mcp.server"]</code>.</p>
 </div>
-<h3 id="exposed-mcp-tools-17-agentic-tools">Exposed MCP Tools (17 Agentic Tools)<a class="headerlink" href="#exposed-mcp-tools-17-agentic-tools" title="Permanent link">&para;</a></h3>
+<h3 id="remote-mcp-transport-streamable-http-agent-self-discovery">Remote MCP Transport (<code>streamable-http</code>) &amp; Agent Self-Discovery<a class="headerlink" href="#remote-mcp-transport-streamable-http-agent-self-discovery" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Remote HTTP Endpoint</strong>: FastAPI mounts FastMCP at <code>POST /mcp</code> (<code>streamable-http</code>), sharing the active warehouse <code>ConnectionManager</code> and OAuth/workspace SSO—no local <code>stdio</code> wrapper required for remote agents.</li>
+<li><strong>Standalone HTTP</strong>: Run <code>IDR_MCP_TRANSPORT=streamable-http idr-mcp</code> to expose Streamable HTTP directly.</li>
+<li><strong>Self-Documenting Specs</strong>: Exposes MCP Resources (<code>idr://spec/config-schema</code>, <code>idr://spec/cli-commands</code>, <code>idr://spec/canonicalizers</code>), the <code>model_config_from_tables</code> prompt, <a href="../llms.txt"><code>llms.txt</code></a>, and <a href="https://github.com/anilkulkarni87/sql-identity-oss/blob/main/skills/sql-identity-resolution/SKILL.md"><code>skills/sql-identity-resolution/SKILL.md</code></a>.</li>
+</ul>
+<h3 id="exposed-mcp-tools-23-agentic-tools">Exposed MCP Tools (23 Agentic Tools)<a class="headerlink" href="#exposed-mcp-tools-23-agentic-tools" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>resolve_customer_360(identifier_type, identifier_value)</code> — Single-call Customer 360 context grounding (canonical identity, golden profile, all linked accounts &amp; identifiers).</li>
 <li><code>discover_and_suggest_rules()</code> — Autonomous table profiling, PII detection, and suggested IDR YAML configuration.</li>
 <li><code>simulate_rule_impact(...)</code> — Non-destructive dry-run simulation of candidate matching rules with supernode risk alerting.</li>
-<li><code>explain_cluster(resolved_id)</code> — Complete cluster explanation (confidence reason, members, edges, and golden profile).</li>
+<li><code>get_triage_queue(max_confidence=0.45, limit=20)</code> &amp; <code>submit_evaluation_label(sample_id, label, rationale)</code> — Closed-loop LLM-as-a-judge quality triage over low-confidence clusters and <code>idr_out.evaluation_sample</code>.</li>
+<li><code>explain_cluster(resolved_id, max_entities=50, max_edges=50)</code> &amp; <code>get_cluster(...)</code> — Bounded, context-window-safe cluster inspection with <code>total_entities</code>, <code>total_edges</code>, <code>distinct_identifier_types</code>, and <code>truncated</code> metadata.</li>
+<li><code>forget_customer_identity(...)</code> &amp; <code>manage_identity_override(...)</code> — Two-step <strong>preview-then-confirm</strong> guardrails (<code>dry_run=True</code> returns a 5-minute <code>confirmation_token</code> + <code>blast_radius_summary</code> required for destructive execution).</li>
 <li><code>explain_edge(entity_a, entity_b)</code> — View evidence for why two records matched (direct or transitive).</li>
-<li><code>search_identifier(identifier_type, value)</code> — Find clusters by email, phone, loyalty ID, etc.</li>
-<li><code>get_cluster(resolved_id)</code> &amp; <code>get_golden_profile(resolved_id)</code> — Fetch cluster details and surviving attributes.</li>
-<li><code>list_skipped_groups()</code> — Inspect oversized identifier groups flagged by <code>max_group_size</code>.</li>
-<li><code>get_metrics_summary()</code> &amp; <code>get_system_status()</code> — High-level identity graph KPIs and warehouse lifecycle status.</li>
-<li><code>dry_run_pipeline()</code> &amp; <code>run_history()</code> — Trigger dry runs and inspect stage execution telemetry.</li>
+<li><code>search_identifier(identifier_type, value)</code> &amp; <code>get_golden_profile(resolved_id)</code> — Find clusters and fetch surviving attributes.</li>
+<li><code>list_skipped_groups()</code>, <code>get_metrics_summary()</code>, <code>get_system_status()</code>, <code>dry_run_pipeline()</code>, &amp; <code>run_history()</code> — Guardrail inspection, lifecycle state, and execution telemetry.</li>
 </ul>
+<h3 id="event-webhooks-for-autonomous-ops-headless">Event Webhooks for Autonomous Ops (Headless)<a class="headerlink" href="#event-webhooks-for-autonomous-ops-headless" title="Permanent link">&para;</a></h3>
+<p>Set <code>IDR_WEBHOOK_URL</code> (and optional <code>IDR_WEBHOOK_SECRET</code> for <code>X-IDR-Signature: sha256=...</code> HMAC verification) to receive non-blocking JSON events on:
+- <code>run.completed</code> / <code>run.failed</code>
+- <code>guardrail.skipped_groups_spike</code> (configurable via <code>IDR_WEBHOOK_SKIPPED_THRESHOLD</code>, default <code>5</code>)
+- <code>crosswalk.cluster_changes</code>
+- <code>privacy.erasure_completed</code> (zero-PII receipt)</p>
 <h3 id="pii-safety-controls">PII Safety Controls<a class="headerlink" href="#pii-safety-controls" title="Permanent link">&para;</a></h3>
 <p>By default, all sensitive PII (emails, phone numbers, exact match values) is masked in tool outputs (<code>jo***hn@example.com</code>). To grant the agent full unmasked values, explicitly pass <code>"IDR_PII_ACCESS": "full"</code> in the server <code>"env"</code>.</p>
 <hr />

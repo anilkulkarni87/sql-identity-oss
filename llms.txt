@@ -1,0 +1,61 @@
+# SQL Identity Resolution (`sql-identity-oss`)
+
+> Headless, warehouse-native deterministic & fuzzy identity resolution for DuckDB, Snowflake, BigQuery, and Databricks. Zero data movement. 100% SQL-auditable.
+
+## Docs Index
+- Home & Overview: https://anilkulkarni87.github.io/sql-identity-oss/
+- Quickstart: https://anilkulkarni87.github.io/sql-identity-oss/getting-started/
+- Architecture & 8-Stage Pipeline: https://anilkulkarni87.github.io/sql-identity-oss/concepts-and-architecture/
+- Algorithm & Graph Engine: https://anilkulkarni87.github.io/sql-identity-oss/algorithm-and-graph-engine/
+- Configuration & Governance: https://anilkulkarni87.github.io/sql-identity-oss/configuration-and-governance/
+- CLI, UI, MCP & dbt: https://anilkulkarni87.github.io/sql-identity-oss/interfaces-and-dbt/
+- Databricks App Deployment: https://anilkulkarni87.github.io/sql-identity-oss/databricks-app/
+- Warehouses, Schema & Benchmarks: https://anilkulkarni87.github.io/sql-identity-oss/warehouses-and-schema/
+- Agent Skill (`SKILL.md`): https://github.com/anilkulkarni87/sql-identity-oss/blob/main/skills/sql-identity-resolution/SKILL.md
+
+## Headless Interfaces
+- **CLI**: `idr init`, `idr doctor`, `idr bootstrap`, `idr apply-config`, `idr run --mode FULL|INCR`, `idr evaluate`, `idr privacy forget`
+- **Python SDK**: `from idr_core.runner import IDRRunner, RunConfig`
+- **dbt Package**: `dbt_idr`
+- **MCP Server**: `idr-mcp` (`stdio`) or FastAPI `POST /mcp` (`streamable-http`)
+- **Webhooks**: set `IDR_WEBHOOK_URL` (+ optional `IDR_WEBHOOK_SECRET`) for `run.completed`, `run.failed`, `guardrail.skipped_groups_spike`, `crosswalk.cluster_changes`, `privacy.erasure_completed`
+
+## Config Modeling Workflow for Agents
+1. `get_system_status()` (MCP) or `idr doctor` (CLI)
+2. `discover_and_suggest_rules(schema=...)` (MCP) or `idr bootstrap --schema ... --output idr_config.yaml` (CLI)
+3. `simulate_rule_impact(...)` (MCP) to check supernode risk
+4. `dry_run_pipeline()` (MCP) or `idr run --dry-run` (CLI)
+5. `idr apply-config` + `idr run --mode FULL`
+
+## Minimal Config Structure (YAML/JSON)
+```yaml
+sources:
+  - id: customers
+    table: db.schema.customers
+    entity_type: PERSON
+    entity_key: customer_id
+    watermark: updated_at
+    identifiers:
+      - type: email
+        expr: email
+    attributes:
+      - name: first_name
+        expr: first_name
+use_default_exclusions: true
+rules:
+  - id: "104"
+    type: EXACT
+    match_keys: [email]
+    priority: 1
+    canonicalize: EMAIL_STANDARD
+survivorship:
+  - attribute: first_name
+    strategy: RECENCY
+    source_priority: [customers]
+```
+
+## Production Benchmarks (6.3M Entities, 15 Source Tables)
+- **Snowflake**: 170s (2.8 min, ~37k entities/sec)
+- **Databricks SQL Warehouse**: 296s (4.9 min, ~21k entities/sec)
+- **Google BigQuery**: 306s (5.1 min, ~21k entities/sec)
+
