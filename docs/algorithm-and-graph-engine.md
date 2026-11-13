@@ -386,7 +386,7 @@ When invoked with `--dry-run` or via the **Dry Run Preview** checkbox in the Web
 | **ID Stabilization** | $\mathcal{O}(K \log K)$ | Window rank `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY size DESC)` | Deterministic tie-breaking; zero UUID drift on batch updates |
 | **Incremental Delta** | $\mathcal{O}(\Delta N)$ | Watermark preservation + candidate expansion | Short-circuits 0-delta runs without full graph recompute |
 
-For empirical execution times across 6.3M entities and 15 tables on BigQuery (306s) and Databricks (296s), see [Production Benchmarks & Real-World Runtimes](warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes). (Snowflake benchmarks are currently in progress).
+For empirical execution times across 6.3M entities and 15 tables on Snowflake (170s), Databricks (296s), and BigQuery (306s), see [Production Benchmarks & Real-World Runtimes](warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes).
 
 ---
 
