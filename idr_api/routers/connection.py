@@ -70,13 +70,22 @@ def connect(request: ConnectionRequest, current_user: dict = Depends(get_current
             # Use Snowflake Python Connector (not Snowpark)
             import snowflake.connector
 
+            raw_account = (request.account or _get_env("SNOWFLAKE_ACCOUNT") or "").strip()
+            for prefix in ("https://", "http://"):
+                if raw_account.lower().startswith(prefix):
+                    raw_account = raw_account[len(prefix):]
+            raw_account = raw_account.split("/")[0].strip()
+            if raw_account.lower().endswith(".snowflakecomputing.com"):
+                raw_account = raw_account[: -len(".snowflakecomputing.com")]
+
             conn = snowflake.connector.connect(
-                account=request.account or _get_env("SNOWFLAKE_ACCOUNT"),
-                user=request.user or _get_env("SNOWFLAKE_USER"),
+                account=raw_account,
+                user=(request.user or _get_env("SNOWFLAKE_USER") or "").strip(),
                 password=request.password or _get_env("SNOWFLAKE_PASSWORD"),
                 warehouse=request.warehouse or _get_env("SNOWFLAKE_WAREHOUSE"),
                 database=request.sf_database or _get_env("SNOWFLAKE_DATABASE"),
                 schema=request.schema_name or _get_env("SNOWFLAKE_SCHEMA", "PUBLIC"),
+                login_timeout=20,
             )
             from idr_core.adapters.snowflake import SnowflakeAdapter
 

@@ -64,9 +64,9 @@ idr ui --db demo.duckdb
 
 ### 🎬 Live Cloud Execution & Production Runtimes
 
-- **Databricks SQL Warehouse**: 6.3M entities across 15 tables resolved into 1.54M clusters in **296s (4.9 min)**.
-- **Google BigQuery (Serverless)**: 6.3M entities across 15 tables resolved into 1.54M clusters in **306s (5.1 min)**.
-- **Snowflake**: *Testing in progress — benchmark results being published shortly.*
+- **Snowflake Virtual Warehouse**: 6.3M entities across 15 tables resolved into 1.54M clusters in **170s (2.8 min)** (~37k entities/sec).
+- **Databricks SQL Warehouse**: 6.3M entities across 15 tables resolved into 1.54M clusters in **296s (4.9 min)** (~21k entities/sec).
+- **Google BigQuery (Serverless)**: 6.3M entities across 15 tables resolved into 1.54M clusters in **306s (5.1 min)** (~21k entities/sec).
 
 👉 [View Full Stage-by-Stage Production Benchmark Breakdown →](warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes)
 

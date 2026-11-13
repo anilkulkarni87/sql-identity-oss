@@ -147,11 +147,11 @@ Pre-built configurations for common use cases:
 
 ## 🧪 Testing & Production Benchmarks
 
-- **Live Cloud Benchmarks (6.3M Entities, 15 Source Tables)**:
-  - **Databricks SQL Warehouse**: Full resolution across 6.3M records in **296s (4.9 min)**.
-  - **Google BigQuery**: Full resolution across 6.3M records in **306s (5.1 min)**.
-  - **Snowflake**: Testing in progress — results being added shortly.
-  - Detailed stage breakdown in [Supported Warehouses & Production Benchmarks](docs/warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes).
+- **Live Cloud Benchmarks (6.3M Entities, 15 Source Tables → 5.38M Edges → 1.54M Clusters)**:
+  - **Snowflake**: **170s (2.8 min)** (~37,000 entities/sec)
+  - **Databricks SQL Warehouse**: **296s (4.9 min)** (~21,300 entities/sec)
+  - **Google BigQuery (Serverless)**: **306s (5.1 min)** (~20,600 entities/sec)
+  - Detailed stage-by-stage breakdown in [Supported Warehouses & Production Benchmarks](docs/warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes).
 
 ```bash
 # 1. Run the full unit & multi-dialect test suite (265+ tests)

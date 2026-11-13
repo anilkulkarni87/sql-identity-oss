@@ -133,27 +133,38 @@ class SnowflakeAdapter(IDRAdapter):
                 return [{"name": row[0].lower(), "type": row[1]} for row in result]
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
-        """List tables in a schema."""
-        if schema:
-            # Handle Snowpark vs DBAPI param differences
-            # Snowpark session.sql() typically needs literal SQL or specific param style dependent on version.
-            # Safest is to validate schema identifier and inject formatted string.
-            # Assuming schema is a valid identifier (alphanumeric w/ underscores/dots potentially)
-            # But "schema" usually is just one identifier.
+        """List tables in a schema (case-insensitive, supports optional db.schema)."""
+        info_schema = "information_schema.tables"
+        schema_filter = schema
+        if schema and "." in schema:
+            db_part, schema_part = schema.split(".", 1)
+            clean_db = db_part.strip().replace('"', "").replace("'", "")
+            if clean_db:
+                info_schema = f"{clean_db}.information_schema.tables"
+            schema_filter = schema_part.strip()
 
-            # Simple injection guard for schema name
-            clean_schema = schema.replace("'", "''").replace("\\", "")
-
+        if schema_filter:
+            clean_schema = schema_filter.replace("'", "''").replace("\\", "")
             if self.is_snowpark:
-                # Snowpark mode: Construct SQL directly due to ambiguous param support in wrapper
-                query = f"SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = '{clean_schema}'"
+                query = (
+                    f"SELECT table_schema, table_name FROM {info_schema} "
+                    f"WHERE UPPER(table_schema) = UPPER('{clean_schema}') "
+                    f"ORDER BY table_name"
+                )
                 params = []
             else:
-                # DBAPI mode: Use params
-                query = "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = %s"
-                params = [schema]
+                query = (
+                    f"SELECT table_schema, table_name FROM {info_schema} "
+                    f"WHERE UPPER(table_schema) = UPPER(%s) "
+                    f"ORDER BY table_name"
+                )
+                params = [schema_filter]
         else:
-            query = "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema != 'INFORMATION_SCHEMA'"
+            query = (
+                f"SELECT table_schema, table_name FROM {info_schema} "
+                f"WHERE UPPER(table_schema) != 'INFORMATION_SCHEMA' "
+                f"ORDER BY table_schema, table_name"
+            )
             params = []
 
         return [f"{row['table_schema']}.{row['table_name']}" for row in self.query(query, params)]

@@ -254,10 +254,13 @@ export default function StepConnect({ onNext, isConnected = false }: StepConnect
                                     type="text"
                                     required
                                     value={params.account || ''}
-                                    placeholder="xy12345.us-east-1"
+                                    placeholder="xy12345.us-east-1 or ORG-ACCOUNT"
                                     className={inputClass}
                                     onChange={e => updateParam('account', e.target.value)}
                                 />
+                                <p className="text-[11px] text-gray-500 mt-1">
+                                    Use account locator (<code>xy12345.us-east-1</code>) or <code>ORGNAME-ACCOUNTNAME</code> with a hyphen.
+                                </p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>

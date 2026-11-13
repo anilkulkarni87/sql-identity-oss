@@ -202,39 +202,50 @@ The pipeline has been benchmarked on a realistic omni-channel e-commerce workloa
 
 ### Warehouse Benchmark Comparison (6.3M Entities, 15 Source Tables)
 
-The table below summarizes full identity resolution execution metrics across supported warehouse engines (executed with `--mode FULL --strict`):
+The table below summarizes full identity resolution execution metrics across supported warehouse engines (all cloud runs executed on the exact same 15-table `ecommerce_synth` dataset):
 
-| Metric / Dimension | Google BigQuery | Databricks (Unity Catalog) | Snowflake | DuckDB (Local) |
+| Metric / Dimension | Snowflake | Databricks (Unity Catalog) | Google BigQuery | DuckDB (Local) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Compute Engine** | Serverless BigQuery (US Multi-Region) | Serverless SQL Warehouse | *[Testing in progress — results being added shortly]* | Single-Node (10-core M-series ARM) |
+| **Compute Engine** | Snowflake Virtual Warehouse | Serverless SQL Warehouse | Serverless BigQuery (US Multi-Region) | Single-Node (10-core M-series ARM) |
 | **Source Tables** | 15 tables | 15 tables | 15 tables | 15 tables |
-| **Input Entities** | **6,297,049** | **~6,300,000** | *Upcoming* | 250,000 (scale harness) |
-| **Edges Constructed** | **5,381,635** | **~5,380,000** | *Upcoming* | ~215,000 |
-| **Resolved Clusters** | **1,544,042** | **~1,544,000** | *Upcoming* | ~62,000 |
-| **Graph LP Iterations**| **6 iterations** | **6 iterations** | *Upcoming* | 4 iterations |
-| **Total Pipeline Duration** | **306s (5.1 min)** | **296s (4.9 min)** | *[Testing in progress]* | 12.4s |
-| **Graph Label Propagation** | **110s** | **~108s** | *Upcoming* | 4.8s |
-| **Golden Profile Output** | **90s** | **~85s** | *Upcoming* | 3.2s |
+| **Input Entities** | **6,297,049** | **~6,300,000** | **6,297,049** | 250,000 (scale harness) |
+| **Edges Constructed** | **5,381,635** | **~5,380,000** | **5,381,635** | ~215,000 |
+| **Resolved Clusters** | **1,544,042** | **~1,544,000** | **1,544,042** | ~62,000 |
+| **Total Pipeline Duration** | **170s (2.8 min)** | **296s (4.9 min)** | **306s (5.1 min)** | 12.4s |
+| **Avg. Throughput** | **~37,000 entities/sec** | ~21,300 entities/sec | ~20,600 entities/sec | ~20,200 entities/sec |
+| **Graph Label Propagation** | **58.8s** | ~108s | 110.0s | 4.8s |
+| **Golden Profile Output** | **66.7s** | ~85s | 90.0s | 3.2s |
 
-> [!NOTE] Snowflake Testing in Progress
-> Snowflake benchmarking on this exact 6.3M-entity omni-channel workload is currently underway and results will be added directly upon test verification.
+> [!TIP] Key Takeaways at a Glance
+> - **Identical Graph Correctness**: All three cloud warehouses resolved the exact same **6,297,049** entities and **5,381,635** edges into **1,544,042** clusters from a single portable configuration.
+> - **1.7x–1.8x Faster on Snowflake**: Snowflake completed end-to-end in **170s (2.8 min)** vs. **296s** on Databricks and **306s** on BigQuery—driven primarily by faster metadata preflight (**6.7s**), identifier normalization (**20.2s**), and label propagation (**58.8s**).
+> - **Predictable Bottlenecks**: Across every engine, `label_propagation` + `output_generation` account for ~65–74% of total runtime, while `entity_extraction` (~5–6s) and `edge_building` (~11–14s) stay fast thanks to anchor-based star graph reduction.
+
+```mermaid
+xychart-beta
+    title "Stage Duration Comparison (Seconds — Lower is Better)"
+    x-axis ["Preflight", "Entities", "Identifiers", "Edges", "Label Prop", "Output"]
+    y-axis "Duration (seconds)" 0 --> 120
+    bar [6.7, 5.3, 20.2, 11.1, 58.8, 66.7]
+    bar [24, 6, 52, 14, 108, 85]
+    bar [26, 5, 54, 12, 110, 90]
+```
+*(Series order in chart: **Snowflake** · **Databricks** · **BigQuery**)*
 
 ---
 
-### Detailed Stage-by-Stage Breakdown (BigQuery vs. Databricks)
+### Detailed Stage-by-Stage Breakdown (Snowflake vs. Databricks vs. BigQuery)
 
-Both warehouses demonstrate near-identical execution characteristics on identical workloads:
-
-| Stage # | Pipeline Stage | BigQuery Duration | BigQuery Rows | Databricks Duration | Databricks Rows | Description |
+| Stage # | Pipeline Stage | Snowflake | Databricks | BigQuery | Rows (Snowflake / BigQuery) | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Stage 1** | `preflight` | 26.0s | 0 | ~24s | 0 | Metadata schema validation, column DDL checks, and run state initialization |
-| **Stage 2** | `entity_extraction` | 5.0s | 6,297,049 | ~6s | ~6.3M | Scans 15 tables, generates composite entity keys, and stages into `idr_work.entities_delta` |
-| **Stage 3** | `identifier_extraction`| 54.0s | 5,710,608 | ~52s | ~5.7M | Normalizes identifiers (`EMAIL_STANDARD`, `PHONE_DIGITS`, etc.) and applies poison-pill filters |
-| **Stage 4** | `attribute_extraction` | 1.0s | 0 | ~1s | 0 | Extracts attributes for blocking rules (bypassed in `--strict` mode) |
-| **Stage 5** | `edge_building` | 12.0s | 5,381,635 | ~14s | ~5.4M | Anchor-based star graph reduction ($N-1$ edges per group) avoiding $O(N^2)$ cliques |
-| **Stage 6** | `label_propagation` | 110.0s | 1,544,042 | ~108s | ~1.54M | Iterative connected components (converged in 6 iterations) |
-| **Stage 7** | `output_generation` | 90.0s | 1,544,042 | ~85s | ~1.54M | Wide consolidated golden profiles with survivorship across 15 source feeds, plus crosswalk |
-| **Total** | **Full Pipeline Run** | **306s (5.1 min)** | — | **296s (4.9 min)** | — | Complete end-to-end warehouse-native execution |
+| **Stage 1** | `preflight` | **6.7s** | ~24s | 26.0s | 0 | Metadata schema validation, column DDL checks, and run state initialization |
+| **Stage 2** | `entity_extraction` | **5.3s** | ~6s | 5.0s | 6,297,049 | Scans 15 tables, generates composite entity keys, and stages into `idr_work.entities_delta` |
+| **Stage 3** | `identifier_extraction` | **20.2s** | ~52s | 54.0s | 5,710,608 | Normalizes identifiers and applies poison-pill / suppression filters |
+| **Stage 4** | `attribute_extraction` | **0.4s** | ~1s | 1.0s | 0 | Extracts attributes for blocking rules (bypassed when no fuzzy blocking rules are active) |
+| **Stage 5** | `edge_building` | **11.1s** | ~14s | 12.0s | 5,381,635 | Anchor-based star graph reduction ($N-1$ edges per group) avoiding $O(N^2)$ cliques |
+| **Stage 6** | `label_propagation` | **58.8s** | ~108s | 110.0s | 1,544,042 | Iterative connected components until full cluster convergence |
+| **Stage 7** | `output_generation` | **66.7s** | ~85s | 90.0s | 1,544,042 | Wide consolidated golden profiles with survivorship across 15 source feeds, plus crosswalk |
+| **Total** | **Full Pipeline Run** | **170s (2.8 min)** | **296s (4.9 min)** | **306s (5.1 min)** | — | Complete end-to-end warehouse-native execution |
 
 
 

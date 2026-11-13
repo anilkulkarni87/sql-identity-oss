@@ -55,14 +55,29 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
 
                 from idr_core.adapters.snowflake import SnowflakeAdapter
 
-                conn = snowflake.connector.connect(
-                    user=params.get("user"),
-                    password=params.get("password"),
-                    account=params.get("account"),
-                    warehouse=params.get("warehouse"),
-                    database=params.get("database"),
-                    schema=params.get("schema"),
-                )
+                raw_account = (params.get("account") or "").strip()
+                for prefix in ("https://", "http://"):
+                    if raw_account.lower().startswith(prefix):
+                        raw_account = raw_account[len(prefix):]
+                raw_account = raw_account.split("/")[0].strip()
+                if raw_account.lower().endswith(".snowflakecomputing.com"):
+                    raw_account = raw_account[: -len(".snowflakecomputing.com")]
+
+                sf_kwargs = {
+                    "user": (params.get("user") or "").strip(),
+                    "password": params.get("password"),
+                    "account": raw_account,
+                    "warehouse": (params.get("warehouse") or "").strip() or None,
+                    "database": (params.get("database") or "").strip() or None,
+                    "schema": (params.get("schema") or "").strip() or None,
+                    "login_timeout": 20,
+                }
+                if params.get("role"):
+                    sf_kwargs["role"] = str(params["role"]).strip()
+                if params.get("authenticator"):
+                    sf_kwargs["authenticator"] = str(params["authenticator"]).strip()
+
+                conn = snowflake.connector.connect(**{k: v for k, v in sf_kwargs.items() if v is not None})
                 adapter = SnowflakeAdapter(conn)
             except ImportError:
                 raise HTTPException(400, "Snowflake connector not installed")
