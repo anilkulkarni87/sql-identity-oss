@@ -2,30 +2,34 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-13</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/algorithm-and-graph-engine/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-13</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/concepts-and-architecture/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-13</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/configuration-and-governance/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-13</lastmod>
+    </url>
+    <url>
+         <loc>https://anilkulkarni87.github.io/sql-identity-oss/databricks-app/</loc>
+         <lastmod>2026-11-13</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/getting-started/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-13</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/interfaces-and-dbt/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-13</lastmod>
     </url>
     <url>
          <loc>https://anilkulkarni87.github.io/sql-identity-oss/warehouses-and-schema/</loc>
-         <lastmod>2026-11-12</lastmod>
+         <lastmod>2026-11-13</lastmod>
     </url>
 </urlset>
