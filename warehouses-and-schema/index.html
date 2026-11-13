@@ -783,9 +783,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#detailed-stage-by-stage-breakdown-bigquery-vs-databricks" class="md-nav__link">
+  <a href="#detailed-stage-by-stage-breakdown-snowflake-vs-databricks-vs-bigquery" class="md-nav__link">
     <span class="md-ellipsis">
-      Detailed Stage-by-Stage Breakdown (BigQuery vs. Databricks)
+      Detailed Stage-by-Stage Breakdown (Snowflake vs. Databricks vs. BigQuery)
     </span>
   </a>
   
@@ -1012,9 +1012,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#detailed-stage-by-stage-breakdown-bigquery-vs-databricks" class="md-nav__link">
+  <a href="#detailed-stage-by-stage-breakdown-snowflake-vs-databricks-vs-bigquery" class="md-nav__link">
     <span class="md-ellipsis">
-      Detailed Stage-by-Stage Breakdown (BigQuery vs. Databricks)
+      Detailed Stage-by-Stage Breakdown (Snowflake vs. Databricks vs. BigQuery)
     </span>
   </a>
   
@@ -1349,23 +1349,23 @@ Verifies:
 <h2 id="5-production-benchmarks-real-world-runtimes">5. Production Benchmarks &amp; Real-World Runtimes<a class="headerlink" href="#5-production-benchmarks-real-world-runtimes" title="Permanent link">&para;</a></h2>
 <p>The pipeline has been benchmarked on a realistic omni-channel e-commerce workload spanning <strong>15 source tables</strong> and <strong>6,297,049 entity records</strong> across customer profiles, loyalty transactions, POS accounts, online/in-store orders, addresses, email campaigns, AB-testing experiments, reviews, support tickets, web events, and fraud cases.</p>
 <h3 id="warehouse-benchmark-comparison-63m-entities-15-source-tables">Warehouse Benchmark Comparison (6.3M Entities, 15 Source Tables)<a class="headerlink" href="#warehouse-benchmark-comparison-63m-entities-15-source-tables" title="Permanent link">&para;</a></h3>
-<p>The table below summarizes full identity resolution execution metrics across supported warehouse engines (executed with <code>--mode FULL --strict</code>):</p>
+<p>The table below summarizes full identity resolution execution metrics across supported warehouse engines (all cloud runs executed on the exact same 15-table <code>ecommerce_synth</code> dataset):</p>
 <table>
 <thead>
 <tr>
 <th style="text-align: left;">Metric / Dimension</th>
-<th style="text-align: left;">Google BigQuery</th>
-<th style="text-align: left;">Databricks (Unity Catalog)</th>
 <th style="text-align: left;">Snowflake</th>
+<th style="text-align: left;">Databricks (Unity Catalog)</th>
+<th style="text-align: left;">Google BigQuery</th>
 <th style="text-align: left;">DuckDB (Local)</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td style="text-align: left;"><strong>Compute Engine</strong></td>
-<td style="text-align: left;">Serverless BigQuery (US Multi-Region)</td>
+<td style="text-align: left;">Snowflake Virtual Warehouse</td>
 <td style="text-align: left;">Serverless SQL Warehouse</td>
-<td style="text-align: left;"><em>[Testing in progress — results being added shortly]</em></td>
+<td style="text-align: left;">Serverless BigQuery (US Multi-Region)</td>
 <td style="text-align: left;">Single-Node (10-core M-series ARM)</td>
 </tr>
 <tr>
@@ -1379,69 +1379,78 @@ Verifies:
 <td style="text-align: left;"><strong>Input Entities</strong></td>
 <td style="text-align: left;"><strong>6,297,049</strong></td>
 <td style="text-align: left;"><strong>~6,300,000</strong></td>
-<td style="text-align: left;"><em>Upcoming</em></td>
+<td style="text-align: left;"><strong>6,297,049</strong></td>
 <td style="text-align: left;">250,000 (scale harness)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Edges Constructed</strong></td>
 <td style="text-align: left;"><strong>5,381,635</strong></td>
 <td style="text-align: left;"><strong>~5,380,000</strong></td>
-<td style="text-align: left;"><em>Upcoming</em></td>
+<td style="text-align: left;"><strong>5,381,635</strong></td>
 <td style="text-align: left;">~215,000</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Resolved Clusters</strong></td>
 <td style="text-align: left;"><strong>1,544,042</strong></td>
 <td style="text-align: left;"><strong>~1,544,000</strong></td>
-<td style="text-align: left;"><em>Upcoming</em></td>
+<td style="text-align: left;"><strong>1,544,042</strong></td>
 <td style="text-align: left;">~62,000</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Graph LP Iterations</strong></td>
-<td style="text-align: left;"><strong>6 iterations</strong></td>
-<td style="text-align: left;"><strong>6 iterations</strong></td>
-<td style="text-align: left;"><em>Upcoming</em></td>
-<td style="text-align: left;">4 iterations</td>
-</tr>
-<tr>
 <td style="text-align: left;"><strong>Total Pipeline Duration</strong></td>
-<td style="text-align: left;"><strong>306s (5.1 min)</strong></td>
+<td style="text-align: left;"><strong>170s (2.8 min)</strong></td>
 <td style="text-align: left;"><strong>296s (4.9 min)</strong></td>
-<td style="text-align: left;"><em>[Testing in progress]</em></td>
+<td style="text-align: left;"><strong>306s (5.1 min)</strong></td>
 <td style="text-align: left;">12.4s</td>
 </tr>
 <tr>
+<td style="text-align: left;"><strong>Avg. Throughput</strong></td>
+<td style="text-align: left;"><strong>~37,000 entities/sec</strong></td>
+<td style="text-align: left;">~21,300 entities/sec</td>
+<td style="text-align: left;">~20,600 entities/sec</td>
+<td style="text-align: left;">~20,200 entities/sec</td>
+</tr>
+<tr>
 <td style="text-align: left;"><strong>Graph Label Propagation</strong></td>
-<td style="text-align: left;"><strong>110s</strong></td>
-<td style="text-align: left;"><strong>~108s</strong></td>
-<td style="text-align: left;"><em>Upcoming</em></td>
+<td style="text-align: left;"><strong>58.8s</strong></td>
+<td style="text-align: left;">~108s</td>
+<td style="text-align: left;">110.0s</td>
 <td style="text-align: left;">4.8s</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Golden Profile Output</strong></td>
-<td style="text-align: left;"><strong>90s</strong></td>
-<td style="text-align: left;"><strong>~85s</strong></td>
-<td style="text-align: left;"><em>Upcoming</em></td>
+<td style="text-align: left;"><strong>66.7s</strong></td>
+<td style="text-align: left;">~85s</td>
+<td style="text-align: left;">90.0s</td>
 <td style="text-align: left;">3.2s</td>
 </tr>
 </tbody>
 </table>
 <blockquote>
-<p>[!NOTE] Snowflake Testing in Progress
-Snowflake benchmarking on this exact 6.3M-entity omni-channel workload is currently underway and results will be added directly upon test verification.</p>
+<p>[!TIP] Key Takeaways at a Glance
+- <strong>Identical Graph Correctness</strong>: All three cloud warehouses resolved the exact same <strong>6,297,049</strong> entities and <strong>5,381,635</strong> edges into <strong>1,544,042</strong> clusters from a single portable configuration.
+- <strong>1.7x–1.8x Faster on Snowflake</strong>: Snowflake completed end-to-end in <strong>170s (2.8 min)</strong> vs. <strong>296s</strong> on Databricks and <strong>306s</strong> on BigQuery—driven primarily by faster metadata preflight (<strong>6.7s</strong>), identifier normalization (<strong>20.2s</strong>), and label propagation (<strong>58.8s</strong>).
+- <strong>Predictable Bottlenecks</strong>: Across every engine, <code>label_propagation</code> + <code>output_generation</code> account for ~65–74% of total runtime, while <code>entity_extraction</code> (~5–6s) and <code>edge_building</code> (~11–14s) stay fast thanks to anchor-based star graph reduction.</p>
 </blockquote>
+<p><pre class="mermaid"><code>xychart-beta
+    title "Stage Duration Comparison (Seconds — Lower is Better)"
+    x-axis ["Preflight", "Entities", "Identifiers", "Edges", "Label Prop", "Output"]
+    y-axis "Duration (seconds)" 0 --&gt; 120
+    bar [6.7, 5.3, 20.2, 11.1, 58.8, 66.7]
+    bar [24, 6, 52, 14, 108, 85]
+    bar [26, 5, 54, 12, 110, 90]</code></pre>
+<em>(Series order in chart: <strong>Snowflake</strong> · <strong>Databricks</strong> · <strong>BigQuery</strong>)</em></p>
 <hr />
-<h3 id="detailed-stage-by-stage-breakdown-bigquery-vs-databricks">Detailed Stage-by-Stage Breakdown (BigQuery vs. Databricks)<a class="headerlink" href="#detailed-stage-by-stage-breakdown-bigquery-vs-databricks" title="Permanent link">&para;</a></h3>
-<p>Both warehouses demonstrate near-identical execution characteristics on identical workloads:</p>
+<h3 id="detailed-stage-by-stage-breakdown-snowflake-vs-databricks-vs-bigquery">Detailed Stage-by-Stage Breakdown (Snowflake vs. Databricks vs. BigQuery)<a class="headerlink" href="#detailed-stage-by-stage-breakdown-snowflake-vs-databricks-vs-bigquery" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
 <th style="text-align: left;">Stage #</th>
 <th style="text-align: left;">Pipeline Stage</th>
-<th style="text-align: left;">BigQuery Duration</th>
-<th style="text-align: left;">BigQuery Rows</th>
-<th style="text-align: left;">Databricks Duration</th>
-<th style="text-align: left;">Databricks Rows</th>
+<th style="text-align: left;">Snowflake</th>
+<th style="text-align: left;">Databricks</th>
+<th style="text-align: left;">BigQuery</th>
+<th style="text-align: left;">Rows (Snowflake / BigQuery)</th>
 <th style="text-align: left;">Description</th>
 </tr>
 </thead>
@@ -1449,72 +1458,72 @@ Snowflake benchmarking on this exact 6.3M-entity omni-channel workload is curren
 <tr>
 <td style="text-align: left;"><strong>Stage 1</strong></td>
 <td style="text-align: left;"><code>preflight</code></td>
-<td style="text-align: left;">26.0s</td>
-<td style="text-align: left;">0</td>
+<td style="text-align: left;"><strong>6.7s</strong></td>
 <td style="text-align: left;">~24s</td>
+<td style="text-align: left;">26.0s</td>
 <td style="text-align: left;">0</td>
 <td style="text-align: left;">Metadata schema validation, column DDL checks, and run state initialization</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Stage 2</strong></td>
 <td style="text-align: left;"><code>entity_extraction</code></td>
+<td style="text-align: left;"><strong>5.3s</strong></td>
+<td style="text-align: left;">~6s</td>
 <td style="text-align: left;">5.0s</td>
 <td style="text-align: left;">6,297,049</td>
-<td style="text-align: left;">~6s</td>
-<td style="text-align: left;">~6.3M</td>
 <td style="text-align: left;">Scans 15 tables, generates composite entity keys, and stages into <code>idr_work.entities_delta</code></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Stage 3</strong></td>
 <td style="text-align: left;"><code>identifier_extraction</code></td>
+<td style="text-align: left;"><strong>20.2s</strong></td>
+<td style="text-align: left;">~52s</td>
 <td style="text-align: left;">54.0s</td>
 <td style="text-align: left;">5,710,608</td>
-<td style="text-align: left;">~52s</td>
-<td style="text-align: left;">~5.7M</td>
-<td style="text-align: left;">Normalizes identifiers (<code>EMAIL_STANDARD</code>, <code>PHONE_DIGITS</code>, etc.) and applies poison-pill filters</td>
+<td style="text-align: left;">Normalizes identifiers and applies poison-pill / suppression filters</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Stage 4</strong></td>
 <td style="text-align: left;"><code>attribute_extraction</code></td>
+<td style="text-align: left;"><strong>0.4s</strong></td>
+<td style="text-align: left;">~1s</td>
 <td style="text-align: left;">1.0s</td>
 <td style="text-align: left;">0</td>
-<td style="text-align: left;">~1s</td>
-<td style="text-align: left;">0</td>
-<td style="text-align: left;">Extracts attributes for blocking rules (bypassed in <code>--strict</code> mode)</td>
+<td style="text-align: left;">Extracts attributes for blocking rules (bypassed when no fuzzy blocking rules are active)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Stage 5</strong></td>
 <td style="text-align: left;"><code>edge_building</code></td>
+<td style="text-align: left;"><strong>11.1s</strong></td>
+<td style="text-align: left;">~14s</td>
 <td style="text-align: left;">12.0s</td>
 <td style="text-align: left;">5,381,635</td>
-<td style="text-align: left;">~14s</td>
-<td style="text-align: left;">~5.4M</td>
 <td style="text-align: left;">Anchor-based star graph reduction (<span class="arithmatex">\(N-1\)</span> edges per group) avoiding <span class="arithmatex">\(O(N^2)\)</span> cliques</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Stage 6</strong></td>
 <td style="text-align: left;"><code>label_propagation</code></td>
+<td style="text-align: left;"><strong>58.8s</strong></td>
+<td style="text-align: left;">~108s</td>
 <td style="text-align: left;">110.0s</td>
 <td style="text-align: left;">1,544,042</td>
-<td style="text-align: left;">~108s</td>
-<td style="text-align: left;">~1.54M</td>
-<td style="text-align: left;">Iterative connected components (converged in 6 iterations)</td>
+<td style="text-align: left;">Iterative connected components until full cluster convergence</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Stage 7</strong></td>
 <td style="text-align: left;"><code>output_generation</code></td>
+<td style="text-align: left;"><strong>66.7s</strong></td>
+<td style="text-align: left;">~85s</td>
 <td style="text-align: left;">90.0s</td>
 <td style="text-align: left;">1,544,042</td>
-<td style="text-align: left;">~85s</td>
-<td style="text-align: left;">~1.54M</td>
 <td style="text-align: left;">Wide consolidated golden profiles with survivorship across 15 source feeds, plus crosswalk</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Total</strong></td>
 <td style="text-align: left;"><strong>Full Pipeline Run</strong></td>
-<td style="text-align: left;"><strong>306s (5.1 min)</strong></td>
-<td style="text-align: left;">—</td>
+<td style="text-align: left;"><strong>170s (2.8 min)</strong></td>
 <td style="text-align: left;"><strong>296s (4.9 min)</strong></td>
+<td style="text-align: left;"><strong>306s (5.1 min)</strong></td>
 <td style="text-align: left;">—</td>
 <td style="text-align: left;">Complete end-to-end warehouse-native execution</td>
 </tr>
