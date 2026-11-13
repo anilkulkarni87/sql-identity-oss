@@ -113,6 +113,37 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"Failed to auto-connect to {env_db_path}: {e}")
 
+    # Auto-connect to Databricks SQL Warehouse when running in Databricks Apps (or env configured)
+    warehouse_id = os.getenv("DATABRICKS_WAREHOUSE_ID")
+    if warehouse_id:
+        try:
+            from databricks import sql as databricks_sql
+            from databricks.sdk.core import Config as DatabricksConfig
+
+            from idr_core.adapters.databricks import DatabricksAdapter
+
+            cfg = DatabricksConfig()
+            host = (cfg.host or os.getenv("DATABRICKS_HOST", "")).replace("https://", "").rstrip("/")
+            catalog = os.getenv("IDR_DATABRICKS_CATALOG") or None
+            conn = databricks_sql.connect(
+                server_hostname=host,
+                http_path=f"/sql/1.0/warehouses/{warehouse_id}",
+                credentials_provider=lambda: cfg.authenticate,
+            )
+            _manager.set_adapter(
+                DatabricksAdapter(conn, catalog=catalog),
+                {
+                    "platform": "databricks",
+                    "warehouse_id": warehouse_id,
+                    "catalog": catalog,
+                },
+            )
+            print(f"✓ Auto-connected to Databricks SQL Warehouse: {warehouse_id}")
+            yield
+            return
+        except Exception as e:
+            print(f"Failed to auto-connect to Databricks SQL Warehouse {warehouse_id}: {e}")
+
     # Fallback: check for local demo DB
     db_paths = [
         "../retail_test.duckdb",
