@@ -269,6 +269,50 @@ class PrivacyManager:
 
         status = "DRY_RUN" if dry_run else ("COMPLETED" if (entity_keys or resolved_ids) else "NOT_FOUND")
 
+        suppressed_count = 0
+        if not dry_run and entity_keys:
+            try:
+                if not self.adapter.table_exists("idr_meta.privacy_suppression"):
+                    from .schema_manager import SchemaManager
+
+                    SchemaManager(self.adapter).initialize(reset=False)
+                if self.adapter.table_exists("idr_meta.privacy_suppression"):
+                    current_ts = self._dialect["current_timestamp"]
+                    hashes = sorted({self._sha256(ek) for ek in entity_keys})
+                    hash_in = ", ".join(f"'{h}'" for h in hashes)
+                    existing_rows = self.adapter.query(
+                        f"SELECT entity_key_hash FROM idr_meta.privacy_suppression "
+                        f"WHERE entity_key_hash IN ({hash_in})"
+                    )
+                    existing_hashes = {
+                        r["entity_key_hash"] for r in existing_rows if r.get("entity_key_hash")
+                    }
+                    new_hashes = [h for h in hashes if h not in existing_hashes]
+                    for i in range(0, len(new_hashes), 100):
+                        chunk = new_hashes[i : i + 100]
+                        if self.adapter.dialect == "duckdb":
+                            vals_sql = ", ".join(
+                                f"('{h}', '{request_id}', {current_ts})" for h in chunk
+                            )
+                            self.adapter.execute(f"""
+                                INSERT INTO idr_meta.privacy_suppression
+                                    (entity_key_hash, request_id, suppressed_at)
+                                VALUES {vals_sql}
+                            """)
+                        else:
+                            select_sql = " UNION ALL ".join(
+                                f"SELECT '{h}' AS entity_key_hash, '{request_id}' AS request_id, {current_ts} AS suppressed_at"
+                                for h in chunk
+                            )
+                            self.adapter.execute(f"""
+                                INSERT INTO idr_meta.privacy_suppression
+                                    (entity_key_hash, request_id, suppressed_at)
+                                {select_sql}
+                            """)
+                    suppressed_count = len(hashes)
+            except Exception:
+                pass
+
         # Write cryptographic audit log (zero cleartext PII)
         if not dry_run and self.adapter.table_exists("idr_meta.privacy_audit_log"):
             current_ts = self._dialect["current_timestamp"]
@@ -298,6 +342,7 @@ class PrivacyManager:
             "entities_purged": int(entities_purged),
             "edges_purged": int(edges_purged),
             "profiles_purged": int(profiles_purged),
+            "suppressed_entities": suppressed_count,
             "tables_cleaned": tables_cleaned,
             "executed_at": datetime.now(timezone.utc).isoformat(),
         }

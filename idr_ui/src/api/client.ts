@@ -120,6 +120,18 @@ export const api = {
         count: number | null
     }>>('/alerts'),
 
+    getConfidenceDistribution: () => fetchJson<Array<{
+        bucket: string
+        count: number
+        color: string
+    }>>('/metrics/confidence'),
+
+    getSourceContribution: () => fetchJson<Array<{
+        source_id: string
+        entities: number
+        clusters: number
+    }>>('/metrics/sources'),
+
     // Entity/Cluster Search
     searchEntities: (query: string) => fetchJson<Array<{
         resolved_id: string
@@ -296,6 +308,25 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ config }),
     }),
+
+    saveSetupConfigAsync: (config: unknown) => fetchJson<{
+        status: string
+        message: string
+    }>('/setup/config/save/async', {
+        method: 'POST',
+        body: JSON.stringify({ config }),
+    }),
+
+    getSaveConfigProgress: () => fetchJson<{
+        status: 'IDLE' | 'SAVING' | 'SUCCESS' | 'ERROR'
+        step?: string
+        label?: string
+        percent: number
+        detail?: string
+        elapsed_seconds?: number
+        message?: string
+        error?: string
+    }>('/setup/config/save/progress'),
 
     runSetup: (payload: {
         mode: 'INCR' | 'FULL'

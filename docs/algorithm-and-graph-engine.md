@@ -18,6 +18,9 @@ This document details the underlying graph theory, iterative pure SQL algorithms
 
 ## 1. Mathematical Graph Formulation
 
+!!! tip "In Plain English"
+    Think of every source record (a CRM row, an order, a web session) as a **dot**, and every shared identifier (email, phone, loyalty ID) as a **string** tying two dots together. Any group of dots reachable from one another by following those strings is resolved into **one customer**.
+
 Identity resolution partitions a set of heterogeneous source records $V = \{e_1, e_2, \dots, e_N\}$ into a set of mutually exclusive, collectively exhaustive equivalence classes (resolved identity clusters):
 
 $$
@@ -58,6 +61,9 @@ Any connected component in $G$ constitutes a single resolved identity.
 ---
 
 ## 2. Anchor-Based Star Graph Reduction ($\mathcal{O}(N)$ vs $\mathcal{O}(N^2)$)
+
+!!! tip "In Plain English"
+    If 10,000 rows share the same identifier, connecting every row to every other row creates **50 million** edges. Instead, we pick one row as a **hub (anchor)** and draw **9,999 spokes** to it. The group stays 100% connected with **99.98% fewer edges**.
 
 ### The Clique Edge Explosion Problem
 In a naive identity resolution implementation, if an identifier (e.g., a shared household phone or corporate domain) matches $N$ records, generating all pairwise edges creates a complete graph (clique) $K_N$:
@@ -116,6 +122,9 @@ If $u, v \in \text{group}(i)$, then in the star graph, $u$ is connected to $a(i)
 
 ## 3. The Anti-Megacluster Guardrail (`max_group_size`)
 
+!!! tip "In Plain English"
+    If 50,000 customer rows accidentally contain `test@example.com` or `000-000-0000`, linking them would collapse half your database into one giant false customer. This guardrail checks the group size first and **quarantines** any identifier shared by more than `max_group_size` rows.
+
 Even with star graph reduction, a dirty placeholder identifier (e.g., `test@example.com`, `000-000-0000`, `N/A`) can link tens of thousands of unrelated entities together into a **poison-pill mega-cluster**.
 
 To guarantee graph integrity, the engine enforces a strict mathematical circuit breaker during `Stage 5: edge_building`, comparing each identifier's group size $S(i)$ against the effective threshold $M_{\text{allowed}}(i)$:
@@ -159,6 +168,9 @@ skipped_groups AS (
 ---
 
 ## 4. Pure SQL Connected Components via Iterative Label Propagation
+
+!!! tip "In Plain English"
+    Every record starts holding its own ID as its label. In each round, every record looks at its neighbors and adopts the **smallest ID** it sees. After just 3–7 rounds, everyone in the same connected group agrees on the exact same ID—using ordinary `JOIN` + `GROUP BY`, with zero recursive CTEs.
 
 ### Why Recursive CTEs Fail in Enterprise Warehouses
 Most AI-generated SQL and textbook graph solutions rely on `WITH RECURSIVE`:
@@ -244,6 +256,9 @@ sequenceDiagram
 ---
 
 ## 5. Deterministic Cross-Run ID Stabilization
+
+!!! tip "In Plain English"
+    If Alice's cluster is `res_100` today and a new order arrives tomorrow with a smaller ID, her cluster ID shouldn't suddenly flip—otherwise every downstream CRM and BI dashboard breaks. When clusters merge, **the larger (or older) cluster's ID wins**, and every transition is logged to a crosswalk table.
 
 ### The "Cluster Churn" Problem in Production
 In raw connected components, the canonical cluster ID is simply the minimum node key:
@@ -372,3 +387,33 @@ When invoked with `--dry-run` or via the **Dry Run Preview** checkbox in the Web
 | **Incremental Delta** | $\mathcal{O}(\Delta N)$ | Watermark preservation + candidate expansion | Short-circuits 0-delta runs without full graph recompute |
 
 For empirical execution times across 6.3M entities and 15 tables on BigQuery (306s) and Databricks (296s), see [Production Benchmarks & Real-World Runtimes](warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes). (Snowflake benchmarks are currently in progress).
+
+---
+
+## 9. Corroboration & Fan-Out Confidence Scoring
+
+!!! tip "In Plain English"
+    A cluster linked by **4 independent identifiers** (email + phone + loyalty ID + address) is far more trustworthy than a cluster linked by just 1. Conversely, if **296 people** all share the exact same value, that's likely a shared household or corporate hub—so we **penalize high fan-out** to surface risky over-merges at the bottom of the confidence ranking.
+
+For multi-entity clusters ($|C| > 1$), `sql-identity-resolution` computes a continuous confidence score in $(0, 1]$ by combining **Noisy-OR identifier corroboration** with **square-root fan-out damping**:
+
+$$
+P_{\text{corrob}}(C) = 1 - \prod_{t \in T(C)} (1 - w_t), \qquad
+f_{\text{fanout}}(C) = \min\!\left(1.0, \; \frac{2}{\sqrt{\max_{i \in C} \text{fanout}(i)}}\right)
+$$
+
+$$
+\text{confidence\_score}(C) = \text{round}\!\Big( P_{\text{corrob}}(C) \cdot f_{\text{fanout}}(C) \cdot \big(0.85 + 0.15 \cdot s_{\text{div}}(C)\big), \; 4 \Big)
+$$
+
+where $T(C)$ is the set of distinct identifier types supporting cluster $C$, $w_t \in (0, 1)$ is the identifier-type reliability weight, $\text{fanout}(i)$ is the maximum number of entities sharing a single identifier value in $C$, and $s_{\text{div}}(C) \in [0, 1]$ measures source-system diversity. Singletons ($|C| = 1$) receive `1.0` with reason `'SINGLETON_NO_MATCH_REQUIRED'` so they never pollute multi-entity triage queues.
+
+---
+
+## 10. References & Further Reading
+
+1. **Probabilistic Record Linkage:** Fellegi, I. P., & Sunter, A. B. (1969). *A Theory for Record Linkage*. Journal of the American Statistical Association, 64(328), 1183–1210.
+2. **Label Propagation on Graphs:** Raghavan, U. N., Albert, R., & Kumara, S. (2007). *Near linear time algorithm to detect community structures in large-scale networks*. Physical Review E, 76(3), 036106.
+3. **Parallel Connected Components:** Shiloach, Y., & Vishkin, U. (1982). *An $O(\log n)$ parallel connectivity algorithm*. Journal of Algorithms, 3(1), 57–67.
+4. **Noisy-OR Evidence Aggregation:** Pearl, J. (1988). *Probabilistic Reasoning in Intelligent Systems: Networks of Plausible Inference*. Morgan Kaufmann.
+5. **Entity Resolution & Blocking:** Christen, P. (2012). *Data Matching: Concepts and Techniques for Record Linkage, Entity Resolution, and Duplicate Detection*. Springer.

@@ -1,11 +1,12 @@
-import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useMemo, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import IdentityGraph, { GraphNodeData, GraphEdgeData, GraphLayoutName } from '../components/IdentityGraph'
 import {
     Search, X, Filter, Sparkles, Check, Copy, Eye, EyeOff,
-    Network, Hash, ShieldAlert, Trash2, GitBranch
+    Network, Hash, ShieldAlert, Trash2, GitBranch, Loader2
 } from 'lucide-react'
 import { api } from '../api/client'
+import { useToast } from '../components/Toast'
 import { useDebounce } from '../utils/useDebounce'
 import {
     getEntityColor,
@@ -21,6 +22,8 @@ interface ClusterSummary {
 }
 
 export default function Explorer() {
+    const { toast } = useToast()
+    const queryClient = useQueryClient()
     const [searchQuery, setSearchQuery] = useState('')
     const debouncedSearchQuery = useDebounce(searchQuery, 300)
 
@@ -35,6 +38,8 @@ export default function Explorer() {
     const [actionNotice, setActionNotice] = useState<string | null>(null)
     const [rtbfPreview, setRtbfPreview] = useState<any | null>(null)
     const [rtbfReceipt, setRtbfReceipt] = useState<any | null>(null)
+    const [rtbfLoading, setRtbfLoading] = useState<'preview' | 'purge' | null>(null)
+    const rtbfInFlightRef = useRef(false)
 
     const { data: searchResults, isLoading: searching } = useQuery({
         queryKey: ['search', debouncedSearchQuery],
@@ -286,6 +291,9 @@ export default function Explorer() {
     }
 
     const handlePreviewRtbf = async (resolvedId: string) => {
+        if (rtbfInFlightRef.current || rtbfLoading !== null) return
+        rtbfInFlightRef.current = true
+        setRtbfLoading('preview')
         try {
             const res = await api.privacyForget({
                 resolved_id: resolvedId,
@@ -295,11 +303,19 @@ export default function Explorer() {
             setRtbfPreview(res)
             setRtbfReceipt(null)
         } catch (err: any) {
-            setActionNotice(`RTBF preview failed: ${err?.message || err}`)
+            const msg = `RTBF preview failed: ${err?.message || err}`
+            setActionNotice(msg)
+            toast('error', 'GDPR preview failed', String(err?.message || err))
+        } finally {
+            rtbfInFlightRef.current = false
+            setRtbfLoading(null)
         }
     }
 
     const handleConfirmRtbf = async (resolvedId: string) => {
+        if (rtbfInFlightRef.current || rtbfLoading !== null) return
+        rtbfInFlightRef.current = true
+        setRtbfLoading('purge')
         try {
             const res = await api.privacyForget({
                 resolved_id: resolvedId,
@@ -310,8 +326,16 @@ export default function Explorer() {
             setRtbfReceipt(res)
             setSelectedCluster(null)
             setSelectedNode(null)
+            await queryClient.invalidateQueries({ queryKey: ['search'] })
+            await queryClient.invalidateQueries({ queryKey: ['metrics'] })
+            toast('success', 'GDPR purge & suppression complete', `${res.entities_purged} entities purged and suppressed from future FULL/INCR runs.`)
         } catch (err: any) {
-            setActionNotice(`RTBF purge failed: ${err?.message || err}`)
+            const msg = `RTBF purge failed: ${err?.message || err}`
+            setActionNotice(msg)
+            toast('error', 'GDPR purge failed', String(err?.message || err))
+        } finally {
+            rtbfInFlightRef.current = false
+            setRtbfLoading(null)
         }
     }
 
@@ -413,15 +437,18 @@ export default function Explorer() {
             )}
 
             {rtbfReceipt && (
-                <div className="bg-rose-950/40 border border-rose-700/70 text-rose-200 p-4 rounded-xl text-xs space-y-2">
-                    <div className="flex items-center justify-between font-semibold text-sm text-rose-300">
+                <div className="bg-emerald-950/50 border border-emerald-600/70 text-emerald-100 p-4 rounded-xl text-xs space-y-2">
+                    <div className="flex items-center justify-between font-semibold text-sm text-emerald-300">
                         <span>GDPR / CCPA Right-to-be-Forgotten Purge Complete ({rtbfReceipt.request_id})</span>
-                        <button onClick={() => setRtbfReceipt(null)} className="text-rose-400 hover:text-white">×</button>
+                        <button onClick={() => setRtbfReceipt(null)} className="text-emerald-400 hover:text-white">×</button>
                     </div>
                     <p>
-                        Purged <strong>{rtbfReceipt.entities_purged}</strong> entities and <strong>{rtbfReceipt.edges_purged}</strong> edges across <code>idr_out.*</code> and <code>idr_work.*</code>.
+                        Purged <strong>{rtbfReceipt.entities_purged}</strong> entities and <strong>{rtbfReceipt.edges_purged}</strong> edges across <code>idr_out.*</code> and <code>idr_work.*</code>
+                        {typeof rtbfReceipt.suppressed_entities === 'number' && rtbfReceipt.suppressed_entities > 0
+                            ? ` (${rtbfReceipt.suppressed_entities} entity hashes added to idr_meta.privacy_suppression)`
+                            : ''}.
                     </p>
-                    <p className="font-mono text-[11px] text-rose-300/80">
+                    <p className="font-mono text-[11px] text-emerald-300/80">
                         Zero-PII Audit SHA-256 Receipt: {rtbfReceipt.target_hash}
                     </p>
                 </div>
@@ -461,19 +488,38 @@ export default function Explorer() {
                                 </span>
                                 <button onClick={() => setRtbfPreview(null)} className="text-rose-300 hover:text-white">Cancel</button>
                             </div>
-                            <p>
-                                This will permanently purge cluster <code className="font-mono bg-gray-900 px-1.5 py-0.5 rounded">{selectedCluster}</code> including <strong>{rtbfPreview.entities_purged}</strong> linked entities ({rtbfPreview.entity_keys?.join(', ')}) and <strong>{rtbfPreview.edges_purged}</strong> graph edges across all IDR output & staging tables, and record a SHA-256 audit receipt in <code className="font-mono">idr_meta.privacy_audit_log</code>.
-                            </p>
+                            <div className="space-y-2">
+                                <p>
+                                    This will permanently purge cluster <code className="font-mono bg-gray-900 px-1.5 py-0.5 rounded">{selectedCluster}</code> including <strong>{rtbfPreview.entities_purged}</strong> linked entities and <strong>{rtbfPreview.edges_purged}</strong> graph edges across all IDR output &amp; staging tables, add their zero-PII SHA-256 hashes to <code className="font-mono">idr_meta.privacy_suppression</code> (preventing rebuild on future FULL/INCR runs), and record an audit receipt in <code className="font-mono">idr_meta.privacy_audit_log</code>.
+                                </p>
+                                {rtbfPreview.entity_keys && rtbfPreview.entity_keys.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-2 rounded-lg bg-gray-950/60 border border-rose-900/50">
+                                        {rtbfPreview.entity_keys.slice(0, 6).map((ek: string) => (
+                                            <span key={ek} className="font-mono text-[11px] bg-gray-900 text-rose-200 px-1.5 py-0.5 rounded border border-gray-800">
+                                                {ek}
+                                            </span>
+                                        ))}
+                                        {rtbfPreview.entity_keys.length > 6 && (
+                                            <span className="font-mono text-[11px] text-rose-300/80 px-1.5 py-0.5">
+                                                +{rtbfPreview.entity_keys.length - 6} more entities
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                             <div className="flex gap-2">
                                 <button
                                     onClick={() => handleConfirmRtbf(selectedCluster)}
-                                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-lg"
+                                    disabled={rtbfLoading !== null}
+                                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-lg"
                                 >
-                                    Confirm & Purge Identity Graph
+                                    {rtbfLoading === 'purge' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                    <span>{rtbfLoading === 'purge' ? 'Purging & Suppressing...' : 'Confirm & Purge Identity Graph'}</span>
                                 </button>
                                 <button
                                     onClick={() => setRtbfPreview(null)}
-                                    className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg border border-gray-600"
+                                    disabled={rtbfLoading !== null}
+                                    className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 rounded-lg border border-gray-600"
                                 >
                                     Cancel
                                 </button>
@@ -631,26 +677,34 @@ export default function Explorer() {
                         {/* Graph Canvas */}
                         <div className="lg:col-span-2 space-y-4">
                             <div className="bg-gray-800 rounded-xl p-4 border border-gray-700 shadow-xl space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <h3 className="text-base font-semibold text-white">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <h3 className="text-base font-semibold text-white whitespace-nowrap">
                                             Cluster Entities ({graphNodes.length} / {clusterDetail.entities.length})
                                         </h3>
-                                        <span className="text-xs font-mono text-gray-400 bg-gray-900 px-2 py-0.5 rounded border border-gray-700">
+                                        <span
+                                            className="text-xs font-mono text-gray-400 bg-gray-900 px-2 py-0.5 rounded border border-gray-700 truncate max-w-[220px]"
+                                            title={clusterDetail.resolved_id}
+                                        >
                                             {clusterDetail.resolved_id}
                                         </span>
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-xs text-gray-400">
+                                    <div className="flex items-center gap-3 shrink-0">
+                                        <span className="text-xs text-gray-400 whitespace-nowrap tabular-nums">
                                             {graphEdges.length} connections
                                         </span>
                                         <button
                                             onClick={() => handlePreviewRtbf(clusterDetail.resolved_id)}
-                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 border border-rose-800/70 transition-colors"
+                                            disabled={rtbfLoading !== null}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-950/60 hover:bg-rose-900/70 disabled:opacity-60 disabled:cursor-not-allowed text-rose-300 border border-rose-800/70 transition-colors whitespace-nowrap"
                                             title="GDPR / CCPA Right to be Forgotten cascading purge"
                                         >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                            <span>GDPR Forget</span>
+                                            {rtbfLoading === 'preview' ? (
+                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            )}
+                                            <span>{rtbfLoading === 'preview' ? 'Checking...' : 'GDPR Forget'}</span>
                                         </button>
                                     </div>
                                 </div>

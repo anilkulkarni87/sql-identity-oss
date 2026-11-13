@@ -320,135 +320,221 @@ class ConfigSaveRequest(BaseModel):
     config: Dict[str, Any]
 
 
+_ACTIVE_SAVE_PROGRESS: Dict[str, Dict[str, Any]] = {}
+
+
+def _execute_save_config(
+    adapter,
+    raw_config: Dict[str, Any],
+    progress_cb: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Validate, clear stale metadata, and persist config using batched SQL statements."""
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
+    from idr_core.config import config_to_sql, validate_config
+
+    def _report(step: str, label: str, percent: int, detail: str = "") -> None:
+        if progress_cb:
+            progress_cb(step, label, percent, detail)
+
+    _report("validating", "Validating configuration", 10, "Checking sources, rules, and mappings...")
+    cfg = dict(raw_config or {})
+    for key in ("sources", "rules", "fuzzy_rules", "survivorship", "exclusions", "overrides"):
+        if cfg.get(key) is None:
+            cfg[key] = []
+    for src in cfg.get("sources", []):
+        if isinstance(src, dict):
+            if src.get("identifiers") is None:
+                src["identifiers"] = []
+            if src.get("attributes") is None:
+                src["attributes"] = []
+
+    validate_config(cfg)
+
+    _report("schema", "Ensuring metadata schema", 20, "Checking idr_meta & idr_out tables...")
+    schema_manager = SchemaManager(adapter)
+    schema_manager.initialize(reset=False)
+
+    _report("clearing", "Clearing stale metadata", 30, "Removing obsolete mappings & rules...")
+    for meta_table in (
+        "idr_meta.identifier_mapping",
+        "idr_meta.entity_attribute_mapping",
+        "idr_meta.source_table",
+        "idr_meta.rule",
+        "idr_meta.fuzzy_rule",
+        "idr_meta.survivorship_rule",
+    ):
+        try:
+            if adapter.table_exists(meta_table):
+                adapter.execute(f"DELETE FROM {meta_table} WHERE 1=1")
+        except Exception:
+            pass
+
+    try:
+        if adapter.table_exists("idr_meta.identifier_exclusion"):
+            adapter.execute(
+                "DELETE FROM idr_meta.identifier_exclusion "
+                "WHERE COALESCE(reason, '') IN ('UI exclusion', 'Config exclusion')"
+            )
+        if adapter.table_exists("idr_meta.identity_override"):
+            adapter.execute(
+                "DELETE FROM idr_meta.identity_override "
+                "WHERE COALESCE(created_by, 'config') IN ('config', 'ui')"
+            )
+    except Exception:
+        pass
+
+    statements = config_to_sql(cfg, dialect=adapter.dialect, batched=True)
+    total_batches = len(statements)
+
+    sources_json = json.dumps(cfg.get("sources", []))
+    rules_json = json.dumps(
+        {
+            "rules": cfg.get("rules", []),
+            "fuzzy_rules": cfg.get("fuzzy_rules", []),
+            "exclusions": cfg.get("exclusions", []),
+            "overrides": cfg.get("overrides", []),
+            "use_default_exclusions": bool(cfg.get("use_default_exclusions", False)),
+        }
+    )
+    mappings_json = json.dumps(cfg.get("survivorship", []))
+    config_str = sources_json + rules_json + mappings_json
+    config_hash = hashlib.md5(config_str.encode("utf-8")).hexdigest()
+    current_ts = datetime.now(timezone.utc).isoformat()
+
+    def escape_json(s: str) -> str:
+        if adapter.dialect in ("bigquery", "databricks"):
+            return s.replace("'", "\\'")
+        return s.replace("'", "''")
+
+    sj = escape_json(sources_json)
+    rj = escape_json(rules_json)
+    mj = escape_json(mappings_json)
+
+    snapshot_sql = f"""
+        INSERT INTO idr_out.config_snapshot (config_hash, sources_json, rules_json, mappings_json, created_at)
+        VALUES ('{config_hash}', '{sj}', '{rj}', '{mj}', '{current_ts}')
+    """
+
+    count = 0
+    for idx, stmt in enumerate(statements, start=1):
+        pct = 35 + int((idx / max(total_batches, 1)) * 55)
+        _report(
+            "writing",
+            "Writing metadata batches",
+            pct,
+            f"Executing batch {idx} of {total_batches}...",
+        )
+        adapter.execute(stmt)
+        count += 1
+
+    _report("snapshot", "Saving config snapshot", 95, "Recording versioned config snapshot...")
+    try:
+        adapter.execute(snapshot_sql)
+    except Exception as snapshot_err:
+        print(f"Warning: Failed to save config snapshot: {snapshot_err}")
+
+    msg = f"Configuration saved ({count} batched statements executed)"
+    _report("done", "Configuration saved", 100, msg)
+    return {"status": "ok", "message": msg, "batches_executed": count}
+
+
 @router.post("/config/save")
 async def save_config(
     request: ConfigSaveRequest, current_user: Dict[str, Any] = Depends(require_write_access)
 ):
-    """Save configuration to idr_meta tables."""
+    """Save configuration to idr_meta tables using batched SQL writes."""
     adapter, _ = _require_user_adapter(current_user)
 
     try:
-        from idr_core.config import config_to_sql, validate_config
-
-        # Sanitize config dictionary: normalize None values to empty collections
-        cfg = dict(request.config or {})
-        for key in ("sources", "rules", "fuzzy_rules", "survivorship", "exclusions", "overrides"):
-            if cfg.get(key) is None:
-                cfg[key] = []
-        for src in cfg.get("sources", []):
-            if isinstance(src, dict):
-                if src.get("identifiers") is None:
-                    src["identifiers"] = []
-                if src.get("attributes") is None:
-                    src["attributes"] = []
-        request.config = cfg
-
-        # Validate config before generating SQL
-        validate_config(request.config)
-
-        # 1. Ensure metadata tables exist
-        schema_manager = SchemaManager(adapter)
-        schema_manager.initialize(reset=False)
-
-        # 2. Clear existing active metadata rows so deleted rules/sources don't linger,
-        # while preserving any exclusions or overrides manually inserted via SQL!
-        for meta_table in (
-            "idr_meta.identifier_mapping",
-            "idr_meta.entity_attribute_mapping",
-            "idr_meta.source_table",
-            "idr_meta.rule",
-            "idr_meta.fuzzy_rule",
-            "idr_meta.survivorship_rule",
-        ):
-            try:
-                if adapter.table_exists(meta_table):
-                    adapter.execute(f"DELETE FROM {meta_table} WHERE 1=1")
-            except Exception:
-                pass
-
-        try:
-            if adapter.table_exists("idr_meta.identifier_exclusion"):
-                adapter.execute(
-                    "DELETE FROM idr_meta.identifier_exclusion "
-                    "WHERE COALESCE(reason, '') IN ('UI exclusion', 'Config exclusion')"
-                )
-            if adapter.table_exists("idr_meta.identity_override"):
-                adapter.execute(
-                    "DELETE FROM idr_meta.identity_override "
-                    "WHERE COALESCE(created_by, 'config') IN ('config', 'ui')"
-                )
-        except Exception:
-            pass
-
-        # 3. Generate SQL from config
-        statements = config_to_sql(request.config, dialect=adapter.dialect)
-
-        # 4. Snapshot the config JSON so we can reload it later
-        import hashlib
-        import json
-        from datetime import datetime, timezone
-
-        sources_json = json.dumps(request.config.get("sources", []))
-        rules_json = json.dumps(
-            {
-                "rules": request.config.get("rules", []),
-                "fuzzy_rules": request.config.get("fuzzy_rules", []),
-                "exclusions": request.config.get("exclusions", []),
-                "overrides": request.config.get("overrides", []),
-                "use_default_exclusions": bool(request.config.get("use_default_exclusions", False)),
-            }
-        )
-        mappings_json = json.dumps(
-            request.config.get("survivorship", [])
-        )  # Storing survivorship in mappings_json for now
-
-        # Create a hash of the config
-        config_str = sources_json + rules_json + mappings_json
-        config_hash = hashlib.md5(config_str.encode("utf-8")).hexdigest()
-
-        # Determine how to insert based on dialect
-        # DuckDB handles INSERT OR IGNORE, others MERGE.
-        # idr_out.config_snapshot has columns: config_hash, sources_json, rules_json, mappings_json, created_at
-
-        current_ts = datetime.now(timezone.utc).isoformat()
-
-        # Simple INSERT, duplicates on hash don't strictly matter as we order by created_at DESC LIMIT 1
-        # But let's try to be clean.
-
-        # Escape JSON for SQL
-        def escape_json(s):
-            if adapter.dialect in ("bigquery", "databricks"):
-                return s.replace("'", "\\'")
-            return s.replace("'", "''")
-
-        sj = escape_json(sources_json)
-        rj = escape_json(rules_json)
-        mj = escape_json(mappings_json)
-
-        snapshot_sql = f"""
-            INSERT INTO idr_out.config_snapshot (config_hash, sources_json, rules_json, mappings_json, created_at)
-            VALUES ('{config_hash}', '{sj}', '{rj}', '{mj}', '{current_ts}')
-        """
-
-        # 4. Execute all statements
-        count = 0
-        for stmt in statements:
-            adapter.execute(stmt)
-            count += 1
-
-        # Execute snapshot last
-        try:
-            adapter.execute(snapshot_sql)
-        except Exception as snapshot_err:
-            print(f"Warning: Failed to save config snapshot: {snapshot_err}")
-            # Non-critical for the run itself, but bad for UI reload.
-
-        return {"status": "ok", "message": f"Configuration saved ({count} statements executed)"}
-
+        return _execute_save_config(adapter, request.config)
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(500, f"Failed to save configuration: {str(e)}")
+
+
+@router.post("/config/save/async")
+async def save_config_async(
+    request: ConfigSaveRequest, current_user: Dict[str, Any] = Depends(require_write_access)
+):
+    """Start saving configuration asynchronously with live progress tracking."""
+    import threading
+    import time
+
+    adapter, _ = _require_user_adapter(current_user)
+    user_key = get_user_key(current_user)
+
+    existing = _ACTIVE_SAVE_PROGRESS.get(user_key)
+    if existing and existing.get("status") == "SAVING":
+        return {"status": "already_saving", "message": "A configuration save is already in progress."}
+
+    _ACTIVE_SAVE_PROGRESS[user_key] = {
+        "status": "SAVING",
+        "step": "validating",
+        "label": "Validating configuration",
+        "percent": 5,
+        "detail": "Starting configuration save...",
+        "started_epoch": time.time(),
+        "elapsed_seconds": 0.0,
+        "message": None,
+        "error": None,
+    }
+
+    def _progress_cb(step: str, label: str, percent: int, detail: str) -> None:
+        prog = _ACTIVE_SAVE_PROGRESS.get(user_key)
+        if not prog:
+            return
+        prog["step"] = step
+        prog["label"] = label
+        prog["percent"] = percent
+        prog["detail"] = detail
+        prog["elapsed_seconds"] = round(time.time() - prog["started_epoch"], 1)
+
+    def _worker() -> None:
+        try:
+            result = _execute_save_config(adapter, request.config, progress_cb=_progress_cb)
+            prog = _ACTIVE_SAVE_PROGRESS[user_key]
+            prog["status"] = "SUCCESS"
+            prog["percent"] = 100
+            prog["message"] = result.get("message")
+            prog["elapsed_seconds"] = round(time.time() - prog["started_epoch"], 1)
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            prog = _ACTIVE_SAVE_PROGRESS[user_key]
+            prog["status"] = "ERROR"
+            prog["error"] = str(e)
+            prog["detail"] = str(e)
+            prog["elapsed_seconds"] = round(time.time() - prog["started_epoch"], 1)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return {"status": "started", "message": "Configuration save started"}
+
+
+@router.get("/config/save/progress")
+async def get_save_config_progress(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Return live progress for the active or most recent config save."""
+    import time
+
+    user_key = get_user_key(current_user)
+    prog = _ACTIVE_SAVE_PROGRESS.get(user_key)
+    if not prog:
+        return JSONResponse(
+            content={"status": "IDLE", "percent": 0},
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    snapshot = copy.deepcopy(prog)
+    if snapshot.get("status") == "SAVING" and snapshot.get("started_epoch"):
+        snapshot["elapsed_seconds"] = round(time.time() - snapshot["started_epoch"], 1)
+    return JSONResponse(
+        content=snapshot,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 class RunRequest(BaseModel):

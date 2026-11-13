@@ -273,65 +273,80 @@ def validate_config(config: Dict[str, Any]) -> bool:
     return True
 
 
-def config_to_sql(config: Dict[str, Any], dialect: str = "duckdb") -> List[str]:
+def config_to_sql(
+    config: Dict[str, Any],
+    dialect: str = "duckdb",
+    batched: bool = False,
+    chunk_size: int = 100,
+) -> List[str]:
     """
     Convert YAML configuration to SQL INSERT/MERGE statements.
 
     Args:
         config: Validated configuration dictionary
         dialect: Target dialect ('duckdb', 'snowflake', 'bigquery', 'databricks')
+        batched: When True, combine rows for the same metadata table into multi-row
+            INSERT / MERGE batches (chunk_size rows per statement) to minimize
+            warehouse round-trips.
+        chunk_size: Maximum rows per batched statement when batched=True.
 
     Returns:
         List of SQL statements to populate metadata tables
     """
     statements = []
+    batched_groups: Dict[tuple, List[Dict[str, Any]]] = {}
 
-    def generate_upsert(table: str, keys: List[str], data: Dict[str, Any]) -> str:
-        """Generate dialect-specific UPSERT statement."""
+    bq_type_map: Optional[Dict[tuple, Any]] = None
+    if dialect == "bigquery":
+        try:
+            from .schema_defs import SYSTEM_TABLES
+
+            bq_type_map = {}
+            for t in SYSTEM_TABLES:
+                short = t.fqn.split(".")[-1]
+                for col in t.columns:
+                    bq_type_map[(t.fqn, col.name)] = col.type
+                    bq_type_map[(short, col.name)] = col.type
+        except Exception:
+            bq_type_map = {}
+
+    def _format_val(table: str, col_name: str, v: Any) -> str:
+        if v is None:
+            if dialect == "bigquery":
+                # BigQuery infers untyped NULL as INT64 in SELECT expressions.
+                # We must explicitly cast NULL to target column type to prevent 400 type mismatch.
+                try:
+                    from .schema_defs import ColumnType
+
+                    col_t = (bq_type_map or {}).get((table, col_name)) or (
+                        bq_type_map or {}
+                    ).get((table.split(".")[-1], col_name))
+                    if col_t == ColumnType.INT:
+                        return "CAST(NULL AS INT64)"
+                    if col_t == ColumnType.DOUBLE:
+                        return "CAST(NULL AS FLOAT64)"
+                    if col_t == ColumnType.BOOL:
+                        return "CAST(NULL AS BOOL)"
+                    if col_t == ColumnType.TIMESTAMP:
+                        return "CAST(NULL AS TIMESTAMP)"
+                    return "CAST(NULL AS STRING)"
+                except Exception:
+                    return "CAST(NULL AS STRING)"
+            return "NULL"
+        if isinstance(v, bool):
+            return str(v).upper()  # TRUE/FALSE
+        if isinstance(v, (int, float)):
+            return str(v)
+        if dialect == "bigquery":
+            escaped_v = str(v).replace("'", "\\'")
+        else:
+            # duckdb, snowflake, databricks use ''
+            escaped_v = str(v).replace("'", "''")
+        return f"'{escaped_v}'"
+
+    def _build_single_upsert(table: str, keys: List[str], data: Dict[str, Any]) -> str:
         cols = list(data.keys())
-        vals = []
-        for c, v in data.items():
-            if v is None:
-                if dialect == "bigquery":
-                    # BigQuery infers untyped NULL as INT64 in SELECT expressions.
-                    # We must explicitly cast NULL to target column type to prevent 400 type mismatch.
-                    try:
-                        from .schema_defs import SYSTEM_TABLES, ColumnType
-                        type_map = {}
-                        for t in SYSTEM_TABLES:
-                            short = t.fqn.split(".")[-1]
-                            for col in t.columns:
-                                type_map[(t.fqn, col.name)] = col.type
-                                type_map[(short, col.name)] = col.type
-                        col_t = type_map.get((table, c)) or type_map.get((table.split(".")[-1], c))
-                        if col_t == ColumnType.INT:
-                            vals.append("CAST(NULL AS INT64)")
-                        elif col_t == ColumnType.DOUBLE:
-                            vals.append("CAST(NULL AS FLOAT64)")
-                        elif col_t == ColumnType.BOOL:
-                            vals.append("CAST(NULL AS BOOL)")
-                        elif col_t == ColumnType.TIMESTAMP:
-                            vals.append("CAST(NULL AS TIMESTAMP)")
-                        else:
-                            vals.append("CAST(NULL AS STRING)")
-                    except Exception:
-                        vals.append("CAST(NULL AS STRING)")
-                else:
-                    vals.append("NULL")
-            elif isinstance(v, bool):
-                vals.append(str(v).upper())  # TRUE/FALSE
-            elif isinstance(v, (int, float)):
-                vals.append(str(v))
-            else:
-                # Dialect-specific escaping
-                # BigQuery uses backslash for single quotes in standard SQL (usually)
-                # But Databricks (Spark SQL) defaults to standard SQL escaping ('') in modern versions
-                if dialect == "bigquery":
-                    escaped_v = str(v).replace("'", "\\'")
-                else:
-                    # duckdb, snowflake, databricks use ''
-                    escaped_v = str(v).replace("'", "''")
-                vals.append(f"'{escaped_v}'")
+        vals = [_format_val(table, c, v) for c, v in data.items()]
 
         # DuckDB: INSERT ON CONFLICT
         if dialect == "duckdb":
@@ -348,38 +363,88 @@ ON CONFLICT ({conflict_target}) DO UPDATE SET
 """.strip()
 
         # Snowflake/BigQuery/Databricks: MERGE
-        else:
-            # Build source SELECT
-            select_cols = []
-            for c, v in zip(cols, vals):
-                select_cols.append(f"{v} AS {c}")
-            source_select = f"SELECT {', '.join(select_cols)}"
-
-            # Build match condition
-            join_cond = " AND ".join([f"tgt.{k} = src.{k}" for k in keys])
-
-            # Build update clause
-            update_assignments = [f"tgt.{c} = src.{c}" for c in cols if c not in keys]
-            update_clause = ""
-            if update_assignments:
-                update_clause = f"WHEN MATCHED THEN UPDATE SET {', '.join(update_assignments)}"
-            else:
-                # If only keys (e.g. valid-only table), no update needed, but MERGE allows empty update?
-                # Actually BigQuery Requires UPDATE/DELETE/INSERT.
-                # Safe fallback: update one key to itself or skip.
-                # For our metadata tables, we always have non-key columns to update.
-                pass
-
-            # Build insert clause
-            insert_clause = f"WHEN NOT MATCHED THEN INSERT ({', '.join(cols)}) VALUES ({', '.join([f'src.{c}' for c in cols])})"
-
-            return f"""
+        select_cols = [f"{v} AS {c}" for c, v in zip(cols, vals)]
+        source_select = f"SELECT {', '.join(select_cols)}"
+        join_cond = " AND ".join([f"tgt.{k} = src.{k}" for k in keys])
+        update_assignments = [f"tgt.{c} = src.{c}" for c in cols if c not in keys]
+        update_clause = (
+            f"WHEN MATCHED THEN UPDATE SET {', '.join(update_assignments)}"
+            if update_assignments
+            else ""
+        )
+        insert_clause = (
+            f"WHEN NOT MATCHED THEN INSERT ({', '.join(cols)}) "
+            f"VALUES ({', '.join([f'src.{c}' for c in cols])})"
+        )
+        return f"""
 MERGE INTO {table} tgt
 USING ({source_select}) src
 ON {join_cond}
 {update_clause}
 {insert_clause}
 """.strip()
+
+    def _build_batched_upsert(
+        table: str, keys: List[str], rows: List[Dict[str, Any]]
+    ) -> str:
+        if len(rows) == 1:
+            return _build_single_upsert(table, keys, rows[0])
+
+        cols = list(rows[0].keys())
+        if dialect == "duckdb":
+            conflict_target = ",".join(keys)
+            updates = [f"{c} = EXCLUDED.{c}" for c in cols if c not in keys]
+            values_rows = [
+                f"({','.join(_format_val(table, c, r.get(c)) for c in cols)})"
+                for r in rows
+            ]
+            values_block = ",\n    ".join(values_rows)
+            if not updates:
+                return (
+                    f"INSERT OR IGNORE INTO {table} ({','.join(cols)}) "
+                    f"VALUES\n    {values_block}"
+                )
+            return f"""
+INSERT INTO {table} ({",".join(cols)})
+VALUES
+    {values_block}
+ON CONFLICT ({conflict_target}) DO UPDATE SET
+    {", ".join(updates)}
+""".strip()
+
+        select_rows = []
+        for r in rows:
+            select_cols = [f"{_format_val(table, c, r.get(c))} AS {c}" for c in cols]
+            select_rows.append(f"SELECT {', '.join(select_cols)}")
+        source_select = "\n    UNION ALL\n    ".join(select_rows)
+        join_cond = " AND ".join([f"tgt.{k} = src.{k}" for k in keys])
+        update_assignments = [f"tgt.{c} = src.{c}" for c in cols if c not in keys]
+        update_clause = (
+            f"WHEN MATCHED THEN UPDATE SET {', '.join(update_assignments)}"
+            if update_assignments
+            else ""
+        )
+        insert_clause = (
+            f"WHEN NOT MATCHED THEN INSERT ({', '.join(cols)}) "
+            f"VALUES ({', '.join([f'src.{c}' for c in cols])})"
+        )
+        return f"""
+MERGE INTO {table} tgt
+USING (
+    {source_select}
+) src
+ON {join_cond}
+{update_clause}
+{insert_clause}
+""".strip()
+
+    def generate_upsert(table: str, keys: List[str], data: Dict[str, Any]) -> str:
+        """Generate dialect-specific UPSERT statement (or queue for batching)."""
+        if batched:
+            group_key = (table, tuple(keys))
+            batched_groups.setdefault(group_key, []).append(data)
+            return ""
+        return _build_single_upsert(table, keys, data)
 
     # Source tables
     for src in (config.get("sources") or []):
@@ -629,6 +694,22 @@ ON {join_cond}
             "is_active": True,
         }
         statements.append(generate_upsert("idr_meta.survivorship_rule", ["attribute_name"], data))
+
+    if batched:
+        batched_statements: List[str] = []
+        safe_chunk = max(1, int(chunk_size or 100))
+        for (table, keys_tuple), rows in batched_groups.items():
+            # Deduplicate by primary key (keeping last) so MERGE never hits duplicate source rows
+            deduped: Dict[tuple, Dict[str, Any]] = {}
+            for row in rows:
+                pk = tuple(row.get(k) for k in keys_tuple)
+                deduped[pk] = row
+            unique_rows = list(deduped.values())
+            keys_list = list(keys_tuple)
+            for idx in range(0, len(unique_rows), safe_chunk):
+                chunk = unique_rows[idx : idx + safe_chunk]
+                batched_statements.append(_build_batched_upsert(table, keys_list, chunk))
+        return batched_statements
 
     return statements
 

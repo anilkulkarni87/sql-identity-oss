@@ -11,7 +11,7 @@ except ImportError:
     pass
 
 import httpx
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
 try:
@@ -234,14 +234,33 @@ async def _get_jwk_for_token(token: str) -> Dict[str, Any]:
     )
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    request: Request = None,
+):
     """
     Validate the JWT token and return the user.
-    If IDR_AUTH_ISSUER is not set, auth fails closed unless
+    In Databricks Apps (DATABRICKS_APP_NAME set), workspace SSO is enforced
+    by the platform proxy via x-forwarded-* headers.
+    Otherwise, if IDR_AUTH_ISSUER is not set, auth fails closed unless
     IDR_ALLOW_INSECURE_DEV_AUTH=true is explicitly set.
     """
-    # 1. Unconfigured Auth
+    # 1. Unconfigured OIDC Auth
     if not OIDC_ISSUER:
+        if os.getenv("DATABRICKS_APP_NAME"):
+            headers = request.headers if request is not None else {}
+            db_user = (
+                headers.get("x-forwarded-email")
+                or headers.get("x-forwarded-preferred-username")
+                or headers.get("x-forwarded-user")
+                or "databricks-app-user"
+            )
+            return {
+                "sub": db_user,
+                "email": db_user,
+                "name": db_user,
+                "roles": ["admin"],
+            }
         if not _is_dev_auth_allowed():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
