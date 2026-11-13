@@ -79,45 +79,45 @@ title: Supported Warehouses, Schema & Operations
 
 All tables are defined in `idr_core/schema_defs.py` (`SYSTEM_TABLES`) and mirrored in `sql/ddl/{duckdb,snowflake,bigquery,databricks}.sql`. During **Stage 1 (`preflight`)**, `PreflightStage._ensure_schema_upgrades()` automatically creates any missing tables on existing deployments.
 
-### `idr_meta` Schema (Configuration, State & Governance)
+=== "`idr_meta` (Config & Governance)"
 
-| Table | Primary Key / Purpose | Key Columns |
-| :--- | :--- | :--- |
-| `idr_meta.source_table` | Registered source tables | `table_id`, `table_fqn`, `entity_type`, `entity_key_expr`, `watermark_column`, `watermark_lookback_minutes`, `is_active` |
-| `idr_meta.source_identifier` | Identifier extraction mappings | `table_id`, `identifier_type`, `identifier_value_expr`, `is_hashed` |
-| `idr_meta.entity_attribute_mapping` | Profile attribute mappings | `table_id`, `attribute_name`, `attribute_expr` |
-| `idr_meta.rule` | Deterministic matching rules | `rule_id`, `identifier_type`, `canonicalize`, `max_group_size`, `priority`, `is_active` |
-| `idr_meta.fuzzy_rule` | Blocking-based fuzzy rules | `rule_id`, `rule_name`, `blocking_key_expr`, `score_expr`, `threshold`, `priority`, `is_active` |
-| `idr_meta.survivorship_rule` | Golden profile attribute rules | `attribute_name`, `strategy`, `source_priority_list`, `recency_field` |
-| `idr_meta.identifier_exclusion` | Poison-pill blocklist | `identifier_type` (`EMAIL`, `PHONE`, `ANY`), `identifier_value_pattern`, `match_type` (`EXACT`, `LIKE`), `reason` |
-| `idr_meta.identity_override` | Manual stewardship overrides | `override_id`, `override_type` (`FORCE_LINK`, `DO_NOT_LINK`, `ISOLATE`), `entity_key_a`, `entity_key_b`, `reason`, `created_by`, `is_active` |
-| `idr_meta.privacy_audit_log` | GDPR / CCPA erasure ledger | `request_id`, `request_type`, `target_value`, `affected_entities_count`, `affected_clusters_count`, `tables_purged`, `requested_by`, `reason`, `executed_at`, `status` |
-| `idr_meta.run_state` | Per-table incremental watermarks | `table_id`, `last_watermark_value`, `last_run_id`, `last_run_ts` |
+    | Table | Primary Key / Purpose | Key Columns |
+    | :--- | :--- | :--- |
+    | `idr_meta.source_table` | Registered source tables | `table_id`, `table_fqn`, `entity_type`, `entity_key_expr`, `watermark_column`, `watermark_lookback_minutes`, `is_active` |
+    | `idr_meta.source_identifier` | Identifier extraction mappings | `table_id`, `identifier_type`, `identifier_value_expr`, `is_hashed` |
+    | `idr_meta.entity_attribute_mapping` | Profile attribute mappings | `table_id`, `attribute_name`, `attribute_expr` |
+    | `idr_meta.rule` | Deterministic matching rules | `rule_id`, `identifier_type`, `canonicalize`, `max_group_size`, `priority`, `is_active` |
+    | `idr_meta.fuzzy_rule` | Blocking-based fuzzy rules | `rule_id`, `rule_name`, `blocking_key_expr`, `score_expr`, `threshold`, `priority`, `is_active` |
+    | `idr_meta.survivorship_rule` | Golden profile attribute rules | `attribute_name`, `strategy`, `source_priority_list`, `recency_field` |
+    | `idr_meta.identifier_exclusion` | Poison-pill blocklist | `identifier_type` (`EMAIL`, `PHONE`, `ANY`), `identifier_value_pattern`, `match_type` (`EXACT`, `LIKE`), `reason` |
+    | `idr_meta.identity_override` | Manual stewardship overrides | `override_id`, `override_type` (`FORCE_LINK`, `DO_NOT_LINK`, `ISOLATE`), `entity_key_a`, `entity_key_b`, `reason`, `created_by`, `is_active` |
+    | `idr_meta.privacy_audit_log` | GDPR / CCPA erasure ledger | `request_id`, `request_type`, `target_value`, `affected_entities_count`, `affected_clusters_count`, `tables_purged`, `requested_by`, `reason`, `executed_at`, `status` |
+    | `idr_meta.run_state` | Per-table incremental watermarks | `table_id`, `last_watermark_value`, `last_run_id`, `last_run_ts` |
 
-### `idr_work` Schema (Ephemeral Pipeline Staging)
+=== "`idr_work` (Ephemeral Staging)"
 
-| Table | Purpose |
-| :--- | :--- |
-| `idr_work.entities_delta` | New/updated entities extracted in the current run (`watermark_value IS NOT NULL`) plus candidate-expanded historical entities (`watermark_value IS NULL`). |
-| `idr_work.identifiers_extracted` | Canonicalized and exclusion-filtered identifiers for current delta entities. |
-| `idr_work.identifiers_all` | Full working set of identifiers across impacted entities used for anchor edge building. |
-| `idr_work.entity_attributes` | Extracted attributes for fuzzy blocking (skipped automatically when `0` active fuzzy rules exist). |
-| `idr_work.edges_new` | Anchor-based star edges ($N-1$ edges per group) after `ISOLATE`, `DO_NOT_LINK`, and `FORCE_LINK` overrides. |
-| `idr_work.lp_edges` / `idr_work.lp_labels` | Undirected graph edges and iterative Label Propagation labels (stabilized against historical `resolved_id`s). |
+    | Table | Purpose |
+    | :--- | :--- |
+    | `idr_work.entities_delta` | New/updated entities extracted in the current run (`watermark_value IS NOT NULL`) plus candidate-expanded historical entities (`watermark_value IS NULL`). |
+    | `idr_work.identifiers_extracted` | Canonicalized and exclusion-filtered identifiers for current delta entities. |
+    | `idr_work.identifiers_all` | Full working set of identifiers across impacted entities used for anchor edge building. |
+    | `idr_work.entity_attributes` | Extracted attributes for fuzzy blocking (skipped automatically when `0` active fuzzy rules exist). |
+    | `idr_work.edges_new` | Anchor-based star edges ($N-1$ edges per group) after `ISOLATE`, `DO_NOT_LINK`, and `FORCE_LINK` overrides. |
+    | `idr_work.lp_edges` / `idr_work.lp_labels` | Undirected graph edges and iterative Label Propagation labels (stabilized against historical `resolved_id`s). |
 
-### `idr_out` Schema (Production Outputs & Telemetry)
+=== "`idr_out` (Outputs & Telemetry)"
 
-| Table | Purpose | Key Columns |
-| :--- | :--- | :--- |
-| `idr_out.identity_resolved_membership_current` | Canonical mapping of every `entity_key` to its persistent `resolved_id`. | `entity_key`, `resolved_id`, `updated_at`, `super_cluster_id` |
-| `idr_out.identity_identifiers_current` | Current normalized identifiers per `entity_key` (powers candidate expansion & no-watermark state-diffing). | `entity_key`, `identifier_type`, `identifier_value_norm`, `is_hashed`, `updated_at` |
-| `idr_out.identity_clusters_current` | Cluster-level quality and confidence metrics. | `resolved_id`, `cluster_size`, `confidence_score`, `edge_diversity`, `edge_count`, `max_fanout`, `match_density`, `primary_reason`, `updated_at` |
-| `idr_out.edge_evidence` | Granular match evidence trail for every edge ("why did A match B"). | `run_id`, `entity_key_a`, `entity_key_b`, `rule_id`, `identifier_type`, `match_value`, `score` |
-| `idr_out.evaluation_sample` | Stratified pair sample for Precision/Recall audit & human/LLM labeling. | `sample_id`, `stratum`, `entity_key_a`, `entity_key_b`, `identifier_type`, `confidence_score`, `human_label` |
-| `idr_out.golden_profile_current` | Consolidated 360° customer profile per `resolved_id`. | `resolved_id`, `email_primary`, `phone_primary`, `first_name`, `last_name`, `<dynamic_attributes>`, `updated_at` |
-| `idr_out.resolved_id_crosswalk` | Historical ledger of cluster ID merges and splits across runs. | `run_id`, `old_resolved_id`, `new_resolved_id`, `entity_key`, `change_type`, `changed_at` |
-| `idr_out.run_history` & `idr_out.stage_metrics` | Run-level and stage-level execution telemetry. | `run_id`, `run_mode`, `status`, `entities_processed`, `edges_created`, `clusters_Impacted`, `lp_iterations`, `duration_seconds` |
-| `idr_out.skipped_identifier_groups` | Identifier groups skipped for exceeding `max_group_size`. | `run_id`, `identifier_type`, `identifier_value_norm`, `group_size`, `max_allowed`, `sample_entity_keys` |
+    | Table | Purpose | Key Columns |
+    | :--- | :--- | :--- |
+    | `idr_out.identity_resolved_membership_current` | Canonical mapping of every `entity_key` to its persistent `resolved_id`. | `entity_key`, `resolved_id`, `updated_at`, `super_cluster_id` |
+    | `idr_out.identity_identifiers_current` | Current normalized identifiers per `entity_key` (powers candidate expansion & no-watermark state-diffing). | `entity_key`, `identifier_type`, `identifier_value_norm`, `is_hashed`, `updated_at` |
+    | `idr_out.identity_clusters_current` | Cluster-level quality and confidence metrics. | `resolved_id`, `cluster_size`, `confidence_score`, `edge_diversity`, `edge_count`, `max_fanout`, `match_density`, `primary_reason`, `updated_at` |
+    | `idr_out.edge_evidence` | Granular match evidence trail for every edge ("why did A match B"). | `run_id`, `entity_key_a`, `entity_key_b`, `rule_id`, `identifier_type`, `match_value`, `score` |
+    | `idr_out.evaluation_sample` | Stratified pair sample for Precision/Recall audit & human/LLM labeling. | `sample_id`, `stratum`, `entity_key_a`, `entity_key_b`, `identifier_type`, `confidence_score`, `human_label` |
+    | `idr_out.golden_profile_current` | Consolidated 360° customer profile per `resolved_id`. | `resolved_id`, `email_primary`, `phone_primary`, `first_name`, `last_name`, `<dynamic_attributes>`, `updated_at` |
+    | `idr_out.resolved_id_crosswalk` | Historical ledger of cluster ID merges and splits across runs. | `run_id`, `old_resolved_id`, `new_resolved_id`, `entity_key`, `change_type`, `changed_at` |
+    | `idr_out.run_history` & `idr_out.stage_metrics` | Run-level and stage-level execution telemetry. | `run_id`, `run_mode`, `status`, `entities_processed`, `edges_created`, `clusters_Impacted`, `lp_iterations`, `duration_seconds` |
+    | `idr_out.skipped_identifier_groups` | Identifier groups skipped for exceeding `max_group_size`. | `run_id`, `identifier_type`, `identifier_value_norm`, `group_size`, `max_allowed`, `sample_entity_keys` |
 
 ---
 
@@ -202,50 +202,68 @@ The pipeline has been benchmarked on a realistic omni-channel e-commerce workloa
 
 ### Warehouse Benchmark Comparison (6.3M Entities, 15 Source Tables)
 
-The table below summarizes full identity resolution execution metrics across supported warehouse engines (all cloud runs executed on the exact same 15-table `ecommerce_synth` dataset):
+All three cloud runs executed on the exact same 15-table `ecommerce_synth` dataset (**6,297,049** entities → **5,381,635** edges → **1,544,042** resolved clusters).
 
-| Metric / Dimension | Snowflake | Databricks (Unity Catalog) | Google BigQuery | DuckDB (Local) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Compute Engine** | Snowflake Virtual Warehouse | Serverless SQL Warehouse | Serverless BigQuery (US Multi-Region) | Single-Node (10-core M-series ARM) |
-| **Source Tables** | 15 tables | 15 tables | 15 tables | 15 tables |
-| **Input Entities** | **6,297,049** | **~6,300,000** | **6,297,049** | 250,000 (scale harness) |
-| **Edges Constructed** | **5,381,635** | **~5,380,000** | **5,381,635** | ~215,000 |
-| **Resolved Clusters** | **1,544,042** | **~1,544,000** | **1,544,042** | ~62,000 |
-| **Total Pipeline Duration** | **170s (2.8 min)** | **296s (4.9 min)** | **306s (5.1 min)** | 12.4s |
-| **Avg. Throughput** | **~37,000 entities/sec** | ~21,300 entities/sec | ~20,600 entities/sec | ~20,200 entities/sec |
-| **Graph Label Propagation** | **58.8s** | ~108s | 110.0s | 4.8s |
-| **Golden Profile Output** | **66.7s** | ~85s | 90.0s | 3.2s |
+<div class="idr-stats-grid">
+  <div class="idr-stat-card">
+    <div class="idr-stat-number">170s</div>
+    <div class="idr-stat-label">Snowflake (2.8 min · ~37k ent/s)</div>
+  </div>
+  <div class="idr-stat-card">
+    <div class="idr-stat-number">296s</div>
+    <div class="idr-stat-label">Databricks (4.9 min · ~21k ent/s)</div>
+  </div>
+  <div class="idr-stat-card">
+    <div class="idr-stat-number">306s</div>
+    <div class="idr-stat-label">BigQuery (5.1 min · ~21k ent/s)</div>
+  </div>
+</div>
 
-> [!TIP] Key Takeaways at a Glance
-> - **Identical Graph Correctness**: All three cloud warehouses resolved the exact same **6,297,049** entities and **5,381,635** edges into **1,544,042** clusters from a single portable configuration.
-> - **1.7x–1.8x Faster on Snowflake**: Snowflake completed end-to-end in **170s (2.8 min)** vs. **296s** on Databricks and **306s** on BigQuery—driven primarily by faster metadata preflight (**6.7s**), identifier normalization (**20.2s**), and label propagation (**58.8s**).
-> - **Predictable Bottlenecks**: Across every engine, `label_propagation` + `output_generation` account for ~65–74% of total runtime, while `entity_extraction` (~5–6s) and `edge_building` (~11–14s) stay fast thanks to anchor-based star graph reduction.
+!!! tip "Key Takeaways at a Glance"
+    - **Identical Graph Correctness**: All three cloud warehouses resolved the exact same **6,297,049** entities and **5,381,635** edges into **1,544,042** clusters from a single portable configuration.
+    - **1.7x–1.8x Faster on Snowflake**: Snowflake completed end-to-end in **170s (2.8 min)** vs. **296s** on Databricks and **306s** on BigQuery—driven primarily by faster metadata preflight (**6.7s**), identifier normalization (**20.2s**), and label propagation (**58.8s**).
+    - **Predictable Bottlenecks**: Across every engine, `label_propagation` + `output_generation` account for ~65–74% of total runtime, while `entity_extraction` (~5–6s) and `edge_building` (~11–14s) stay fast thanks to anchor-based star graph reduction.
 
-```mermaid
-xychart-beta
-    title "Stage Duration Comparison (Seconds — Lower is Better)"
-    x-axis ["Preflight", "Entities", "Identifiers", "Edges", "Label Prop", "Output"]
-    y-axis "Duration (seconds)" 0 --> 120
-    bar [6.7, 5.3, 20.2, 11.1, 58.8, 66.7]
-    bar [24, 6, 52, 14, 108, 85]
-    bar [26, 5, 54, 12, 110, 90]
-```
-*(Series order in chart: **Snowflake** · **Databricks** · **BigQuery**)*
+=== "Comparison Summary"
 
----
+    | Metric / Dimension | Snowflake | Databricks (Unity Catalog) | Google BigQuery | DuckDB (Local) |
+    | :--- | :--- | :--- | :--- | :--- |
+    | **Compute Engine** | Snowflake Virtual Warehouse | Serverless SQL Warehouse | Serverless BigQuery (US Multi-Region) | Single-Node (10-core M-series ARM) |
+    | **Source Tables** | 15 tables | 15 tables | 15 tables | 15 tables |
+    | **Input Entities** | **6,297,049** | **~6,300,000** | **6,297,049** | 250,000 (scale harness) |
+    | **Edges Constructed** | **5,381,635** | **~5,380,000** | **5,381,635** | ~215,000 |
+    | **Resolved Clusters** | **1,544,042** | **~1,544,000** | **1,544,042** | ~62,000 |
+    | **Total Pipeline Duration** | **170s (2.8 min)** | **296s (4.9 min)** | **306s (5.1 min)** | 12.4s |
+    | **Avg. Throughput** | **~37,000 entities/sec** | ~21,300 entities/sec | ~20,600 entities/sec | ~20,200 entities/sec |
+    | **Graph Label Propagation** | **58.8s** | ~108s | 110.0s | 4.8s |
+    | **Golden Profile Output** | **66.7s** | ~85s | 90.0s | 3.2s |
 
-### Detailed Stage-by-Stage Breakdown (Snowflake vs. Databricks vs. BigQuery)
+=== "Stage-by-Stage Breakdown"
 
-| Stage # | Pipeline Stage | Snowflake | Databricks | BigQuery | Rows (Snowflake / BigQuery) | Description |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Stage 1** | `preflight` | **6.7s** | ~24s | 26.0s | 0 | Metadata schema validation, column DDL checks, and run state initialization |
-| **Stage 2** | `entity_extraction` | **5.3s** | ~6s | 5.0s | 6,297,049 | Scans 15 tables, generates composite entity keys, and stages into `idr_work.entities_delta` |
-| **Stage 3** | `identifier_extraction` | **20.2s** | ~52s | 54.0s | 5,710,608 | Normalizes identifiers and applies poison-pill / suppression filters |
-| **Stage 4** | `attribute_extraction` | **0.4s** | ~1s | 1.0s | 0 | Extracts attributes for blocking rules (bypassed when no fuzzy blocking rules are active) |
-| **Stage 5** | `edge_building` | **11.1s** | ~14s | 12.0s | 5,381,635 | Anchor-based star graph reduction ($N-1$ edges per group) avoiding $O(N^2)$ cliques |
-| **Stage 6** | `label_propagation` | **58.8s** | ~108s | 110.0s | 1,544,042 | Iterative connected components until full cluster convergence |
-| **Stage 7** | `output_generation` | **66.7s** | ~85s | 90.0s | 1,544,042 | Wide consolidated golden profiles with survivorship across 15 source feeds, plus crosswalk |
-| **Total** | **Full Pipeline Run** | **170s (2.8 min)** | **296s (4.9 min)** | **306s (5.1 min)** | — | Complete end-to-end warehouse-native execution |
+    | Stage # | Pipeline Stage | Snowflake | Databricks | BigQuery | Rows (Snowflake / BigQuery) | Description |
+    | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+    | **Stage 1** | `preflight` | **6.7s** | ~24s | 26.0s | 0 | Metadata schema validation, column DDL checks, and run state initialization |
+    | **Stage 2** | `entity_extraction` | **5.3s** | ~6s | 5.0s | 6,297,049 | Scans 15 tables, generates composite entity keys, and stages into `idr_work.entities_delta` |
+    | **Stage 3** | `identifier_extraction` | **20.2s** | ~52s | 54.0s | 5,710,608 | Normalizes identifiers and applies poison-pill / suppression filters |
+    | **Stage 4** | `attribute_extraction` | **0.4s** | ~1s | 1.0s | 0 | Extracts attributes for blocking rules (bypassed when no fuzzy blocking rules are active) |
+    | **Stage 5** | `edge_building` | **11.1s** | ~14s | 12.0s | 5,381,635 | Anchor-based star graph reduction ($N-1$ edges per group) avoiding $O(N^2)$ cliques |
+    | **Stage 6** | `label_propagation` | **58.8s** | ~108s | 110.0s | 1,544,042 | Iterative connected components until full cluster convergence |
+    | **Stage 7** | `output_generation` | **66.7s** | ~85s | 90.0s | 1,544,042 | Wide consolidated golden profiles with survivorship across 15 source feeds, plus crosswalk |
+    | **Total** | **Full Pipeline Run** | **170s (2.8 min)** | **296s (4.9 min)** | **306s (5.1 min)** | — | Complete end-to-end warehouse-native execution |
+
+=== "Visual Chart"
+
+    ```mermaid
+    xychart-beta
+        title "Stage Duration Comparison (Seconds — Lower is Better)"
+        x-axis ["Preflight", "Entities", "Identifiers", "Edges", "Label Prop", "Output"]
+        y-axis "Duration (seconds)" 0 --> 120
+        bar [6.7, 5.3, 20.2, 11.1, 58.8, 66.7]
+        bar [24, 6, 52, 14, 108, 85]
+        bar [26, 5, 54, 12, 110, 90]
+    ```
+
+    *(Series order: **Snowflake** · **Databricks** · **BigQuery**)*
 
 
 
