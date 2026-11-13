@@ -10,6 +10,13 @@ title: Configuration, Canonicalizers & Governance
 
 ## 1. Complete YAML Manifest Reference
 
+!!! warning "Prerequisite: Unique, Non-Null `entity_key` per Row"
+    Every registered source table **must** expose a unique, non-null `entity_key` expression per row. Graph node identity (`<table_id>:<entity_key>`), incremental watermarks (`INCR`), persistent `resolved_id` tracking, and warehouse `MERGE` operations (`identity_identifiers_current`, `identity_edges_current`) all assume one unique key per source row.
+
+    - **No single primary key column?** Pass a deterministic SQL expression, e.g. `entity_key: "CONCAT(tenant_id, '_', row_id)"` or `SHA2(CONCAT_WS('|', col_a, col_b), 256)`.
+    - **Event / transaction logs** (e.g. `orders`, `web_events` where `customer_id` repeats): Use the row's own unique key (`order_id`, `event_id`) as `entity_key` and map `customer_id` under `identifiers:`.
+    - **Tables with duplicate keys** (e.g. raw CDC staging tables): Point `table:` at a deduplicated view (`QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`).
+
 ```yaml
 # Enable built-in poison-pill identifier exclusions (noreply@, test@, 0000000000, etc.)
 use_default_exclusions: true

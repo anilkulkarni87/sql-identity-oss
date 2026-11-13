@@ -88,6 +88,11 @@ idr privacy forget --platform <platform> --identifier <val> [--dry-run]
 
 ## Config Modeling Reference (`idr_config.yaml` / `.json`)
 
+> **Prerequisite (`entity_key`)**: Every source table **must** have a unique, non-null `entity_key` expression per row (`<table_id>:<entity_key>`). Duplicate keys can fail warehouse `MERGE` steps, and `NULL` keys collapse or fail.
+> - **Composite key**: Use a SQL expression, e.g. `entity_key: "CONCAT(tenant_id, '_', id)"`.
+> - **Event/log tables**: Use the row's unique key (`order_id`, `event_id`) as `entity_key` and map `customer_id` under `identifiers:`.
+> - **Dirty duplicates**: Point `table:` at a deduplicated view (`QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`).
+
 ```yaml
 sources:
   - id: customers                    # Unique logical source ID
