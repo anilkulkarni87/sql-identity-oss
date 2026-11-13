@@ -70,7 +70,79 @@ idr run --db my_warehouse.duckdb --config idr_config.yaml --mode FULL
 # Export YAML or live warehouse metadata to dbt_idr seed CSVs:
 idr dbt export --file idr_config.yaml --output-dir dbt_idr/seeds
 
-# Start FastMCP server over stdio:
+# Start FastMCP server over stdio or Streamable HTTP:
 idr-mcp
+IDR_MCP_TRANSPORT=streamable-http idr-mcp
+
+# Headless CLI lifecycle:
+idr init --platform <duckdb|snowflake|bigquery|databricks>
+idr doctor --platform <platform>
+idr bootstrap --platform <platform> --schema <schema> --output idr_config.yaml [--apply]
+idr apply-config --platform <platform> --config idr_config.yaml
+idr run --platform <platform> --mode <FULL|INCR> [--dry-run] [--strict]
+idr evaluate --platform <platform>
+idr privacy forget --platform <platform> --identifier <val> [--dry-run]
 ```
+
+---
+
+## Config Modeling Reference (`idr_config.yaml` / `.json`)
+
+```yaml
+sources:
+  - id: customers                    # Unique logical source ID
+    table: db.schema.customers       # FQN (db.schema.table for Snowflake, project.dataset.table for BQ, schema.table for Databricks/DuckDB)
+    entity_type: PERSON
+    entity_key: customer_id          # Primary row key expression
+    watermark: updated_at            # Optional incremental timestamp column
+    watermark_lookback: 60           # Optional lookback minutes
+    identifiers:
+      - type: email
+        expr: email
+      - type: phone
+        expr: phone_number
+    attributes:
+      - name: first_name
+        expr: first_name
+
+use_default_exclusions: true
+
+rules:
+  - id: "104"
+    type: EXACT
+    match_keys: [email]
+    priority: 1
+    canonicalize: EMAIL_STANDARD     # EMAIL_STANDARD | EMAIL_STRIP_PLUS | PHONE_DIGITS | PHONE_US_10 | LOWERCASE | UPPERCASE | ALPHANUMERIC_UPPER | custom {val} SQL
+    max_group_size: 50               # Optional supernode circuit breaker
+
+survivorship:
+  - attribute: first_name
+    strategy: RECENCY                # RECENCY | PRIORITY | FREQUENCY | LONGEST
+    source_priority: [customers]
+
+exclusions:                          # Optional custom poison-pill exclusions
+  - identifier_type: email           # email | phone | ANY
+    pattern: "%@example.com"
+    match_type: LIKE                 # EXACT | LIKE
+    reason: "Synthetic test domain"
+
+overrides:                           # Optional manual stewardship overrides
+  - type: DO_NOT_LINK                # FORCE_LINK | DO_NOT_LINK | ISOLATE
+    entity_key_a: "crm:101"
+    entity_key_b: "crm:102"          # Required for FORCE_LINK / DO_NOT_LINK; omit for ISOLATE
+    reason: "Shared household phone"
+```
+
+### Agentic Safety & Triage Tools (MCP)
+- **Remote MCP**: FastAPI mounts Streamable HTTP at `POST /mcp` (shared OAuth/SSO & `ConnectionManager`).
+- **Two-Step Guardrails**: `forget_customer_identity` defaults to `dry_run=True` and issues a 5-minute `confirmation_token` + `blast_radius_summary` required for `dry_run=False`. `manage_identity_override` also supports `dry_run=True` preview tokens.
+- **Triage Loop**: `get_triage_queue(max_confidence=0.45)` + `submit_evaluation_label(sample_id, label, rationale)`.
+- **Bounded Payloads**: `get_cluster` and `explain_cluster` cap members/edges (`max_entities`, `max_edges`) and return `truncated: true` when exceeded.
+- **Resources & Prompts**: `idr://spec/config-schema`, `idr://spec/cli-commands`, `idr://spec/canonicalizers`, and prompt `model_config_from_tables`.
+
+### Warehouse Env Vars
+- **DuckDB**: `IDR_PLATFORM=duckdb`, `IDR_DATABASE=demo.duckdb`
+- **Snowflake**: `IDR_PLATFORM=snowflake`, `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`
+- **BigQuery**: `IDR_PLATFORM=bigquery`, `IDR_PROJECT`
+- **Databricks**: `IDR_PLATFORM=databricks`, `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_HTTP_PATH`, `DATABRICKS_CATALOG`
 

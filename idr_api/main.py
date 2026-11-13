@@ -36,7 +36,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 # Add parent directory to path for idr_core imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from idr_api.dependencies import get_manager
 from idr_api.routers import connection, dashboard, explorer, runs, schema, setup
@@ -86,17 +86,11 @@ def _route_path_template(scope: dict, raw_path: str) -> str:
     return template or raw_path
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Auto-connect to DuckDB via env vars or local demo DB."""
-    from idr_core.logger_utils import configure_logging
-
-    configure_logging()
-
+def _auto_connect_on_startup() -> None:
+    """Auto-connect to DuckDB or Databricks SQL Warehouse from environment variables."""
     _manager = get_manager()
 
     env_db_path = os.getenv("IDR_DATABASE") or os.getenv("IDR_DB_PATH")
-
     if env_db_path:
         try:
             import duckdb
@@ -108,7 +102,6 @@ async def lifespan(app: FastAPI):
                 DuckDBAdapter(conn), {"platform": "duckdb", "db_path": env_db_path}
             )
             print(f"✓ Auto-connected to DuckDB via env: {env_db_path}")
-            yield
             return
         except Exception as e:
             print(f"Failed to auto-connect to {env_db_path}: {e}")
@@ -139,7 +132,6 @@ async def lifespan(app: FastAPI):
                 },
             )
             print(f"✓ Auto-connected to Databricks SQL Warehouse: {warehouse_id}")
-            yield
             return
         except Exception as e:
             print(f"Failed to auto-connect to Databricks SQL Warehouse {warehouse_id}: {e}")
@@ -169,7 +161,24 @@ async def lifespan(app: FastAPI):
     else:
         print("⚠ No DuckDB database found. Call POST /api/connect to connect.")
 
-    yield
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize logging, auto-connect warehouse, and run FastMCP session manager."""
+    from idr_core.logger_utils import configure_logging
+
+    configure_logging()
+    _auto_connect_on_startup()
+
+    async with AsyncExitStack() as stack:
+        try:
+            from idr_mcp.server import get_mcp_http_app, mcp as idr_fastmcp
+
+            if get_mcp_http_app() is not None and hasattr(idr_fastmcp, "session_manager"):
+                await stack.enter_async_context(idr_fastmcp.session_manager.run())
+        except Exception as e:
+            print(f"WARNING: MCP session_manager not started: {e}")
+        yield
 
 
 app = FastAPI(
@@ -214,6 +223,16 @@ app.include_router(dashboard.router)
 app.include_router(explorer.router)
 app.include_router(runs.router)
 app.include_router(schema.router)
+
+# Mount Remote MCP (Streamable HTTP) before SPA catch-all
+try:
+    from idr_mcp.server import get_mcp_http_app
+
+    _mcp_http_app = get_mcp_http_app()
+    if _mcp_http_app is not None:
+        app.mount("/mcp", _mcp_http_app)
+except Exception as e:
+    print(f"WARNING: Failed to mount /mcp Streamable HTTP endpoint: {e}")
 
 
 @app.get("/api/health")

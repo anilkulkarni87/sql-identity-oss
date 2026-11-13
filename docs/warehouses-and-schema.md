@@ -189,11 +189,6 @@ docker compose -f docker-compose.enterprise.yml up -d --build
 - **Prometheus Metrics**: Scrapes `http://api:8000/metrics` via `monitoring/prometheus/prometheus.yml`.
 - **Grafana Dashboard**: Pre-provisioned 6-panel dashboard (`monitoring/grafana/dashboards/idr_dashboard.json`) tracking entities processed, edges created, clusters impacted, and last run duration.
 
-### Scale Testing & Benchmarking Tools (`tools/scale_test/`)
-- **End-to-End Benchmark**: `python tools/scale_test/run_scale_and_mcp_benchmark.py --rows 250000 --incr-rows 10000` (runs resolution, verifies 4 mathematical graph invariants, and benchmarks all MCP server tools).
-- **Synthetic Omni-Channel Retail Generator**: `python tools/scale_test/generate_retail_idr_mimesis.py --config tools/scale_test/configs/retail_idr_5k.yaml` (generates Parquet files across CRM, POS, E-commerce, web events, app events, and support tickets).
-- **Cloud Loaders**: Fast Parquet loaders for DuckDB (`load_duckdb.py`), BigQuery (`load_bigquery.py`), Snowflake (`load_snowflake.py`), and Databricks (`load_databricks.py`).
-
 ---
 
 ## 5. Production Benchmarks & Real-World Runtimes

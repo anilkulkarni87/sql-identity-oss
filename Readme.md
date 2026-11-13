@@ -10,7 +10,7 @@
 [![Databricks](https://img.shields.io/badge/Databricks-✓-FF3621?logo=databricks&logoColor=white)](https://databricks.com/)
 [![DuckDB](https://img.shields.io/badge/DuckDB-✓-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org/)
 
-**Production-grade deterministic identity resolution** for modern data warehouses. Unify customer identities across CRM, transactions, web events, and loyalty data—**no ML required**.
+**Headless, warehouse-native deterministic identity resolution** for modern data warehouses. Unify customer identities across CRM, transactions, web events, and loyalty data via CLI, Python, dbt, FastAPI, or Remote MCP (`/mcp`)—with an optional Explorer UI. **Zero data movement. No ML required.**
 
 ## ⚡ 60-Second Demo
 
@@ -37,9 +37,10 @@ That's it! The engine will:
 
 ## ✨ Key Features
 
-- **Unified Core Package** - Same logic everywhere via `idr_core`
-- **🤖 MCP Server** - Native integration with Claude Desktop & Cursor for AI agents
-- **🖥️ Web UI** - Visualization dashboard and setup wizard
+- **Unified Core Package** - Headless-first execution via `idr_core`, CLI, Python, and `dbt_idr`
+- **🤖 Agent-Native MCP Server** - 23 tools + `/mcp` Streamable HTTP, two-step confirmation guardrails, triage loop, `SKILL.md` & `llms.txt`
+- **🖥️ Optional Explorer UI** - Visualization dashboard, setup wizard, and one-click GDPR Forget
+- **🪝 Event Webhooks** - Non-blocking `run.completed`, `guardrail.skipped_groups_spike`, and `privacy.erasure_completed` hooks
 - **🎯 Confidence Scoring** - Cluster quality metrics (0-1)
 - **🔒 Dry Run Mode** - Preview changes before committing
 - **🛡️ Data Quality Controls** - strict mode, max_group_size, exclusion lists
@@ -154,14 +155,11 @@ Pre-built configurations for common use cases:
   - Detailed stage-by-stage breakdown in [Supported Warehouses & Production Benchmarks](docs/warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes).
 
 ```bash
-# 1. Run the full unit & multi-dialect test suite (265+ tests)
+# 1. Run the full unit & multi-dialect test suite
 pytest
 
 # 2. Run opt-in live cloud integration tests (when cloud credentials are set)
 pytest tests/test_cloud_dialects_live.py -v
-
-# 3. Run the 260,000-entity scale & MCP benchmark
-python tools/scale_test/run_scale_and_mcp_benchmark.py --rows 250000 --incr-rows 10000
 ```
 
 See [Concepts & Architecture](docs/concepts-and-architecture.md) for detailed pipeline stage and schema design.

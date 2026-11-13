@@ -187,17 +187,28 @@ Expose your identity graph and configuration tools to **Antigravity**, **Codex**
 !!! tip "Virtual Environments"
     If `idr` is installed inside a virtual environment (e.g. `.venv`), set `"command"` to `/path/to/venv/bin/python` and `"args"` to `["-m", "idr_mcp.server"]`.
 
-### Exposed MCP Tools (17 Agentic Tools)
+### Remote MCP Transport (`streamable-http`) & Agent Self-Discovery
+- **Remote HTTP Endpoint**: FastAPI mounts FastMCP at `POST /mcp` (`streamable-http`), sharing the active warehouse `ConnectionManager` and OAuth/workspace SSO—no local `stdio` wrapper required for remote agents.
+- **Standalone HTTP**: Run `IDR_MCP_TRANSPORT=streamable-http idr-mcp` to expose Streamable HTTP directly.
+- **Self-Documenting Specs**: Exposes MCP Resources (`idr://spec/config-schema`, `idr://spec/cli-commands`, `idr://spec/canonicalizers`), the `model_config_from_tables` prompt, [`llms.txt`](llms.txt), and [`skills/sql-identity-resolution/SKILL.md`](https://github.com/anilkulkarni87/sql-identity-oss/blob/main/skills/sql-identity-resolution/SKILL.md).
+
+### Exposed MCP Tools (23 Agentic Tools)
 - `resolve_customer_360(identifier_type, identifier_value)` — Single-call Customer 360 context grounding (canonical identity, golden profile, all linked accounts & identifiers).
 - `discover_and_suggest_rules()` — Autonomous table profiling, PII detection, and suggested IDR YAML configuration.
 - `simulate_rule_impact(...)` — Non-destructive dry-run simulation of candidate matching rules with supernode risk alerting.
-- `explain_cluster(resolved_id)` — Complete cluster explanation (confidence reason, members, edges, and golden profile).
+- `get_triage_queue(max_confidence=0.45, limit=20)` & `submit_evaluation_label(sample_id, label, rationale)` — Closed-loop LLM-as-a-judge quality triage over low-confidence clusters and `idr_out.evaluation_sample`.
+- `explain_cluster(resolved_id, max_entities=50, max_edges=50)` & `get_cluster(...)` — Bounded, context-window-safe cluster inspection with `total_entities`, `total_edges`, `distinct_identifier_types`, and `truncated` metadata.
+- `forget_customer_identity(...)` & `manage_identity_override(...)` — Two-step **preview-then-confirm** guardrails (`dry_run=True` returns a 5-minute `confirmation_token` + `blast_radius_summary` required for destructive execution).
 - `explain_edge(entity_a, entity_b)` — View evidence for why two records matched (direct or transitive).
-- `search_identifier(identifier_type, value)` — Find clusters by email, phone, loyalty ID, etc.
-- `get_cluster(resolved_id)` & `get_golden_profile(resolved_id)` — Fetch cluster details and surviving attributes.
-- `list_skipped_groups()` — Inspect oversized identifier groups flagged by `max_group_size`.
-- `get_metrics_summary()` & `get_system_status()` — High-level identity graph KPIs and warehouse lifecycle status.
-- `dry_run_pipeline()` & `run_history()` — Trigger dry runs and inspect stage execution telemetry.
+- `search_identifier(identifier_type, value)` & `get_golden_profile(resolved_id)` — Find clusters and fetch surviving attributes.
+- `list_skipped_groups()`, `get_metrics_summary()`, `get_system_status()`, `dry_run_pipeline()`, & `run_history()` — Guardrail inspection, lifecycle state, and execution telemetry.
+
+### Event Webhooks for Autonomous Ops (Headless)
+Set `IDR_WEBHOOK_URL` (and optional `IDR_WEBHOOK_SECRET` for `X-IDR-Signature: sha256=...` HMAC verification) to receive non-blocking JSON events on:
+- `run.completed` / `run.failed`
+- `guardrail.skipped_groups_spike` (configurable via `IDR_WEBHOOK_SKIPPED_THRESHOLD`, default `5`)
+- `crosswalk.cluster_changes`
+- `privacy.erasure_completed` (zero-PII receipt)
 
 ### PII Safety Controls
 By default, all sensitive PII (emails, phone numbers, exact match values) is masked in tool outputs (`jo***hn@example.com`). To grant the agent full unmasked values, explicitly pass `"IDR_PII_ACCESS": "full"` in the server `"env"`.

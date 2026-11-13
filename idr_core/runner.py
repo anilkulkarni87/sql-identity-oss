@@ -14,6 +14,7 @@ Pipeline stages are implemented in idr_core.stages:
 
 import hashlib
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -547,6 +548,61 @@ class IDRRunner:
                 "error": error,
             }
         )
+
+        if not config.dry_run and os.environ.get("IDR_WEBHOOK_URL", "").strip():
+            from idr_core.webhooks import emit_webhook_event
+
+            event_name = "run.completed" if status == "SUCCESS" else "run.failed"
+            emit_webhook_event(
+                event_name,
+                {
+                    "run_id": self.run_id,
+                    "run_mode": config.run_mode,
+                    "status": status,
+                    "duration_seconds": round(duration, 2),
+                    "entities_processed": entities,
+                    "edges_created": edges,
+                    "clusters_impacted": clusters,
+                    "lp_iterations": iterations,
+                    "error": error,
+                },
+            )
+            if status == "SUCCESS":
+                try:
+                    if self.adapter.table_exists("idr_out.skipped_identifier_groups"):
+                        skipped = (
+                            self.adapter.query_one(
+                                f"SELECT COUNT(*) FROM idr_out.skipped_identifier_groups WHERE run_id = '{self.run_id}'"
+                            )
+                            or 0
+                        )
+                        threshold = int(os.environ.get("IDR_WEBHOOK_SKIPPED_THRESHOLD", "5"))
+                        if skipped >= threshold > 0:
+                            emit_webhook_event(
+                                "guardrail.skipped_groups_spike",
+                                {
+                                    "run_id": self.run_id,
+                                    "skipped_groups": int(skipped),
+                                    "threshold": threshold,
+                                },
+                            )
+                    if self.adapter.table_exists("idr_out.resolved_id_crosswalk"):
+                        cw_changes = (
+                            self.adapter.query_one(
+                                f"SELECT COUNT(*) FROM idr_out.resolved_id_crosswalk WHERE run_id = '{self.run_id}'"
+                            )
+                            or 0
+                        )
+                        if cw_changes > 0:
+                            emit_webhook_event(
+                                "crosswalk.cluster_changes",
+                                {
+                                    "run_id": self.run_id,
+                                    "changes_count": int(cw_changes),
+                                },
+                            )
+                except Exception:
+                    pass
 
         return RunResult(
             run_id=self.run_id,

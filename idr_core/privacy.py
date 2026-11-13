@@ -330,6 +330,22 @@ class PrivacyManager:
                 )
             """)
 
+        if not dry_run and status == "SUCCESS":
+            from idr_core.webhooks import emit_webhook_event
+
+            emit_webhook_event(
+                "privacy.erasure_completed",
+                {
+                    "request_id": request_id,
+                    "search_type": search_type,
+                    "entities_purged": int(entities_purged),
+                    "edges_purged": int(edges_purged),
+                    "profiles_purged": int(profiles_purged),
+                    "suppressed_entities": suppressed_count,
+                    "tables_cleaned": tables_cleaned,
+                },
+            )
+
         return {
             "request_id": request_id,
             "status": status,

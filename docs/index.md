@@ -8,7 +8,7 @@ hide:
 <div class="idr-hero" markdown>
 
 <div class="idr-hero-badge">
-  <span>⚡ Open-Source Warehouse-Native Identity Engine · v0.6.1</span>
+  <span>⚡ Headless, Warehouse-Native Identity Engine · v0.6.1</span>
 </div>
 
 <h1 class="idr-hero-title">
@@ -16,7 +16,7 @@ hide:
 </h1>
 
 <p class="idr-hero-subtitle">
-  Production-grade deterministic graph resolution, blocking-based fuzzy super-clustering, golden profile survivorship, persistent cluster IDs, and GDPR erasure across <strong>DuckDB</strong>, <strong>Snowflake</strong>, <strong>BigQuery</strong>, and <strong>Databricks</strong>. Zero data movement. 100% SQL-auditable.
+  Headless-first deterministic graph resolution, blocking-based fuzzy super-clustering, golden profile survivorship, persistent cluster IDs, and GDPR erasure across <strong>DuckDB</strong>, <strong>Snowflake</strong>, <strong>BigQuery</strong>, and <strong>Databricks</strong>. Run via CLI, Python, dbt, FastAPI, or Remote MCP—with an optional Explorer UI. Zero data movement. 100% SQL-auditable.
 </p>
 
 <div class="idr-hero-cta">
@@ -30,8 +30,9 @@ hide:
   <span class="idr-pill">🧱 Databricks</span>
   <span class="idr-pill">☁️ BigQuery</span>
   <span class="idr-pill">🦆 DuckDB</span>
-  <span class="idr-pill">🤖 17 MCP Agent Tools</span>
+  <span class="idr-pill">🤖 23 MCP Tools + /mcp</span>
   <span class="idr-pill">📦 dbt Package</span>
+  <span class="idr-pill">🪝 Webhooks</span>
 </div>
 
 </div>

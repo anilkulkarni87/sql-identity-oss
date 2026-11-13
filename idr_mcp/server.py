@@ -1,6 +1,8 @@
 import os
+import secrets
 import sys
-from typing import Any, Dict
+import time
+from typing import Any, Dict, Optional
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -18,7 +20,19 @@ except ImportError:
 
             return _decorator
 
-        def run(self):
+        def resource(self, _uri: str):
+            def _decorator(fn):
+                return fn
+
+            return _decorator
+
+        def prompt(self):
+            def _decorator(fn):
+                return fn
+
+            return _decorator
+
+        def run(self, **_kwargs):
             raise RuntimeError("The 'mcp' package is required to run the MCP server.")
 
 from idr_core.connection_manager import ConnectionManager, ConnectionState
@@ -26,14 +40,67 @@ from idr_core.connection_manager import ConnectionManager, ConnectionState
 # Initialize FastMCP Server
 mcp = FastMCP("idr-mcp")
 
+# Short-lived confirmation tokens for two-step destructive tool guardrails
+_CONFIRMATION_TOKENS: Dict[str, Dict[str, Any]] = {}
+_CONFIRMATION_TTL_SECONDS = 300
+
+
+def get_mcp_http_app():
+    """Return FastMCP's Streamable HTTP ASGI app when ``mcp`` is installed, else None."""
+    if hasattr(mcp, "streamable_http_app"):
+        return mcp.streamable_http_app()
+    return None
+
+
+def _issue_confirmation_token(action_key: str, summary: Dict[str, Any]) -> str:
+    """Issue a short-lived single-use confirmation token bound to ``action_key``."""
+    now = time.time()
+    # Prune expired tokens lazily
+    expired = [tok for tok, meta in _CONFIRMATION_TOKENS.items() if meta["expires_at"] < now]
+    for tok in expired:
+        _CONFIRMATION_TOKENS.pop(tok, None)
+
+    token = f"idr_conf_{secrets.token_urlsafe(16)}"
+    _CONFIRMATION_TOKENS[token] = {
+        "action_key": action_key,
+        "summary": summary,
+        "expires_at": now + _CONFIRMATION_TTL_SECONDS,
+    }
+    return token
+
+
+def _consume_confirmation_token(token: Optional[str], expected_action_key: str) -> Optional[str]:
+    """Validate and consume a confirmation token. Returns error message or None if valid."""
+    if not token:
+        return "Missing confirmation_token. Run with dry_run=True first to preview blast radius and obtain a confirmation_token."
+    meta = _CONFIRMATION_TOKENS.get(token)
+    if not meta:
+        return "Invalid or already-used confirmation_token. Run with dry_run=True to generate a fresh token."
+    if time.time() > meta["expires_at"]:
+        _CONFIRMATION_TOKENS.pop(token, None)
+        return "confirmation_token expired. Run with dry_run=True to generate a fresh token."
+    if meta["action_key"] != expected_action_key:
+        return "confirmation_token does not match the target parameters of this call."
+    _CONFIRMATION_TOKENS.pop(token, None)
+    return None
+
+
 # --- Helpers ---
 
 
 def get_adapter():
-    """Get the active database adapter from IDR Core, auto-recovering if possible."""
+    """Get the active database adapter from IDR Core or FastAPI IDRManager, auto-recovering if possible."""
     manager = ConnectionManager.instance()
     adapter = manager.get_adapter()
     if not adapter:
+        try:
+            from idr_api.dependencies import get_manager
+
+            api_adapter = get_manager().get_any_adapter()
+            if api_adapter is not None:
+                return api_adapter
+        except Exception:
+            pass
         connect_from_env()
         adapter = manager.get_adapter()
 
@@ -120,10 +187,15 @@ def get_system_status() -> Dict[str, Any]:
 
 @mcp.tool()
 def get_cluster(
-    resolved_id: str, include_edges: bool = False, include_entities: bool = False
+    resolved_id: str,
+    include_edges: bool = False,
+    include_entities: bool = False,
+    max_entities: int = 50,
+    max_edges: int = 50,
 ) -> Dict[str, Any]:
     """
-    Get details for a resolved identity cluster.
+    Get details for a resolved identity cluster with context-window-safe bounds.
+    Returns summary counts and ``truncated: true`` when members or edges exceed limits.
     """
     adapter = get_adapter()
 
@@ -141,27 +213,56 @@ def get_cluster(
     result = clusters[0]
     result["pii_access_level"] = "masked" if should_mask_pii() else "full"
 
+    ent_limit = max(1, min(int(max_entities), 500))
+    edge_limit = max(1, min(int(max_edges), 500))
+    truncated = False
+
     if include_entities:
-        # Membership table contains only system keys (entity_key, resolved_id) and timestamps.
-        # These are not considered PII, so no masking is applied here.
-        sql_ent = "SELECT * FROM idr_out.identity_resolved_membership_current WHERE resolved_id = ?"
+        total_ent = adapter.query_one(
+            "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current WHERE resolved_id = ?",
+            params=[resolved_id],
+        ) or 0
+        sql_ent = (
+            "SELECT * FROM idr_out.identity_resolved_membership_current "
+            f"WHERE resolved_id = ? LIMIT {ent_limit}"
+        )
         entities = adapter.query(sql_ent, params=[resolved_id])
         result["entities"] = entities
+        result["total_entities"] = int(total_ent)
+        if int(total_ent) > len(entities):
+            truncated = True
 
     if include_edges:
-        sql_edges = """
+        total_edges = adapter.query_one(
+            """
+            SELECT COUNT(*) FROM idr_out.identity_edges_current
+            WHERE left_entity_key IN (SELECT entity_key FROM idr_out.identity_resolved_membership_current WHERE resolved_id = ?)
+               OR right_entity_key IN (SELECT entity_key FROM idr_out.identity_resolved_membership_current WHERE resolved_id = ?)
+            """,
+            params=[resolved_id, resolved_id],
+        ) or 0
+        sql_edges = f"""
             SELECT * FROM idr_out.identity_edges_current
             WHERE left_entity_key IN (SELECT entity_key FROM idr_out.identity_resolved_membership_current WHERE resolved_id = ?)
                OR right_entity_key IN (SELECT entity_key FROM idr_out.identity_resolved_membership_current WHERE resolved_id = ?)
+            LIMIT {edge_limit}
         """
         # Mask identifier_value_norm in edges if needed
         edges = adapter.query(sql_edges, params=[resolved_id, resolved_id])
+        distinct_types = sorted(
+            {str(e.get("identifier_type")) for e in edges if e.get("identifier_type")}
+        )
         if should_mask_pii():
             for e in edges:
                 if "identifier_value_norm" in e:
                     e["identifier_value_norm"] = mask_value(e["identifier_value_norm"])
         result["edges"] = edges
+        result["total_edges"] = int(total_edges)
+        result["distinct_identifier_types"] = distinct_types
+        if int(total_edges) > len(edges):
+            truncated = True
 
+    result["truncated"] = truncated
     return result
 
 
@@ -477,11 +578,15 @@ def get_metrics_summary() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def explain_cluster(resolved_id: str) -> Dict[str, Any]:
+def explain_cluster(
+    resolved_id: str,
+    max_entities: int = 50,
+    max_edges: int = 50,
+) -> Dict[str, Any]:
     """
-    Generate a comprehensive explanation for a resolved cluster:
+    Generate a context-window-safe explanation for a resolved cluster:
     cluster metadata (size, confidence_score, primary_reason, super_cluster_id),
-    member entities, connecting edges with rules, and the unified Golden Profile.
+    bounded member entities & edges with truncation metadata, and Golden Profile.
     """
     adapter = get_adapter()
     try:
@@ -489,13 +594,25 @@ def explain_cluster(resolved_id: str) -> Dict[str, Any]:
             "SELECT * FROM idr_out.identity_clusters_current WHERE resolved_id = ?",
             params=[resolved_id],
         )
-        cluster_data = get_cluster(resolved_id, include_edges=True, include_entities=True)
+        cluster_data = get_cluster(
+            resolved_id,
+            include_edges=True,
+            include_entities=True,
+            max_entities=max_entities,
+            max_edges=max_edges,
+        )
         profile_data = get_golden_profile(resolved_id)
         return {
             "resolved_id": resolved_id,
             "cluster_metadata": meta_rows[0] if meta_rows else None,
             "members": cluster_data.get("entities", []),
             "edges": cluster_data.get("edges", []),
+            "summary": {
+                "total_entities": cluster_data.get("total_entities", len(cluster_data.get("entities", []))),
+                "total_edges": cluster_data.get("total_edges", len(cluster_data.get("edges", []))),
+                "distinct_identifier_types": cluster_data.get("distinct_identifier_types", []),
+                "truncated": bool(cluster_data.get("truncated", False)),
+            },
             "golden_profile": profile_data.get("attributes"),
             "pii_access_level": "masked" if should_mask_pii() else "full",
         }
@@ -869,20 +986,29 @@ def forget_customer_identity(
     identifier_value: str = None,
     entity_key: str = None,
     resolved_id: str = None,
-    dry_run: bool = False,
+    dry_run: bool = True,
+    confirmation_token: str = None,
     reason: str = "GDPR_CCPA_RTBF",
 ) -> Dict[str, Any]:
     """
-    Execute or preview a GDPR / CCPA Right-to-be-Forgotten (RTBF) cascading purge
-    across all IDR output and staging tables, writing a zero-PII SHA-256 receipt
-    to idr_meta.privacy_audit_log.
+    Preview or execute a GDPR / CCPA Right-to-be-Forgotten (RTBF) cascading purge.
+
+    Safety guardrail: defaults to ``dry_run=True``, returning a blast-radius summary
+    and a short-lived ``confirmation_token``. Pass ``dry_run=False`` together with that
+    ``confirmation_token`` to execute the purge.
     """
     try:
         adapter = get_adapter()
         from idr_core.privacy import PrivacyManager
 
+        action_key = f"forget:{identifier_value or ''}:{entity_key or ''}:{resolved_id or ''}"
+        if not dry_run:
+            err = _consume_confirmation_token(confirmation_token, action_key)
+            if err:
+                return {"status": "CONFIRMATION_REQUIRED", "error": err}
+
         pm = PrivacyManager(adapter)
-        return pm.forget(
+        res = pm.forget(
             identifier_value=identifier_value,
             entity_key=entity_key,
             resolved_id=resolved_id,
@@ -890,6 +1016,20 @@ def forget_customer_identity(
             requested_by="mcp_agent",
             reason=reason,
         )
+        if dry_run:
+            summary = {
+                "entities_purged": res.get("entities_purged", 0),
+                "edges_purged": res.get("edges_purged", 0),
+                "profiles_purged": res.get("profiles_purged", 0),
+            }
+            res["confirmation_token"] = _issue_confirmation_token(action_key, summary)
+            res["confirmation_expires_in_seconds"] = _CONFIRMATION_TTL_SECONDS
+            res["blast_radius_summary"] = (
+                f"{summary['entities_purged']} entities, "
+                f"{summary['edges_purged']} edges, "
+                f"{summary['profiles_purged']} profiles"
+            )
+        return res
     except Exception as e:
         return {"status": "ERROR", "error": f"Failed to execute RTBF forget: {str(e)}"}
 
@@ -901,11 +1041,14 @@ def manage_identity_override(
     entity_key_a: str = None,
     entity_key_b: str = None,
     reason: str = "Manual stewardship override",
+    dry_run: bool = False,
+    confirmation_token: str = None,
 ) -> Dict[str, Any]:
     """
     Manage manual stewardship overrides in idr_meta.identity_override.
     Actions: 'list', 'add', 'remove'.
     Override types: 'FORCE_LINK', 'DO_NOT_LINK', 'ISOLATE'.
+    Supports ``dry_run=True`` to preview impact and issue a ``confirmation_token``.
     """
     try:
         adapter = get_adapter()
@@ -926,6 +1069,26 @@ def manage_identity_override(
         ek_a = entity_key_a.strip().replace("'", "''")
         ek_b = (entity_key_b.strip() if entity_key_b else "__ISOLATE__").replace("'", "''")
         rsn = (reason or "").replace("'", "''")
+        action_key = f"override:{act}:{otype}:{ek_a}:{ek_b}"
+
+        if dry_run and act in ("add", "remove"):
+            summary = {"action": act, "override_type": otype, "entity_key_a": ek_a, "entity_key_b": ek_b}
+            tok = _issue_confirmation_token(action_key, summary)
+            return {
+                "status": "DRY_RUN",
+                "action": act,
+                "override_type": otype,
+                "entity_key_a": ek_a,
+                "entity_key_b": ek_b,
+                "confirmation_token": tok,
+                "confirmation_expires_in_seconds": _CONFIRMATION_TTL_SECONDS,
+            }
+
+        require_conf = os.environ.get("IDR_MCP_REQUIRE_CONFIRMATION", "").lower() in ("1", "true", "yes")
+        if act in ("add", "remove") and (confirmation_token is not None or require_conf):
+            err = _consume_confirmation_token(confirmation_token, action_key)
+            if err:
+                return {"status": "CONFIRMATION_REQUIRED", "error": err}
 
         if act == "remove":
             adapter.execute(f"""
@@ -956,6 +1119,195 @@ def manage_identity_override(
         return {"status": "ERROR", "error": f"Unknown action '{action}'. Use 'list', 'add', or 'remove'."}
     except Exception as e:
         return {"status": "ERROR", "error": f"Failed to manage override: {str(e)}"}
+
+
+@mcp.tool()
+def get_triage_queue(max_confidence: float = 0.45, limit: int = 20) -> Dict[str, Any]:
+    """
+    Return the highest-risk, lowest-confidence resolved clusters (and any unlabeled
+    evaluation pairs) for agent-driven quality triage and LLM-as-a-judge review.
+    """
+    adapter = get_adapter()
+    safe_limit = max(1, min(int(limit), 100))
+    threshold = float(max_confidence)
+    try:
+        clusters = []
+        if adapter.table_exists("idr_out.identity_clusters_current"):
+            clusters = adapter.query(
+                f"""
+                SELECT resolved_id, cluster_size, confidence_score, edge_diversity,
+                       max_fanout, primary_reason, updated_at
+                FROM idr_out.identity_clusters_current
+                WHERE confidence_score <= ?
+                ORDER BY confidence_score ASC, cluster_size DESC
+                LIMIT {safe_limit}
+                """,
+                params=[threshold],
+            )
+
+        samples = []
+        if adapter.table_exists("idr_out.evaluation_sample"):
+            samples = adapter.query(
+                f"""
+                SELECT sample_id, stratum, resolved_id_a, resolved_id_b,
+                       entity_key_a, entity_key_b, identifier_type, match_value,
+                       confidence_score, cluster_size, human_label
+                FROM idr_out.evaluation_sample
+                WHERE human_label IS NULL OR TRIM(CAST(human_label AS VARCHAR)) = ''
+                ORDER BY confidence_score ASC
+                LIMIT {safe_limit}
+                """
+            )
+            if should_mask_pii():
+                for row in samples:
+                    if row.get("match_value"):
+                        row["match_value"] = mask_value(row["match_value"])
+
+        return {
+            "status": "SUCCESS",
+            "max_confidence": threshold,
+            "low_confidence_clusters": clusters,
+            "pending_evaluation_samples": samples,
+            "pii_access_level": "masked" if should_mask_pii() else "full",
+        }
+    except Exception as e:
+        return {"status": "ERROR", "error": f"Failed to fetch triage queue: {str(e)}"}
+
+
+@mcp.tool()
+def submit_evaluation_label(
+    sample_id: str, label: str, rationale: str = ""
+) -> Dict[str, Any]:
+    """
+    Record an audit judgment ('MATCH', 'NON_MATCH', or 'UNCERTAIN') on a pair
+    in idr_out.evaluation_sample for closed-loop quality evaluation.
+    """
+    adapter = get_adapter()
+    norm_label = (label or "").strip().upper()
+    if norm_label not in ("MATCH", "NON_MATCH", "UNCERTAIN"):
+        return {
+            "status": "ERROR",
+            "error": f"Invalid label '{label}'. Must be MATCH, NON_MATCH, or UNCERTAIN.",
+        }
+    if not adapter.table_exists("idr_out.evaluation_sample"):
+        return {
+            "status": "ERROR",
+            "error": "idr_out.evaluation_sample does not exist. Run 'idr evaluate' first.",
+        }
+    try:
+        sid = sample_id.strip().replace("'", "''")
+        adapter.execute(
+            f"UPDATE idr_out.evaluation_sample SET human_label = '{norm_label}' WHERE sample_id = '{sid}'"
+        )
+        recommendation = None
+        if norm_label == "NON_MATCH":
+            recommendation = (
+                "Consider adding a DO_NOT_LINK / ISOLATE override via manage_identity_override "
+                "or excluding the shared identifier value."
+            )
+        return {
+            "status": "SUCCESS",
+            "sample_id": sample_id,
+            "label": norm_label,
+            "rationale": rationale,
+            "recommended_next_step": recommendation,
+        }
+    except Exception as e:
+        return {"status": "ERROR", "error": f"Failed to submit evaluation label: {str(e)}"}
+
+
+# --- MCP Resources & Prompts (Self-Documenting Specs for Agents) ---
+
+
+@mcp.resource("idr://spec/config-schema")
+def resource_config_schema() -> str:
+    """YAML/JSON configuration schema for sql-identity-oss."""
+    return """# sql-identity-oss Configuration Schema (YAML or JSON)
+sources:
+  - id: customers                    # Unique logical source ID
+    table: db.schema.customers       # Fully-qualified table name
+    entity_type: PERSON
+    entity_key: customer_id          # Primary row key expression
+    watermark: updated_at            # Optional incremental timestamp column
+    watermark_lookback: 60           # Optional lookback minutes
+    identifiers:
+      - type: email                  # Identifier type referenced by rules
+        expr: email                  # Column or SQL expression
+    attributes:
+      - name: first_name             # Output golden profile attribute
+        expr: first_name
+
+use_default_exclusions: true
+
+rules:
+  - id: "104"
+    type: EXACT
+    match_keys: [email]
+    priority: 1
+    canonicalize: EMAIL_STANDARD     # EMAIL_STANDARD | EMAIL_STRIP_PLUS | PHONE_DIGITS | PHONE_US_10 | LOWERCASE | UPPERCASE | ALPHANUMERIC_UPPER | custom {val} SQL
+    max_group_size: 50               # Optional circuit breaker
+
+fuzzy_rules: []
+
+survivorship:
+  - attribute: first_name
+    strategy: RECENCY                # RECENCY | PRIORITY | FREQUENCY | LONGEST
+    source_priority: [customers]
+
+exclusions:                          # Optional custom exclusions (EXACT | LIKE)
+  - identifier_type: email
+    pattern: "%@example.com"
+    match_type: LIKE
+    reason: "Test domain"
+
+overrides:                           # Optional stewardship overrides (FORCE_LINK | DO_NOT_LINK | ISOLATE)
+  - type: DO_NOT_LINK
+    entity_key_a: "crm:101"
+    entity_key_b: "crm:102"          # Omit entity_key_b for ISOLATE
+    reason: "Shared household phone"
+"""
+
+
+@mcp.resource("idr://spec/cli-commands")
+def resource_cli_commands() -> str:
+    """Headless CLI command reference for sql-identity-oss."""
+    return """idr init --platform <duckdb|snowflake|bigquery|databricks>
+idr doctor --platform <platform>
+idr bootstrap --platform <platform> --schema <schema> --output idr_config.yaml [--apply]
+idr apply-config --platform <platform> --config idr_config.yaml
+idr run --platform <platform> --mode <FULL|INCR> [--dry-run] [--strict]
+idr evaluate --platform <platform>
+idr privacy forget --platform <platform> --identifier <val> [--dry-run]
+idr ui --platform <platform>
+"""
+
+
+@mcp.resource("idr://spec/canonicalizers")
+def resource_canonicalizers() -> str:
+    """Built-in canonicalizers and custom {val} SQL template rules."""
+    return """Built-in canonicalizers:
+- EMAIL_STANDARD: trim + lowercase email normalization
+- EMAIL_STRIP_PLUS: strips +tag subaddressing before @ + lowercase
+- PHONE_DIGITS: keeps digits only
+- PHONE_US_10: digits only, strips leading US '1' to 10 digits
+- LOWERCASE / UPPERCASE / TRIM: basic string normalization
+- ALPHANUMERIC_UPPER: keeps [A-Z0-9] uppercase
+Custom SQL: pass any warehouse-native SQL expression with {val} placeholder.
+"""
+
+
+@mcp.prompt()
+def model_config_from_tables(schema: str = "") -> str:
+    """Step-by-step prompt guiding an agent to model an IDR config from existing warehouse tables."""
+    target = f" in schema '{schema}'" if schema else ""
+    return (
+        f"Help model a sql-identity-oss configuration from existing warehouse tables{target}.\n"
+        "1. Call get_system_status() to verify warehouse connectivity.\n"
+        f"2. Call discover_and_suggest_rules(schema={schema!r}) to profile columns, keys, watermarks, and PII.\n"
+        "3. Review suggested entity_key, watermark, identifiers, and attributes; drop pure lookup tables.\n"
+        "4. Call simulate_rule_impact(...) on key identifiers (email, phone, customer_id) to check max_group_size.\n"
+        "5. Read idr://spec/config-schema if needed, then present the final YAML/JSON config and run dry_run_pipeline()."
+    )
 
 
 # --- Entry Point ---
@@ -1055,7 +1407,11 @@ def connect_from_env():
 def main():
     """CLI entrypoint for `idr-mcp` binary."""
     connect_from_env()
-    mcp.run()
+    transport = os.environ.get("IDR_MCP_TRANSPORT", "stdio").strip().lower()
+    if transport in ("streamable-http", "http"):
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":
