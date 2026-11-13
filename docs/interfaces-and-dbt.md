@@ -184,8 +184,8 @@ Expose your identity graph and configuration tools to **Antigravity**, **Codex**
     }
     ```
 
-> [!TIP] Virtual Environments
-> If `idr` is installed inside a virtual environment (e.g. `.venv`), set `"command"` to `/path/to/venv/bin/python` and `"args"` to `["-m", "idr_mcp.server"]`.
+!!! tip "Virtual Environments"
+    If `idr` is installed inside a virtual environment (e.g. `.venv`), set `"command"` to `/path/to/venv/bin/python` and `"args"` to `["-m", "idr_mcp.server"]`.
 
 ### Exposed MCP Tools (17 Agentic Tools)
 - `resolve_customer_360(identifier_type, identifier_value)` — Single-call Customer 360 context grounding (canonical identity, golden profile, all linked accounts & identifiers).

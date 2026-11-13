@@ -37,6 +37,7 @@ theme:
     - navigation.instant.progress
     - navigation.tracking
     - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
     - navigation.path
     - navigation.top
@@ -87,10 +88,10 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting Started: getting-started.md
-  - Concepts & Architecture: concepts-and-architecture.md
-  - Algorithm & Graph Engine: algorithm-and-graph-engine.md
-  - Configuration & Governance: configuration-and-governance.md
-  - Interfaces & dbt: interfaces-and-dbt.md
+  - Quickstart: getting-started.md
+  - Architecture: concepts-and-architecture.md
+  - Graph Engine: algorithm-and-graph-engine.md
+  - Governance: configuration-and-governance.md
+  - CLI & dbt: interfaces-and-dbt.md
   - Databricks App: databricks-app.md
-  - Warehouses & Schema: warehouses-and-schema.md
+  - Warehouses: warehouses-and-schema.md
