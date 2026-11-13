@@ -7,17 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
 ### Added
-- **Quickstart Command**: `idr quickstart` for one-click demo setup and execution.
-- **MCP Server**: Native Model Context Protocol support for AI agents (`idr mcp`).
-- **Web UI**: React-based dashboard and configuration wizard (`idr serve`).
-- **Pre-commit Hooks**: Automated linting and formatting on commit.
-- **Project Structure**: Refactored into `idr_core`, `idr_api`, `idr_ui`, `idr_mcp`.
+- **Snowflake Production Parity & Benchmarks**: Verified 6.3M-entity / 15-table omni-channel workload end-to-end on Snowflake in **170s (2.8 min)** (~37,000 entities/sec), alongside Databricks (**296s**) and BigQuery (**306s**).
+- **Agent-Native MCP Server (`idr_mcp`)**:
+  - Remote **Streamable HTTP** transport mounted at `POST /mcp` inside FastAPI (plus `IDR_MCP_TRANSPORT=streamable-http`).
+  - Quality triage & LLM-as-a-judge tools: `get_triage_queue` and `submit_evaluation_label`.
+  - Two-step **preview-then-confirm** safety guardrails (`confirmation_token` + `blast_radius_summary`) on `forget_customer_identity` and `manage_identity_override`.
+  - Context-window-safe bounded responses (`max_entities`, `max_edges`, `truncated`) on `get_cluster` and `explain_cluster`.
+  - Self-documenting MCP Resources (`idr://spec/config-schema`, `idr://spec/cli-commands`, `idr://spec/canonicalizers`), `model_config_from_tables` prompt, `skills/sql-identity-resolution/SKILL.md`, and `docs/llms.txt`.
+- **Event Webhooks (`idr_core/webhooks.py`)**: Non-blocking `IDR_WEBHOOK_URL` + HMAC-SHA256 `X-IDR-Signature` events for `run.completed`, `run.failed`, `guardrail.skipped_groups_spike`, `crosswalk.cluster_changes`, and `privacy.erasure_completed`.
+- **GDPR Persistent Suppression**: `idr_meta.privacy_suppression` with SHA-256 `entity_key` hashing across all 4 dialects to prevent purged subjects from being re-ingested.
+- **Batched Config Save**: Single-query `MERGE INTO` batched metadata persistence with async progress tracking.
+- **Glassmorphic GitHub Pages (`docs/index.html`)**: Self-contained Tailwind dark UI with interactive terminal, scale estimator, schema browser, and GitHub Actions `pages.yml` deployment.
 
 ### Changed
-- **Linting**: Replaced `flake8`/`black` with `ruff` for faster, unified linting.
-- **Docker**: Improved Docker Compose setup with healthchecks and volume persistence.
-- **Docs**: Comprehensive documentation overhaul to reflect new features.
+- **Headless-First Positioning**: Unified CLI, Python SDK, `dbt_idr`, FastAPI, Remote `/mcp`, and Webhooks with optional React Explorer UI.
+- **Snowflake Adapter**: Normalized account identifiers and case-insensitive `UPPER(table_schema)` table discovery.
+
+### Removed
+- Legacy `tools/scale_test/` scripts and duplicate skill directory.
 
 ## [0.5.1] - 2026-01-16
 

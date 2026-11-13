@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SQL Identity Resolution — Headless, Warehouse-Native Identity Engine</title>
+  <meta name="description" content="Headless, warehouse-native deterministic & fuzzy identity resolution for Snowflake, Databricks, BigQuery, and DuckDB. Zero data movement. 23 MCP agent tools." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            bg: '#060913',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #060913;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .glass-card {
+      background: rgba(11, 17, 32, 0.75);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card:hover {
+      border-color: rgba(99, 102, 241, 0.28);
+    }
+    .gradient-text {
+      background: linear-gradient(135deg, #818cf8 0%, #38bdf8 55%, #22d3ee 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .ambient-glow {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: -1;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(99, 102, 241, 0.14), transparent 36%),
+        radial-gradient(circle at 82% 20%, rgba(34, 211, 238, 0.10), transparent 34%),
+        radial-gradient(circle at 50% 85%, rgba(79, 70, 229, 0.08), transparent 42%);
+    }
+    .pill-string { background: rgba(168, 85, 247, 0.14); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.28); }
+    .pill-ts     { background: rgba(34, 211, 238, 0.14); color: #22d3ee; border: 1px solid rgba(34, 211, 238, 0.28); }
+    .pill-int    { background: rgba(59, 130, 246, 0.14); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.28); }
+    .pill-float  { background: rgba(245, 158, 11, 0.14); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.28); }
+    .pill-bool   { background: rgba(16, 185, 129, 0.14); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.28); }
+  </style>
+</head>
+<body class="antialiased selection:bg-indigo-500/30 selection:text-cyan-200">
+  <div class="ambient-glow"></div>
+
+  <!-- 1. Sticky Glass Navbar -->
+  <header class="sticky top-0 z-50 border-b border-white/10 bg-[#060913]/80 backdrop-blur-xl">
+    <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
+      <a href="#" class="flex items-center gap-2.5 text-white font-bold tracking-tight">
+        <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-cyan-400 text-xs font-mono font-bold text-slate-950">IDR</span>
+        <span class="text-sm sm:text-base">SQL Identity Resolution</span>
+      </a>
+
+      <nav class="hidden md:flex items-center gap-6 text-xs font-medium text-slate-300">
+        <a href="#benchmarks" class="hover:text-cyan-300 transition">Benchmarks</a>
+        <a href="#estimator" class="hover:text-cyan-300 transition">Estimator</a>
+        <a href="#schema" class="hover:text-cyan-300 transition">Schema</a>
+        <a href="#integrations" class="hover:text-cyan-300 transition">Integrations</a>
+        <a href="#quickstart" class="hover:text-cyan-300 transition">Quickstart</a>
+        <a href="llms.txt" class="text-cyan-400 hover:text-cyan-300 font-mono transition">llms.txt</a>
+      </nav>
+
+      <div class="flex items-center gap-3">
+        <span class="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-mono text-emerald-300">
+          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          v0.7.0 · Headless
+        </span>
+        <a href="https://github.com/anilkulkarni87/sql-identity-oss" target="_blank" rel="noopener"
+           class="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/10 transition">
+          <span>★</span> Star on GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <!-- 2. Hero Section -->
+    <section class="pt-14 pb-16 lg:pt-20 lg:pb-20">
+      <div class="grid gap-10 lg:grid-cols-12 lg:items-center">
+        <div class="lg:col-span-6 space-y-6">
+          <div class="inline-flex items-center gap-2 rounded-full border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-300">
+            <span>⚡ Headless, Warehouse-Native Identity Engine</span>
+            <span class="text-slate-500">·</span>
+            <span class="text-cyan-300">Apache 2.0</span>
+          </div>
+
+          <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl leading-[1.08]">
+            Unify Customer Identities <span class="gradient-text">Inside Your Data Warehouse</span>
+          </h1>
+
+          <p class="text-base text-slate-300 leading-relaxed max-w-xl">
+            Deterministic star-graph resolution, fuzzy super-clustering, golden profile survivorship, persistent cluster IDs, and GDPR erasure across
+            <strong class="text-white">Snowflake</strong>, <strong class="text-white">Databricks</strong>, <strong class="text-white">BigQuery</strong>, and <strong class="text-white">DuckDB</strong>.
+            Run via CLI, Python, dbt, FastAPI, or Remote MCP (<code class="text-cyan-300 font-mono text-sm">/mcp</code>).
+          </p>
+
+          <div class="flex flex-wrap gap-3">
+            <a href="#quickstart" class="rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-500/20 hover:opacity-95 transition">
+              Get Started in 60s →
+            </a>
+            <a href="#schema" class="rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10 transition">
+              Explore System Schema
+            </a>
+          </div>
+
+          <!-- Key Metrics Bar -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+            <div class="glass-card rounded-xl p-3">
+              <div class="font-mono text-xl font-bold text-cyan-300">170s</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">Snowflake (6.3M rows)</div>
+            </div>
+            <div class="glass-card rounded-xl p-3">
+              <div class="font-mono text-xl font-bold text-indigo-300">4 Engines</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">100% SQL Parity</div>
+            </div>
+            <div class="glass-card rounded-xl p-3">
+              <div class="font-mono text-xl font-bold text-emerald-300">23 Tools</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">MCP + Guardrails</div>
+            </div>
+            <div class="glass-card rounded-xl p-3">
+              <div class="font-mono text-xl font-bold text-amber-300">0 Moves</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">Zero Data Egress</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabbed Interactive CLI Terminal -->
+        <div class="lg:col-span-6">
+          <div class="glass-card rounded-2xl overflow-hidden shadow-2xl shadow-indigo-950/50">
+            <div class="flex items-center justify-between border-b border-white/10 bg-slate-950/70 px-4 py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="h-2.5 w-2.5 rounded-full bg-rose-500/80"></span>
+                <span class="h-2.5 w-2.5 rounded-full bg-amber-500/80"></span>
+                <span class="h-2.5 w-2.5 rounded-full bg-emerald-500/80"></span>
+              </div>
+              <div id="hero-term-tabs" class="flex flex-wrap gap-1 text-[11px] font-mono">
+                <button data-tab="quickstart" class="term-tab px-2.5 py-1 rounded-md bg-indigo-500/20 text-cyan-300 border border-indigo-400/30">Quickstart</button>
+                <button data-tab="snowflake" class="term-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white">Snowflake</button>
+                <button data-tab="databricks" class="term-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white">Databricks</button>
+                <button data-tab="bigquery" class="term-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white">BigQuery</button>
+                <button data-tab="mcp" class="term-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white">/mcp</button>
+              </div>
+              <button onclick="copyCode('hero-term-code', this)" class="text-[11px] font-mono text-slate-400 hover:text-cyan-300 transition">Copy</button>
+            </div>
+            <pre id="hero-term-code" class="p-5 font-mono text-xs sm:text-[13px] leading-relaxed text-slate-200 overflow-x-auto min-h-[270px]"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Before -> After Strip -->
+    <section class="pb-16">
+      <div class="grid gap-4 md:grid-cols-2">
+        <div class="glass-card rounded-2xl p-6">
+          <div class="text-xs font-mono uppercase tracking-wider text-rose-400 mb-2">Before · Fragmented Warehouse Tables</div>
+          <div class="space-y-2 font-mono text-xs text-slate-300">
+            <div class="rounded-lg bg-slate-950/70 p-2.5 border border-white/5"><span class="text-purple-400">CUSTOMERS</span>: cust_101 · <span class="text-cyan-300">alice+vip@gmail.com</span></div>
+            <div class="rounded-lg bg-slate-950/70 p-2.5 border border-white/5"><span class="text-purple-400">ORDERS_ONLINE</span>: ord_502 · <span class="text-cyan-300">alice@gmail.com</span> · +1-415-555-0199</div>
+            <div class="rounded-lg bg-slate-950/70 p-2.5 border border-white/5"><span class="text-purple-400">INSTORE_ACCOUNTS</span>: pos_980 · (415) 555-0199</div>
+          </div>
+        </div>
+        <div class="glass-card rounded-2xl p-6 border-cyan-500/20">
+          <div class="text-xs font-mono uppercase tracking-wider text-emerald-400 mb-2">After · Unified Golden Profile + Persistent ID</div>
+          <div class="rounded-lg bg-slate-950/70 p-4 border border-emerald-500/20 font-mono text-xs space-y-1.5">
+            <div><span class="text-slate-400">resolved_id:</span> <span class="text-emerald-300 font-bold">"res_8f3a1c"</span> <span class="text-slate-500">(stabilized across runs)</span></div>
+            <div><span class="text-slate-400">linked_keys:</span> <span class="text-cyan-300">["cust_101", "ord_502", "pos_980"]</span></div>
+            <div><span class="text-slate-400">confidence:</span>  <span class="text-amber-300">0.97</span> · <span class="text-slate-400">crosswalk:</span> <span class="text-indigo-300">audited</span> · <span class="text-slate-400">rtbf:</span> <span class="text-purple-300">sha256-suppressed</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Benchmarks -->
+    <section id="benchmarks" class="py-12 border-t border-white/10">
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+        <div>
+          <h2 class="text-2xl sm:text-3xl font-bold text-white">Production Cloud Benchmarks</h2>
+          <p class="text-sm text-slate-400 mt-1">Exact same 15-table <code class="font-mono text-cyan-300">ecommerce_synth</code> workload: <strong class="text-slate-200">6,297,049 entities → 5,381,635 edges → 1,544,042 clusters</strong>.</p>
+        </div>
+        <span class="font-mono text-xs text-slate-400">100% identical graph outputs across all 3 engines</span>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-3 mb-6">
+        <div class="glass-card rounded-2xl p-6 border-cyan-400/25">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-white">❄️ Snowflake</span>
+            <span class="rounded-full bg-cyan-500/15 px-2.5 py-0.5 text-[11px] font-mono text-cyan-300">1.8x Faster</span>
+          </div>
+          <div class="font-mono text-3xl font-extrabold text-cyan-300 mt-3">170s <span class="text-sm font-normal text-slate-400">(2.8 min)</span></div>
+          <div class="text-xs text-slate-400 mt-1 font-mono">~37,000 entities/sec · LP 58.8s · Output 66.7s</div>
+        </div>
+        <div class="glass-card rounded-2xl p-6">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-white">🧱 Databricks SQL</span>
+            <span class="rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-mono text-slate-300">Serverless</span>
+          </div>
+          <div class="font-mono text-3xl font-extrabold text-indigo-300 mt-3">296s <span class="text-sm font-normal text-slate-400">(4.9 min)</span></div>
+          <div class="text-xs text-slate-400 mt-1 font-mono">~21,300 entities/sec · LP ~108s · Output ~85s</div>
+        </div>
+        <div class="glass-card rounded-2xl p-6">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-white">☁️ Google BigQuery</span>
+            <span class="rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-mono text-slate-300">Multi-Region</span>
+          </div>
+          <div class="font-mono text-3xl font-extrabold text-purple-300 mt-3">306s <span class="text-sm font-normal text-slate-400">(5.1 min)</span></div>
+          <div class="text-xs text-slate-400 mt-1 font-mono">~20,600 entities/sec · LP 110s · Output 90s</div>
+        </div>
+      </div>
+
+      <!-- Stage Comparison Bars -->
+      <div class="glass-card rounded-2xl p-6 space-y-4">
+        <div class="text-xs font-mono uppercase tracking-wider text-slate-400">Stage Duration Breakdown (Snowflake vs. Databricks vs. BigQuery)</div>
+        <div id="stage-bars" class="space-y-3 text-xs font-mono"></div>
+      </div>
+    </section>
+
+    <!-- 4. Interactive Scale & Warehouse Estimator -->
+    <section id="estimator" class="py-12 border-t border-white/10">
+      <div class="mb-6">
+        <h2 class="text-2xl sm:text-3xl font-bold text-white">Interactive Scale & CLI Estimator</h2>
+        <p class="text-sm text-slate-400 mt-1">Slide entity volume and pick your target warehouse to estimate runtime, graph scale, and generate a ready-to-run command.</p>
+      </div>
+      <div class="glass-card rounded-2xl p-6 grid gap-8 lg:grid-cols-12">
+        <div class="lg:col-span-6 space-y-5">
+          <div>
+            <div class="flex justify-between text-xs font-mono mb-2">
+              <span class="text-slate-400">Input Entities</span>
+              <span id="est-rows-label" class="text-cyan-300 font-bold">6,300,000</span>
+            </div>
+            <input id="est-slider" type="range" min="100000" max="50000000" step="100000" value="6300000"
+                   class="w-full accent-cyan-400 cursor-pointer" />
+            <div class="flex justify-between text-[11px] font-mono text-slate-500 mt-1">
+              <span>100K</span><span>6.3M (Benchmarked)</span><span>25M</span><span>50M</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-xs font-mono text-slate-400 mb-2">Target Warehouse</div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2" id="est-platforms">
+              <button data-plat="snowflake" class="est-plat px-3 py-2 rounded-lg text-xs font-mono bg-indigo-500/20 text-cyan-300 border border-indigo-400/30">Snowflake</button>
+              <button data-plat="databricks" class="est-plat px-3 py-2 rounded-lg text-xs font-mono bg-white/5 text-slate-300 border border-white/10">Databricks</button>
+              <button data-plat="bigquery" class="est-plat px-3 py-2 rounded-lg text-xs font-mono bg-white/5 text-slate-300 border border-white/10">BigQuery</button>
+              <button data-plat="duckdb" class="est-plat px-3 py-2 rounded-lg text-xs font-mono bg-white/5 text-slate-300 border border-white/10">DuckDB</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3 pt-1">
+            <div class="rounded-xl bg-slate-950/70 p-3 border border-white/5">
+              <div id="est-time" class="font-mono text-lg font-bold text-cyan-300">~170s</div>
+              <div class="text-[11px] text-slate-400">Est. Runtime</div>
+            </div>
+            <div class="rounded-xl bg-slate-950/70 p-3 border border-white/5">
+              <div id="est-edges" class="font-mono text-lg font-bold text-indigo-300">~5.38M</div>
+              <div class="text-[11px] text-slate-400">Star Edges</div>
+            </div>
+            <div class="rounded-xl bg-slate-950/70 p-3 border border-white/5">
+              <div id="est-clusters" class="font-mono text-lg font-bold text-emerald-300">~1.54M</div>
+              <div class="text-[11px] text-slate-400">Clusters</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lg:col-span-6 flex flex-col justify-between rounded-xl bg-slate-950/80 border border-white/10 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-mono text-slate-400">Generated Headless Pipeline Command</span>
+            <button onclick="copyCode('est-cmd', this)" class="text-xs font-mono text-cyan-400 hover:text-cyan-300">Copy</button>
+          </div>
+          <pre id="est-cmd" class="font-mono text-xs text-slate-200 leading-relaxed overflow-x-auto"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Interactive System Schema Browser -->
+    <section id="schema" class="py-12 border-t border-white/10">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 class="text-2xl sm:text-3xl font-bold text-white">Interactive System Schema Browser</h2>
+          <p class="text-sm text-slate-400 mt-1">100% SQL-auditable tables provisioned by <code class="font-mono text-cyan-300">idr init</code> across all 4 warehouses.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <input id="schema-search" type="text" placeholder="Search tables or columns..."
+                 class="rounded-lg border border-white/15 bg-slate-950/80 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none" />
+          <div id="schema-filters" class="flex gap-1.5 text-xs font-mono">
+            <button data-schema="all" class="sch-filter px-2.5 py-1.5 rounded-lg bg-indigo-500/20 text-cyan-300 border border-indigo-400/30">All</button>
+            <button data-schema="idr_meta" class="sch-filter px-2.5 py-1.5 rounded-lg bg-white/5 text-slate-300 border border-white/10">idr_meta</button>
+            <button data-schema="idr_work" class="sch-filter px-2.5 py-1.5 rounded-lg bg-white/5 text-slate-300 border border-white/10">idr_work</button>
+            <button data-schema="idr_out" class="sch-filter px-2.5 py-1.5 rounded-lg bg-white/5 text-slate-300 border border-white/10">idr_out</button>
+          </div>
+        </div>
+      </div>
+      <div id="schema-grid" class="grid gap-3 md:grid-cols-2"></div>
+    </section>
+
+    <!-- 6. Code Matrix / Integrations Tabs -->
+    <section id="integrations" class="py-12 border-t border-white/10">
+      <div class="mb-6">
+        <h2 class="text-2xl sm:text-3xl font-bold text-white">Headless & Agentic Integrations</h2>
+        <p class="text-sm text-slate-400 mt-1">Same engine, zero UI required. Integrate via declarative YAML, Remote MCP, dbt, Python SDK, or Webhooks.</p>
+      </div>
+      <div class="glass-card rounded-2xl overflow-hidden">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-slate-950/70 px-4 py-2.5">
+          <div id="int-tabs" class="flex flex-wrap gap-1.5 text-xs font-mono">
+            <button data-int="yaml" class="int-tab px-3 py-1.5 rounded-lg bg-indigo-500/20 text-cyan-300 border border-indigo-400/30">Config YAML + Overrides</button>
+            <button data-int="mcp" class="int-tab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Remote /mcp + Guardrails</button>
+            <button data-int="dbt" class="int-tab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">dbt (dbt_idr)</button>
+            <button data-int="python" class="int-tab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Python SDK</button>
+            <button data-int="webhooks" class="int-tab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Webhooks</button>
+          </div>
+          <button onclick="copyCode('int-code', this)" class="text-xs font-mono text-slate-400 hover:text-cyan-300">Copy</button>
+        </div>
+        <pre id="int-code" class="p-6 font-mono text-xs sm:text-[13px] leading-relaxed text-slate-200 overflow-x-auto"></pre>
+      </div>
+    </section>
+
+    <!-- 7. Developer Quickstart -->
+    <section id="quickstart" class="py-12 border-t border-white/10">
+      <div class="mb-6">
+        <h2 class="text-2xl sm:text-3xl font-bold text-white">Developer Quickstart</h2>
+        <p class="text-sm text-slate-400 mt-1">Install extras for your warehouse and run your first headless pipeline in under a minute.</p>
+      </div>
+      <div class="grid gap-6 lg:grid-cols-12">
+        <div class="lg:col-span-7 glass-card rounded-2xl overflow-hidden">
+          <div class="flex flex-wrap items-center justify-between border-b border-white/10 bg-slate-950/70 px-4 py-2.5">
+            <div id="qs-tabs" class="flex flex-wrap gap-1.5 text-xs font-mono">
+              <button data-qs="duckdb" class="qs-tab px-2.5 py-1 rounded-md bg-indigo-500/20 text-cyan-300 border border-indigo-400/30">DuckDB</button>
+              <button data-qs="snowflake" class="qs-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white">Snowflake</button>
+              <button data-qs="databricks" class="qs-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white">Databricks</button>
+              <button data-qs="bigquery" class="qs-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white">BigQuery</button>
+            </div>
+            <button onclick="copyCode('qs-code', this)" class="text-xs font-mono text-slate-400 hover:text-cyan-300">Copy</button>
+          </div>
+          <pre id="qs-code" class="p-5 font-mono text-xs sm:text-[13px] leading-relaxed text-slate-200 overflow-x-auto"></pre>
+        </div>
+        <div class="lg:col-span-5 glass-card rounded-2xl p-6 space-y-3">
+          <div class="text-xs font-mono uppercase tracking-wider text-cyan-300">CLI Cheat Sheet</div>
+          <div class="space-y-2 font-mono text-xs">
+            <div class="flex justify-between gap-3 border-b border-white/5 pb-1.5"><span class="text-white">idr init</span><span class="text-slate-400">Create idr_meta/work/out</span></div>
+            <div class="flex justify-between gap-3 border-b border-white/5 pb-1.5"><span class="text-white">idr doctor</span><span class="text-slate-400">Verify creds & schemas</span></div>
+            <div class="flex justify-between gap-3 border-b border-white/5 pb-1.5"><span class="text-white">idr bootstrap</span><span class="text-slate-400">Auto-model YAML config</span></div>
+            <div class="flex justify-between gap-3 border-b border-white/5 pb-1.5"><span class="text-white">idr apply-config</span><span class="text-slate-400">Batched MERGE metadata</span></div>
+            <div class="flex justify-between gap-3 border-b border-white/5 pb-1.5"><span class="text-white">idr run --mode INCR</span><span class="text-slate-400">Delta + state-diff run</span></div>
+            <div class="flex justify-between gap-3 border-b border-white/5 pb-1.5"><span class="text-white">idr evaluate</span><span class="text-slate-400">Confidence & audit sample</span></div>
+            <div class="flex justify-between gap-3"><span class="text-white">idr privacy forget</span><span class="text-slate-400">GDPR purge + suppression</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-white/10 py-10 text-center text-xs text-slate-400">
+    <div class="mx-auto max-w-7xl px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div>SQL Identity Resolution · Apache 2.0 · Headless, Warehouse-Native Identity Engine</div>
+      <div class="flex items-center gap-5 font-mono">
+        <a href="llms.txt" class="hover:text-cyan-300">llms.txt</a>
+        <a href="https://github.com/anilkulkarni87/sql-identity-oss/blob/main/skills/sql-identity-resolution/SKILL.md" target="_blank" rel="noopener" class="hover:text-cyan-300">SKILL.md</a>
+        <a href="https://github.com/anilkulkarni87/sql-identity-oss" target="_blank" rel="noopener" class="hover:text-cyan-300">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function copyCode(id, btn) {
+      const text = document.getElementById(id).textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = prev, 1400);
+      });
+    }
+
+    // Hero terminal tabs
+    const termSnippets = {
+      quickstart: `# 1. Install with DuckDB, API & MCP extras
+pip install "sql-identity-resolution[duckdb,api,mcp]"
+
+# 2. Run 10,000-row synthetic quickstart
+idr quickstart --rows 10000 --output demo.duckdb
+
+# 3. Inspect or launch optional Explorer UI (+ /mcp)
+idr evaluate --platform duckdb --db demo.duckdb
+idr ui --platform duckdb --db demo.duckdb`,
+      snowflake: `export IDR_PLATFORM=snowflake
+export SNOWFLAKE_ACCOUNT="xy12345.us-east-1"
+export SNOWFLAKE_USER="IDR_SERVICE_USER"
+export SNOWFLAKE_WAREHOUSE="COMPUTE_WH"
+export SNOWFLAKE_DATABASE="IDR_TEST"
+
+idr init --platform snowflake
+idr bootstrap --platform snowflake --schema ECOMMERCE_SYNTH --output idr.yaml --apply
+idr run --platform snowflake --mode FULL
+# ✓ 6,297,049 entities -> 1,544,042 clusters in 170s`,
+      databricks: `export DATABRICKS_HOST="adb-123456.azuredatabricks.net"
+export DATABRICKS_TOKEN="dapi..."
+export DATABRICKS_HTTP_PATH="/sql/1.0/warehouses/abc123"
+export DATABRICKS_CATALOG="main"
+
+idr init --platform databricks
+idr apply-config --platform databricks --config idr.yaml
+idr run --platform databricks --mode FULL
+# ✓ 6,297,049 entities -> 1,544,042 clusters in 296s`,
+      bigquery: `gcloud auth application-default login
+
+idr init --platform bigquery --project my-gcp-project --location US
+idr apply-config --platform bigquery --project my-gcp-project --config idr.yaml
+idr run --platform bigquery --project my-gcp-project --mode FULL
+# ✓ 6,297,049 entities -> 1,544,042 clusters in 306s`,
+      mcp: `# Start FastAPI with Remote MCP mounted at POST /mcp (Streamable HTTP)
+uvicorn idr_api.main:app --host 0.0.0.0 --port 8000
+
+# Or standalone Streamable HTTP MCP server
+IDR_MCP_TRANSPORT=streamable-http idr-mcp
+
+# Agent tools: resolve_customer_360, discover_and_suggest_rules,
+# get_triage_queue, submit_evaluation_label, forget_customer_identity (2-step)`
+    };
+
+    const termEl = document.getElementById('hero-term-code');
+    function setTermTab(key) {
+      termEl.textContent = termSnippets[key];
+      document.querySelectorAll('.term-tab').forEach(b => {
+        const active = b.dataset.tab === key;
+        b.className = active
+          ? 'term-tab px-2.5 py-1 rounded-md bg-indigo-500/20 text-cyan-300 border border-indigo-400/30'
+          : 'term-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white';
+      });
+    }
+    document.querySelectorAll('.term-tab').forEach(b => b.addEventListener('click', () => setTermTab(b.dataset.tab)));
+    setTermTab('quickstart');
+
+    // Stage comparison bars
+    const stages = [
+      { name: 'Preflight', sf: 6.7, dbx: 24, bq: 26 },
+      { name: 'Entities', sf: 5.3, dbx: 6, bq: 5 },
+      { name: 'Identifiers', sf: 20.2, dbx: 52, bq: 54 },
+      { name: 'Edge Building', sf: 11.1, dbx: 14, bq: 12 },
+      { name: 'Label Prop', sf: 58.8, dbx: 108, bq: 110 },
+      { name: 'Output & Golden', sf: 66.7, dbx: 85, bq: 90 },
+    ];
+    document.getElementById('stage-bars').innerHTML = stages.map(s => `
+      <div class="grid grid-cols-12 items-center gap-3">
+        <div class="col-span-3 sm:col-span-2 text-slate-300">${s.name}</div>
+        <div class="col-span-9 sm:col-span-10 space-y-1">
+          <div class="flex items-center gap-2"><div class="h-2 rounded bg-cyan-400" style="width:${(s.sf/115)*100}%"></div><span class="text-cyan-300">${s.sf}s</span></div>
+          <div class="flex items-center gap-2"><div class="h-2 rounded bg-indigo-400/80" style="width:${(s.dbx/115)*100}%"></div><span class="text-indigo-300">${s.dbx}s</span></div>
+          <div class="flex items-center gap-2"><div class="h-2 rounded bg-purple-400/70" style="width:${(s.bq/115)*100}%"></div><span class="text-purple-300">${s.bq}s</span></div>
+        </div>
+      </div>
+    `).join('');
+
+    // Scale estimator
+    let estPlat = 'snowflake';
+    const platRates = { snowflake: 37041, databricks: 21274, bigquery: 20578, duckdb: 20161 };
+    function updateEstimator() {
+      const rows = Number(document.getElementById('est-slider').value);
+      document.getElementById('est-rows-label').textContent = rows.toLocaleString();
+      const secs = Math.max(1, Math.round(rows / platRates[estPlat]));
+      const edges = (rows * 0.8546 / 1e6).toFixed(2);
+      const clusters = (rows * 0.2452 / 1e6).toFixed(2);
+      document.getElementById('est-time').textContent = secs >= 60 ? `~${secs}s (${(secs/60).toFixed(1)}m)` : `~${secs}s`;
+      document.getElementById('est-edges').textContent = `~${edges}M`;
+      document.getElementById('est-clusters').textContent = `~${clusters}M`;
+      const extra = estPlat === 'bigquery' ? ' --project my-gcp-project' : (estPlat === 'duckdb' ? ' --db warehouse.duckdb' : '');
+      document.getElementById('est-cmd').textContent =
+`# Headless run for ${rows.toLocaleString()} entities on ${estPlat}
+idr init --platform ${estPlat}${extra}
+idr apply-config --platform ${estPlat}${extra} --config idr_config.yaml
+idr run --platform ${estPlat}${extra} --mode FULL --strict
+idr evaluate --platform ${estPlat}${extra}`;
+    }
+    document.getElementById('est-slider').addEventListener('input', updateEstimator);
+    document.querySelectorAll('.est-plat').forEach(b => b.addEventListener('click', () => {
+      estPlat = b.dataset.plat;
+      document.querySelectorAll('.est-plat').forEach(btn => {
+        btn.className = btn.dataset.plat === estPlat
+          ? 'est-plat px-3 py-2 rounded-lg text-xs font-mono bg-indigo-500/20 text-cyan-300 border border-indigo-400/30'
+          : 'est-plat px-3 py-2 rounded-lg text-xs font-mono bg-white/5 text-slate-300 border border-white/10';
+      });
+      updateEstimator();
+    }));
+    updateEstimator();
+
+    // Schema Browser
+    const schemaTables = [
+      { schema: 'idr_meta', name: 'source_table', desc: 'Registered source tables, entity keys, and watermarks.', cols: [['table_id','STRING'],['table_fqn','STRING'],['entity_key_expr','STRING'],['watermark_column','STRING'],['is_active','BOOL']] },
+      { schema: 'idr_meta', name: 'rule', desc: 'Deterministic matching rules, canonicalizers, and max_group_size.', cols: [['rule_id','STRING'],['identifier_type','STRING'],['canonicalize','STRING'],['max_group_size','INT'],['is_active','BOOL']] },
+      { schema: 'idr_meta', name: 'identity_override', desc: 'Manual FORCE_LINK, DO_NOT_LINK, and ISOLATE overrides.', cols: [['override_type','STRING'],['entity_key_a','STRING'],['entity_key_b','STRING'],['is_active','BOOL'],['created_at','TIMESTAMP']] },
+      { schema: 'idr_meta', name: 'privacy_suppression', desc: 'SHA-256 suppressed entity keys blocked from re-ingestion.', cols: [['entity_key_hash','STRING'],['request_id','STRING'],['suppressed_at','TIMESTAMP']] },
+      { schema: 'idr_meta', name: 'privacy_audit_log', desc: 'Zero-PII GDPR / CCPA right-to-be-forgotten compliance ledger.', cols: [['request_id','STRING'],['target_hash','STRING'],['entities_purged','INT'],['executed_at','TIMESTAMP']] },
+      { schema: 'idr_work', name: 'entities_delta', desc: 'Delta + candidate-expanded entities staged for current run.', cols: [['table_id','STRING'],['entity_key','STRING'],['watermark_value','TIMESTAMP']] },
+      { schema: 'idr_work', name: 'edges_new', desc: 'Anchor-based star edges (N-1 per group) after overrides.', cols: [['left_entity_key','STRING'],['right_entity_key','STRING'],['identifier_type','STRING'],['score','DOUBLE']] },
+      { schema: 'idr_out', name: 'identity_resolved_membership_current', desc: 'Canonical mapping of every entity_key to persistent resolved_id.', cols: [['entity_key','STRING'],['resolved_id','STRING'],['updated_at','TIMESTAMP']] },
+      { schema: 'idr_out', name: 'identity_clusters_current', desc: 'Cluster confidence, edge diversity, and fan-out metrics.', cols: [['resolved_id','STRING'],['cluster_size','INT'],['confidence_score','DOUBLE'],['max_fanout','INT'],['updated_at','TIMESTAMP']] },
+      { schema: 'idr_out', name: 'golden_profiles', desc: 'Consolidated Customer 360 profile via survivorship rules.', cols: [['resolved_id','STRING'],['run_id','STRING'],['updated_at','TIMESTAMP']] },
+      { schema: 'idr_out', name: 'evaluation_sample', desc: 'Stratified audit pairs for precision/recall & LLM-as-a-judge labeling.', cols: [['sample_id','STRING'],['confidence_score','DOUBLE'],['human_label','STRING'],['sampled_at','TIMESTAMP']] },
+      { schema: 'idr_out', name: 'resolved_id_crosswalk', desc: 'Historical ledger of cluster merges and splits across runs.', cols: [['run_id','STRING'],['old_resolved_id','STRING'],['new_resolved_id','STRING'],['changed_at','TIMESTAMP']] },
+    ];
+    const pillClass = { STRING: 'pill-string', TIMESTAMP: 'pill-ts', INT: 'pill-int', DOUBLE: 'pill-float', BOOL: 'pill-bool' };
+    let activeSchema = 'all';
+    function renderSchema() {
+      const q = document.getElementById('schema-search').value.trim().toLowerCase();
+      const filtered = schemaTables.filter(t => {
+        if (activeSchema !== 'all' && t.schema !== activeSchema) return false;
+        if (!q) return true;
+        return t.name.includes(q) || t.desc.toLowerCase().includes(q) || t.cols.some(c => c[0].includes(q));
+      });
+      document.getElementById('schema-grid').innerHTML = filtered.map(t => `
+        <details class="glass-card rounded-xl p-4 group" open>
+          <summary class="flex cursor-pointer items-center justify-between list-none">
+            <div>
+              <span class="font-mono text-xs text-cyan-300">${t.schema}.</span><span class="font-mono text-sm font-semibold text-white">${t.name}</span>
+              <p class="text-xs text-slate-400 mt-0.5">${t.desc}</p>
+            </div>
+            <span class="text-xs font-mono text-slate-500 group-open:rotate-180 transition">▾</span>
+          </summary>
+          <div class="mt-3 pt-3 border-t border-white/5 flex flex-wrap gap-1.5">
+            ${t.cols.map(([c, dt]) => `<span class="inline-flex items-center gap-1.5 rounded-md bg-slate-950/80 px-2 py-1 text-[11px] font-mono border border-white/5"><span class="text-slate-200">${c}</span><span class="rounded px-1.5 py-0.2 text-[10px] ${pillClass[dt]}">${dt}</span></span>`).join('')}
+          </div>
+        </details>
+      `).join('');
+    }
+    document.getElementById('schema-search').addEventListener('input', renderSchema);
+    document.querySelectorAll('.sch-filter').forEach(b => b.addEventListener('click', () => {
+      activeSchema = b.dataset.schema;
+      document.querySelectorAll('.sch-filter').forEach(btn => {
+        btn.className = btn.dataset.schema === activeSchema
+          ? 'sch-filter px-2.5 py-1.5 rounded-lg bg-indigo-500/20 text-cyan-300 border border-indigo-400/30'
+          : 'sch-filter px-2.5 py-1.5 rounded-lg bg-white/5 text-slate-300 border border-white/10';
+      });
+      renderSchema();
+    }));
+    renderSchema();
+
+    // Integrations tabs
+    const intSnippets = {
+      yaml: `sources:
+  - id: customers
+    table: IDR_TEST.ECOMMERCE_SYNTH.CUSTOMERS
+    entity_type: PERSON
+    entity_key: customer_id
+    watermark: created_at
+    identifiers:
+      - { type: email, expr: email }
+      - { type: phone, expr: phone }
+    attributes:
+      - { name: first_name, expr: first_name }
+      - { name: last_name, expr: last_name }
+
+use_default_exclusions: true
+rules:
+  - { id: "104", type: EXACT, match_keys: [email], priority: 1, canonicalize: EMAIL_STANDARD, max_group_size: 50 }
+overrides:
+  - { type: DO_NOT_LINK, entity_key_a: "crm:101", entity_key_b: "crm:102", reason: "Shared household phone" }`,
+      mcp: `# 1. Remote Streamable HTTP endpoint mounted inside FastAPI at /mcp
+#    Plus stdio (`idr-mcp`) and standalone HTTP (`IDR_MCP_TRANSPORT=streamable-http idr-mcp`)
+
+# 2. Agent-native tools & two-step safety guardrails:
+preview = forget_customer_identity(identifier_value="alice@example.com", dry_run=True)
+# -> returns blast_radius_summary + 5-min confirmation_token
+forget_customer_identity(identifier_value="alice@example.com", dry_run=False, confirmation_token=preview["confirmation_token"])
+
+# 3. Quality triage loop & self-discovery:
+get_triage_queue(max_confidence=0.45, limit=20)
+submit_evaluation_label(sample_id="smp_1", label="NON_MATCH", rationale="Shared store phone")
+# Resources: idr://spec/config-schema | idr://spec/cli-commands | idr://spec/canonicalizers`,
+      dbt: `# Export live warehouse metadata or YAML directly to 7 dbt_idr seed CSVs
+idr dbt export --file idr_config.yaml --output-dir dbt_idr/seeds
+
+# Run inside your existing dbt Core / dbt Cloud DAG
+cd dbt_idr && dbt seed && dbt run`,
+      python: `from idr_core.runner import IDRRunner, RunConfig
+from idr_core.privacy import PrivacyManager
+
+result = IDRRunner(adapter).run(RunConfig(run_mode="INCR", strict=True))
+print(result.run_id, result.clusters_impacted, result.duration_seconds)
+
+# Programmatic GDPR erasure + persistent SHA-256 suppression
+PrivacyManager(adapter).forget(identifier_value="alice@example.com", dry_run=False)`,
+      webhooks: `# Configure non-blocking HMAC-signed webhooks for autonomous ops
+export IDR_WEBHOOK_URL="https://ops.example.com/webhooks/idr"
+export IDR_WEBHOOK_SECRET="whsec_..."
+export IDR_WEBHOOK_SKIPPED_THRESHOLD="5"
+
+# Emitted events (with X-IDR-Signature: sha256=...):
+# - run.completed / run.failed
+# - guardrail.skipped_groups_spike
+# - crosswalk.cluster_changes
+# - privacy.erasure_completed (zero-PII receipt)`
+    };
+    function setIntTab(key) {
+      document.getElementById('int-code').textContent = intSnippets[key];
+      document.querySelectorAll('.int-tab').forEach(b => {
+        b.className = b.dataset.int === key
+          ? 'int-tab px-3 py-1.5 rounded-lg bg-indigo-500/20 text-cyan-300 border border-indigo-400/30'
+          : 'int-tab px-3 py-1.5 rounded-lg text-slate-400 hover:text-white';
+      });
+    }
+    document.querySelectorAll('.int-tab').forEach(b => b.addEventListener('click', () => setIntTab(b.dataset.int)));
+    setIntTab('yaml');
+
+    // Quickstart tabs
+    const qsSnippets = {
+      duckdb: `pip install "sql-identity-resolution[duckdb,api,mcp]"
+idr quickstart --rows 10000 --output demo.duckdb`,
+      snowflake: `pip install "sql-identity-resolution[snowflake,api,mcp]"
+idr init --platform snowflake
+idr run --platform snowflake --mode FULL`,
+      databricks: `pip install "sql-identity-resolution[databricks,api,mcp]"
+idr init --platform databricks
+idr run --platform databricks --mode FULL`,
+      bigquery: `pip install "sql-identity-resolution[bigquery,api,mcp]"
+idr init --platform bigquery --project my-gcp-project
+idr run --platform bigquery --project my-gcp-project --mode FULL`
+    };
+    function setQsTab(key) {
+      document.getElementById('qs-code').textContent = qsSnippets[key];
+      document.querySelectorAll('.qs-tab').forEach(b => {
+        b.className = b.dataset.qs === key
+          ? 'qs-tab px-2.5 py-1 rounded-md bg-indigo-500/20 text-cyan-300 border border-indigo-400/30'
+          : 'qs-tab px-2.5 py-1 rounded-md text-slate-400 hover:text-white';
+      });
+    }
+    document.querySelectorAll('.qs-tab').forEach(b => b.addEventListener('click', () => setQsTab(b.dataset.qs)));
+    setQsTab('duckdb');
+  </script>
+</body>
+</html>
