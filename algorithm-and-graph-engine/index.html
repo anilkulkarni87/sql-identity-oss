@@ -337,6 +337,23 @@
   
   
     <li class="md-tabs__item">
+      <a href="../databricks-app/" class="md-tabs__link">
+        
+  
+    
+  
+  Databricks App
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../warehouses-and-schema/" class="md-tabs__link">
         
   
@@ -716,6 +733,24 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#9-corroboration-fan-out-confidence-scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Corroboration &amp; Fan-Out Confidence Scoring
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-references-further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      10. References &amp; Further Reading
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -756,6 +791,26 @@
   
   <span class="md-ellipsis">
     Interfaces & dbt
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../databricks-app/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Databricks App
   </span>
   
 
@@ -1020,6 +1075,24 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#9-corroboration-fan-out-confidence-scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Corroboration &amp; Fan-Out Confidence Scoring
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-references-further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      10. References &amp; Further Reading
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1049,6 +1122,10 @@
 <p>This document details the underlying graph theory, iterative pure SQL algorithms, and stabilization invariants implemented in <code>sql-identity-resolution</code>.</p>
 <hr />
 <h2 id="1-mathematical-graph-formulation">1. Mathematical Graph Formulation<a class="headerlink" href="#1-mathematical-graph-formulation" title="Permanent link">&para;</a></h2>
+<div class="admonition tip">
+<p class="admonition-title">In Plain English</p>
+<p>Think of every source record (a CRM row, an order, a web session) as a <strong>dot</strong>, and every shared identifier (email, phone, loyalty ID) as a <strong>string</strong> tying two dots together. Any group of dots reachable from one another by following those strings is resolved into <strong>one customer</strong>.</p>
+</div>
 <p>Identity resolution partitions a set of heterogeneous source records <span class="arithmatex">\(V = \{e_1, e_2, \dots, e_N\}\)</span> into a set of mutually exclusive, collectively exhaustive equivalence classes (resolved identity clusters):</p>
 <div class="arithmatex">\[
 \mathcal{C} = \{C_1, C_2, \dots, C_K\} \quad \text{such that} \quad \bigcup_{k=1}^K C_k = V \quad \text{and} \quad C_i \cap C_j = \emptyset \; (\forall i \neq j)
@@ -1079,6 +1156,10 @@
 <p>Any connected component in <span class="arithmatex">\(G\)</span> constitutes a single resolved identity.</p>
 <hr />
 <h2 id="2-anchor-based-star-graph-reduction-mathcalon-vs-mathcalon2">2. Anchor-Based Star Graph Reduction (<span class="arithmatex">\(\mathcal{O}(N)\)</span> vs <span class="arithmatex">\(\mathcal{O}(N^2)\)</span>)<a class="headerlink" href="#2-anchor-based-star-graph-reduction-mathcalon-vs-mathcalon2" title="Permanent link">&para;</a></h2>
+<div class="admonition tip">
+<p class="admonition-title">In Plain English</p>
+<p>If 10,000 rows share the same identifier, connecting every row to every other row creates <strong>50 million</strong> edges. Instead, we pick one row as a <strong>hub (anchor)</strong> and draw <strong>9,999 spokes</strong> to it. The group stays 100% connected with <strong>99.98% fewer edges</strong>.</p>
+</div>
 <h3 id="the-clique-edge-explosion-problem">The Clique Edge Explosion Problem<a class="headerlink" href="#the-clique-edge-explosion-problem" title="Permanent link">&para;</a></h3>
 <p>In a naive identity resolution implementation, if an identifier (e.g., a shared household phone or corporate domain) matches <span class="arithmatex">\(N\)</span> records, generating all pairwise edges creates a complete graph (clique) <span class="arithmatex">\(K_N\)</span>:</p>
 <div class="arithmatex">\[
@@ -1153,6 +1234,10 @@ a(i) = \min \{e \in E \mid (e, i) \in E_B\}
 If <span class="arithmatex">\(u, v \in \text{group}(i)\)</span>, then in the star graph, <span class="arithmatex">\(u\)</span> is connected to <span class="arithmatex">\(a(i)\)</span> and <span class="arithmatex">\(v\)</span> is connected to <span class="arithmatex">\(a(i)\)</span>. Thus, the path <span class="arithmatex">\(u \leftrightarrow a(i) \leftrightarrow v\)</span> exists. By transitivity, <span class="arithmatex">\(u\)</span> and <span class="arithmatex">\(v\)</span> remain in the same connected component. The total edges produced across the entire dataset is bounded by <span class="arithmatex">\(\sum_{i} (\lvert V_i \rvert - 1) &lt; \sum_i \lvert V_i \rvert \in \mathcal{O}(\lvert E_B \rvert)\)</span>. <span class="arithmatex">\(\blacksquare\)</span></p>
 <hr />
 <h2 id="3-the-anti-megacluster-guardrail-max_group_size">3. The Anti-Megacluster Guardrail (<code>max_group_size</code>)<a class="headerlink" href="#3-the-anti-megacluster-guardrail-max_group_size" title="Permanent link">&para;</a></h2>
+<div class="admonition tip">
+<p class="admonition-title">In Plain English</p>
+<p>If 50,000 customer rows accidentally contain <code>test@example.com</code> or <code>000-000-0000</code>, linking them would collapse half your database into one giant false customer. This guardrail checks the group size first and <strong>quarantines</strong> any identifier shared by more than <code>max_group_size</code> rows.</p>
+</div>
 <p>Even with star graph reduction, a dirty placeholder identifier (e.g., <code>test@example.com</code>, <code>000-000-0000</code>, <code>N/A</code>) can link tens of thousands of unrelated entities together into a <strong>poison-pill mega-cluster</strong>.</p>
 <p>To guarantee graph integrity, the engine enforces a strict mathematical circuit breaker during <code>Stage 5: edge_building</code>, comparing each identifier's group size <span class="arithmatex">\(S(i)\)</span> against the effective threshold <span class="arithmatex">\(M_{\text{allowed}}(i)\)</span>:</p>
 <div class="arithmatex">\[
@@ -1189,6 +1274,10 @@ M_{\text{allowed}}(i) = \min \big( M_{\text{rule}}(i), \, M_{\text{global}} \big
 </ol>
 <hr />
 <h2 id="4-pure-sql-connected-components-via-iterative-label-propagation">4. Pure SQL Connected Components via Iterative Label Propagation<a class="headerlink" href="#4-pure-sql-connected-components-via-iterative-label-propagation" title="Permanent link">&para;</a></h2>
+<div class="admonition tip">
+<p class="admonition-title">In Plain English</p>
+<p>Every record starts holding its own ID as its label. In each round, every record looks at its neighbors and adopts the <strong>smallest ID</strong> it sees. After just 3–7 rounds, everyone in the same connected group agrees on the exact same ID—using ordinary <code>JOIN</code> + <code>GROUP BY</code>, with zero recursive CTEs.</p>
+</div>
 <h3 id="why-recursive-ctes-fail-in-enterprise-warehouses">Why Recursive CTEs Fail in Enterprise Warehouses<a class="headerlink" href="#why-recursive-ctes-fail-in-enterprise-warehouses" title="Permanent link">&para;</a></h3>
 <p>Most AI-generated SQL and textbook graph solutions rely on <code>WITH RECURSIVE</code>:
 - <strong>Snowflake</strong>: Recursion depth is strictly capped (default limit: 100 iterations), throwing: <code>Recursion limit reached in recursive query</code>.
@@ -1266,6 +1355,10 @@ k_{\text{converge}} \le \text{diameter}(C)
     Engine-&gt;&gt;Work: Persist converged component labels</code></pre>
 <hr />
 <h2 id="5-deterministic-cross-run-id-stabilization">5. Deterministic Cross-Run ID Stabilization<a class="headerlink" href="#5-deterministic-cross-run-id-stabilization" title="Permanent link">&para;</a></h2>
+<div class="admonition tip">
+<p class="admonition-title">In Plain English</p>
+<p>If Alice's cluster is <code>res_100</code> today and a new order arrives tomorrow with a smaller ID, her cluster ID shouldn't suddenly flip—otherwise every downstream CRM and BI dashboard breaks. When clusters merge, <strong>the larger (or older) cluster's ID wins</strong>, and every transition is logged to a crosswalk table.</p>
+</div>
 <h3 id="the-cluster-churn-problem-in-production">The "Cluster Churn" Problem in Production<a class="headerlink" href="#the-cluster-churn-problem-in-production" title="Permanent link">&para;</a></h3>
 <p>In raw connected components, the canonical cluster ID is simply the minimum node key:</p>
 <div class="arithmatex">\[
@@ -1406,6 +1499,30 @@ Downstream consumers can query this crosswalk as an <strong>immutable SCD Type 2
 </tbody>
 </table>
 <p>For empirical execution times across 6.3M entities and 15 tables on BigQuery (306s) and Databricks (296s), see <a href="../warehouses-and-schema/#5-production-benchmarks-real-world-runtimes">Production Benchmarks &amp; Real-World Runtimes</a>. (Snowflake benchmarks are currently in progress).</p>
+<hr />
+<h2 id="9-corroboration-fan-out-confidence-scoring">9. Corroboration &amp; Fan-Out Confidence Scoring<a class="headerlink" href="#9-corroboration-fan-out-confidence-scoring" title="Permanent link">&para;</a></h2>
+<div class="admonition tip">
+<p class="admonition-title">In Plain English</p>
+<p>A cluster linked by <strong>4 independent identifiers</strong> (email + phone + loyalty ID + address) is far more trustworthy than a cluster linked by just 1. Conversely, if <strong>296 people</strong> all share the exact same value, that's likely a shared household or corporate hub—so we <strong>penalize high fan-out</strong> to surface risky over-merges at the bottom of the confidence ranking.</p>
+</div>
+<p>For multi-entity clusters (<span class="arithmatex">\(|C| &gt; 1\)</span>), <code>sql-identity-resolution</code> computes a continuous confidence score in <span class="arithmatex">\((0, 1]\)</span> by combining <strong>Noisy-OR identifier corroboration</strong> with <strong>square-root fan-out damping</strong>:</p>
+<div class="arithmatex">\[
+P_{\text{corrob}}(C) = 1 - \prod_{t \in T(C)} (1 - w_t), \qquad
+f_{\text{fanout}}(C) = \min\!\left(1.0, \; \frac{2}{\sqrt{\max_{i \in C} \text{fanout}(i)}}\right)
+\]</div>
+<div class="arithmatex">\[
+\text{confidence\_score}(C) = \text{round}\!\Big( P_{\text{corrob}}(C) \cdot f_{\text{fanout}}(C) \cdot \big(0.85 + 0.15 \cdot s_{\text{div}}(C)\big), \; 4 \Big)
+\]</div>
+<p>where <span class="arithmatex">\(T(C)\)</span> is the set of distinct identifier types supporting cluster <span class="arithmatex">\(C\)</span>, <span class="arithmatex">\(w_t \in (0, 1)\)</span> is the identifier-type reliability weight, <span class="arithmatex">\(\text{fanout}(i)\)</span> is the maximum number of entities sharing a single identifier value in <span class="arithmatex">\(C\)</span>, and <span class="arithmatex">\(s_{\text{div}}(C) \in [0, 1]\)</span> measures source-system diversity. Singletons (<span class="arithmatex">\(|C| = 1\)</span>) receive <code>1.0</code> with reason <code>'SINGLETON_NO_MATCH_REQUIRED'</code> so they never pollute multi-entity triage queues.</p>
+<hr />
+<h2 id="10-references-further-reading">10. References &amp; Further Reading<a class="headerlink" href="#10-references-further-reading" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Probabilistic Record Linkage:</strong> Fellegi, I. P., &amp; Sunter, A. B. (1969). <em>A Theory for Record Linkage</em>. Journal of the American Statistical Association, 64(328), 1183–1210.</li>
+<li><strong>Label Propagation on Graphs:</strong> Raghavan, U. N., Albert, R., &amp; Kumara, S. (2007). <em>Near linear time algorithm to detect community structures in large-scale networks</em>. Physical Review E, 76(3), 036106.</li>
+<li><strong>Parallel Connected Components:</strong> Shiloach, Y., &amp; Vishkin, U. (1982). <em>An <span class="arithmatex">\(O(\log n)\)</span> parallel connectivity algorithm</em>. Journal of Algorithms, 3(1), 57–67.</li>
+<li><strong>Noisy-OR Evidence Aggregation:</strong> Pearl, J. (1988). <em>Probabilistic Reasoning in Intelligent Systems: Networks of Plausible Inference</em>. Morgan Kaufmann.</li>
+<li><strong>Entity Resolution &amp; Blocking:</strong> Christen, P. (2012). <em>Data Matching: Concepts and Techniques for Record Linkage, Entity Resolution, and Duplicate Detection</em>. Springer.</li>
+</ol>
 
 
 
