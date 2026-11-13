@@ -573,7 +573,7 @@ rules:
 overrides:
   - { type: DO_NOT_LINK, entity_key_a: "crm:101", entity_key_b: "crm:102", reason: "Shared household phone" }`,
       mcp: `# 1. Remote Streamable HTTP endpoint mounted inside FastAPI at /mcp
-#    Plus stdio (`idr-mcp`) and standalone HTTP (`IDR_MCP_TRANSPORT=streamable-http idr-mcp`)
+#    Plus stdio (idr-mcp) and standalone HTTP (IDR_MCP_TRANSPORT=streamable-http idr-mcp)
 
 # 2. Agent-native tools & two-step safety guardrails:
 preview = forget_customer_identity(identifier_value="alice@example.com", dry_run=True)
@@ -646,3 +646,4 @@ idr run --platform bigquery --project my-gcp-project --mode FULL`
   </script>
 </body>
 </html>
+
