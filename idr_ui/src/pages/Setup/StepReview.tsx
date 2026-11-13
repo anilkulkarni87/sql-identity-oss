@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { IDRConfig } from '../../types';
 import { api } from '../../api/client';
+import { useToast } from '../../components/Toast';
 
 
 export default function StepReview({
@@ -27,6 +28,7 @@ export default function StepReview({
     warningMessage?: string | null,
     onUpdateConfig?: (config: IDRConfig) => void
 }) {
+    const { toast } = useToast();
     const navigate = useNavigate();
     type ReviewPhase = 'idle' | 'saving' | 'running' | 'success';
     const [phase, setPhase] = useState<ReviewPhase>('idle');
@@ -69,9 +71,50 @@ export default function StepReview({
         }>;
     } | null>(null);
 
+    const [saveProgress, setSaveProgress] = useState<{
+        status: string;
+        step?: string;
+        label?: string;
+        percent: number;
+        detail?: string;
+        elapsed_seconds?: number;
+    } | null>(null);
+
     const saving = phase === 'saving';
     const loading = phase === 'running';
     const success = phase === 'success';
+
+    useEffect(() => {
+        if (phase !== 'saving') return;
+        let cancelled = false;
+
+        const poll = async () => {
+            try {
+                const prog = await api.getSaveConfigProgress();
+                if (cancelled) return;
+                setSaveProgress(prog);
+                if (prog.status === 'SUCCESS') {
+                    setConfigSaved(true);
+                    setPhase('idle');
+                    toast('success', 'Configuration saved', prog.message || 'Metadata persisted to warehouse.');
+                } else if (prog.status === 'ERROR') {
+                    const errMsg = prog.error || prog.detail || 'Failed to save configuration';
+                    setError(errMsg);
+                    setPhase('idle');
+                    toast('error', 'Failed to save configuration', errMsg);
+                }
+            } catch {
+                // Keep polling transiently
+            }
+        };
+
+        poll();
+        const interval = setInterval(poll, 350);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [phase]);
 
     useEffect(() => {
         if (phase !== 'running') return;
@@ -131,6 +174,14 @@ export default function StepReview({
         if (readOnly) return;
         setPhase('saving');
         setError(null);
+        setSaveProgress({
+            status: 'SAVING',
+            step: 'validating',
+            label: 'Validating configuration',
+            percent: 5,
+            detail: 'Starting configuration save...',
+            elapsed_seconds: 0,
+        });
         try {
             const cleanConfig = {
                 ...config,
@@ -141,9 +192,7 @@ export default function StepReview({
                 exclusions: config.exclusions || [],
                 overrides: config.overrides || [],
             };
-            await api.saveSetupConfig(cleanConfig);
-            setConfigSaved(true);
-            setPhase('idle');
+            await api.saveSetupConfigAsync(cleanConfig);
         } catch (err: any) {
             setError(err.message || String(err));
             setPhase('idle');
@@ -259,7 +308,7 @@ export default function StepReview({
                         title={readOnly ? "Read-only mode" : "Save configuration"}
                     >
                         {saving ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : <Save className="mr-2 w-4 h-4" />}
-                        {configSaved ? 'Config Saved' : 'Save Config'}
+                        {saving ? `Saving (${saveProgress?.percent ?? 0}%)` : configSaved ? 'Config Saved' : 'Save Config'}
                     </button>
                     <button
                         className={`${btnClass} ${dryRun ? 'bg-purple-600 hover:bg-purple-700' : ''}`}
@@ -272,6 +321,31 @@ export default function StepReview({
                     </button>
                 </div>
             </div>
+
+            {/* Smooth Batched Save Progress Banner */}
+            {saving && saveProgress && (
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 space-y-2.5">
+                    <div className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 text-blue-300 font-medium">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>{saveProgress.label || 'Saving configuration...'}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-blue-200/80 font-mono">
+                            <span>{saveProgress.elapsed_seconds?.toFixed(1) ?? '0.0'}s</span>
+                            <span>{saveProgress.percent}%</span>
+                        </div>
+                    </div>
+                    <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                        <div
+                            className="h-full bg-gradient-to-r from-blue-500 to-indigo-400 transition-all duration-300 ease-out"
+                            style={{ width: `${Math.min(100, Math.max(5, saveProgress.percent || 5))}%` }}
+                        />
+                    </div>
+                    {saveProgress.detail && (
+                        <p className="text-xs text-blue-200/70">{saveProgress.detail}</p>
+                    )}
+                </div>
+            )}
 
             {/* Read Only / Warning Alert */}
             {readOnly && (

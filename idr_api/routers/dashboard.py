@@ -205,3 +205,71 @@ async def get_alerts(adapter=Depends(get_adapter)):
         )
 
     return alerts
+
+
+@router.get("/api/metrics/confidence")
+async def get_confidence_distribution(adapter=Depends(get_adapter)):
+    """Get confidence score distribution across multi-entity clusters (excluding singletons)."""
+    buckets = [
+        ("Over-Merge Risk (<0.30)", "#ef4444"),
+        ("Review Queue (0.30–0.60)", "#f59e0b"),
+        ("Medium (0.60–0.85)", "#3b82f6"),
+        ("High (0.85–1.00)", "#10b981"),
+    ]
+    counts = {label: 0 for label, _ in buckets}
+    try:
+        rows = adapter.query("""
+            SELECT
+                CASE
+                    WHEN confidence_score < 0.30 THEN 'Over-Merge Risk (<0.30)'
+                    WHEN confidence_score < 0.60 THEN 'Review Queue (0.30–0.60)'
+                    WHEN confidence_score < 0.85 THEN 'Medium (0.60–0.85)'
+                    ELSE 'High (0.85–1.00)'
+                END AS bucket,
+                COUNT(*) AS cnt
+            FROM idr_out.identity_clusters_current
+            WHERE cluster_size > 1 AND confidence_score IS NOT NULL
+            GROUP BY 1
+        """)
+        for r in rows:
+            b = r.get("bucket")
+            if b in counts:
+                counts[b] = int(r.get("cnt") or 0)
+    except Exception:
+        pass
+
+    return [
+        {"bucket": label, "count": counts[label], "color": color}
+        for label, color in buckets
+    ]
+
+
+@router.get("/api/metrics/sources")
+async def get_source_contribution(adapter=Depends(get_adapter)):
+    """Get entity and cluster counts per source system."""
+    source_expr = (
+        "SPLIT(entity_key, ':')[SAFE_OFFSET(0)]"
+        if getattr(adapter, "dialect", "") == "bigquery"
+        else "SPLIT_PART(entity_key, ':', 1)"
+    )
+    try:
+        rows = adapter.query(f"""
+            SELECT
+                {source_expr} AS source_id,
+                COUNT(*) AS entities,
+                COUNT(DISTINCT resolved_id) AS clusters
+            FROM idr_out.identity_resolved_membership_current
+            GROUP BY 1
+            ORDER BY entities DESC
+            LIMIT 10
+        """)
+        return [
+            {
+                "source_id": str(r.get("source_id") or "unknown"),
+                "entities": int(r.get("entities") or 0),
+                "clusters": int(r.get("clusters") or 0),
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []

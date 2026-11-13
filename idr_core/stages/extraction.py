@@ -139,6 +139,18 @@ class ExtractionStage(BaseStage):
             {union_sql}
         """)
 
+        # Enforce GDPR/CCPA persistent suppression across FULL and INCR reruns
+        if self.adapter.table_exists("idr_meta.privacy_suppression"):
+            suppressed_count = (
+                self.adapter.query_one("SELECT COUNT(*) FROM idr_meta.privacy_suppression") or 0
+            )
+            if suppressed_count > 0:
+                sha_expr = self._dialect["sha256"]("LOWER(TRIM(entity_key))")
+                self.adapter.execute(f"""
+                    DELETE FROM idr_work.entities_delta
+                    WHERE {sha_expr} IN (SELECT entity_key_hash FROM idr_meta.privacy_suppression)
+                """)
+
         count = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.entities_delta")
         return count or 0
 
