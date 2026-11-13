@@ -2,6 +2,7 @@
 title: SQL Identity Resolution
 hide:
   - navigation
+  - toc
 ---
 
 <div class="idr-hero" markdown>
@@ -22,6 +23,15 @@ hide:
   <a href="getting-started/" class="idr-btn-primary">Get Started in 60 Seconds →</a>
   <a href="concepts-and-architecture/" class="idr-btn-secondary">Explore Architecture</a>
   <a href="https://github.com/anilkulkarni87/sql-identity-oss" class="idr-btn-secondary">GitHub Repository</a>
+</div>
+
+<div class="idr-pills">
+  <span class="idr-pill">❄️ Snowflake</span>
+  <span class="idr-pill">🧱 Databricks</span>
+  <span class="idr-pill">☁️ BigQuery</span>
+  <span class="idr-pill">🦆 DuckDB</span>
+  <span class="idr-pill">🤖 17 MCP Agent Tools</span>
+  <span class="idr-pill">📦 dbt Package</span>
 </div>
 
 </div>
@@ -62,15 +72,54 @@ idr quickstart --rows 10000 --output demo.duckdb
 idr ui --db demo.duckdb
 ```
 
-### 🎬 Live Cloud Execution & Production Runtimes
+### 🎬 Live Cloud Benchmarks (6.3M Entities · 15 Source Tables)
 
-- **Snowflake Virtual Warehouse**: 6.3M entities across 15 tables resolved into 1.54M clusters in **170s (2.8 min)** (~37k entities/sec).
-- **Databricks SQL Warehouse**: 6.3M entities across 15 tables resolved into 1.54M clusters in **296s (4.9 min)** (~21k entities/sec).
-- **Google BigQuery (Serverless)**: 6.3M entities across 15 tables resolved into 1.54M clusters in **306s (5.1 min)** (~21k entities/sec).
+All three cloud warehouses resolved **6,297,049** entities and **5,381,635** edges into **1,544,042** identical clusters from a single portable config:
+
+<div class="idr-stats-grid">
+  <div class="idr-stat-card">
+    <div class="idr-stat-number">170s</div>
+    <div class="idr-stat-label">Snowflake (2.8 min · ~37k ent/s)</div>
+  </div>
+  <div class="idr-stat-card">
+    <div class="idr-stat-number">296s</div>
+    <div class="idr-stat-label">Databricks (4.9 min · ~21k ent/s)</div>
+  </div>
+  <div class="idr-stat-card">
+    <div class="idr-stat-number">306s</div>
+    <div class="idr-stat-label">BigQuery (5.1 min · ~21k ent/s)</div>
+  </div>
+</div>
 
 👉 [View Full Stage-by-Stage Production Benchmark Breakdown →](warehouses-and-schema.md#5-production-benchmarks-real-world-runtimes)
 
-![IDR Full Pipeline Run on Databricks](assets/recordings/idr-databricks-run.gif)
+<div class="idr-media-frame">
+  <img src="assets/recordings/idr-databricks-run.gif" alt="IDR Full Pipeline Run on Databricks" />
+  <div class="idr-media-caption">End-to-end 6.3M-entity resolution run inside Databricks SQL Warehouse</div>
+</div>
+
+---
+
+## 🔍 Before → After in 10 Seconds
+
+<div class="idr-cards-grid">
+  <div class="idr-card">
+    <h3>Before: Fragmented Warehouse Tables</h3>
+    <p>
+      <code>CUSTOMERS</code>: <code>cust_101</code> · <code>alice+vip@gmail.com</code><br/>
+      <code>ORDERS_ONLINE</code>: <code>ord_502</code> · <code>alice@gmail.com</code> · <code>+1-415-555-0199</code><br/>
+      <code>INSTORE_ACCOUNTS</code>: <code>pos_980</code> · <code>(415) 555-0199</code>
+    </p>
+  </div>
+  <div class="idr-card">
+    <h3>After: Unified Golden Profile</h3>
+    <p>
+      <strong>Persistent ID:</strong> <code>resolved_id = res_8f3a1c</code><br/>
+      <strong>Linked Keys:</strong> <code>cust_101</code>, <code>ord_502</code>, <code>pos_980</code><br/>
+      <strong>Golden Record:</strong> Canonical email, phone, survivorship attributes, confidence score, and audit crosswalk.
+    </p>
+  </div>
+</div>
 
 ---
 

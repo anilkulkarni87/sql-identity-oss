@@ -88,10 +88,13 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Quickstart: getting-started.md
-  - Architecture: concepts-and-architecture.md
-  - Graph Engine: algorithm-and-graph-engine.md
-  - Governance: configuration-and-governance.md
-  - CLI & dbt: interfaces-and-dbt.md
-  - Databricks App: databricks-app.md
+  - Get Started:
+      - Quickstart: getting-started.md
+      - Architecture: concepts-and-architecture.md
+  - Engine & Governance:
+      - Graph Engine: algorithm-and-graph-engine.md
+      - Configuration & Governance: configuration-and-governance.md
+  - Interfaces:
+      - CLI, UI, MCP & dbt: interfaces-and-dbt.md
+      - Databricks App: databricks-app.md
   - Warehouses: warehouses-and-schema.md

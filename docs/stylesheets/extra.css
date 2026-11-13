@@ -398,3 +398,48 @@
   max-width: 100% !important;
   height: auto !important;
 }
+
+/* Warehouse & Ecosystem Pill Strip */
+.idr-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1.35rem;
+}
+
+.idr-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.72rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--idr-text-muted);
+  background: var(--idr-surface);
+  border: 1px solid var(--idr-border);
+  border-radius: 999px;
+}
+
+/* Framed Media Container for Demos & Screenshots */
+.idr-media-frame {
+  margin: 1.5rem 0 2rem;
+  padding: 0.65rem;
+  background: var(--idr-surface);
+  border: 1px solid var(--idr-border);
+  border-radius: 0.9rem;
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.25);
+}
+
+.idr-media-frame img {
+  display: block;
+  width: 100%;
+  border-radius: 0.55rem;
+}
+
+.idr-media-caption {
+  text-align: center;
+  font-size: 0.76rem;
+  color: var(--idr-text-muted);
+  margin-top: 0.55rem;
+}
