@@ -10,6 +10,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -78,6 +82,8 @@
     .docs-prose th { text-align: left; padding: 0.6rem 0.75rem; background: rgba(15, 23, 42, 0.9); color: #67e8f9; border-bottom: 1px solid rgba(255,255,255,0.12); font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; }
     .docs-prose td { padding: 0.55rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.06); color: #cbd5e1; }
     .docs-prose blockquote { border-left: 3px solid #6366f1; background: rgba(99, 102, 241, 0.08); padding: 0.6rem 1rem; border-radius: 0 0.5rem 0.5rem 0; margin: 1rem 0; color: #cbd5e1; }
+    .docs-prose .mermaid { background: rgba(2, 6, 23, 0.7); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.75rem; padding: 1.25rem; margin: 1.25rem 0; overflow-x: auto; display: flex; justify-content: center; }
+    .docs-prose .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.5rem 0; }
   </style>
 </head>
 <body class="antialiased selection:bg-indigo-500/30 selection:text-cyan-200">
@@ -717,6 +723,63 @@ idr run --platform bigquery --project my-gcp-project --mode FULL`
       });
     }
 
+    if (window.mermaid) {
+      mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+    }
+
+    function escapeHtmlText(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    async function renderMarkdownDoc(text, contentEl) {
+      const mathBlocks = [];
+      const segments = text.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+      const protectedText = segments.map((seg, idx) => {
+        if (idx % 2 === 1) return seg;
+        return seg
+          .replace(/\$\$([\s\S]*?)\$\$/g, (m) => {
+            const token = '%%IDR_MATH_' + mathBlocks.length + '%%';
+            mathBlocks.push(m);
+            return token;
+          })
+          .replace(/\$([^\n$]+?)\$/g, (m) => {
+            const token = '%%IDR_MATH_' + mathBlocks.length + '%%';
+            mathBlocks.push(m);
+            return token;
+          });
+      }).join('');
+
+      let html = marked.parse(protectedText);
+      html = html.replace(/%%IDR_MATH_(\d+)%%/g, (_, i) => escapeHtmlText(mathBlocks[Number(i)]));
+      contentEl.innerHTML = html;
+
+      const mermaidCodes = contentEl.querySelectorAll('pre > code.language-mermaid');
+      if (mermaidCodes.length && window.mermaid) {
+        mermaidCodes.forEach((codeEl) => {
+          const pre = codeEl.parentElement;
+          const div = document.createElement('div');
+          div.className = 'mermaid';
+          div.textContent = codeEl.textContent;
+          pre.replaceWith(div);
+        });
+        try {
+          await mermaid.run({ querySelector: '#docs-content .mermaid' });
+        } catch (e) {
+          console.warn('Mermaid render error:', e);
+        }
+      }
+
+      if (window.renderMathInElement) {
+        renderMathInElement(contentEl, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false }
+          ],
+          throwOnError: false
+        });
+      }
+    }
+
     async function loadDoc(file, updateHash) {
       activeDocFile = file;
       renderDocsNav();
@@ -742,7 +805,7 @@ idr run --platform bigquery --project my-gcp-project --mode FULL`
           contentEl.innerHTML = '';
           contentEl.appendChild(pre);
         } else if (window.marked) {
-          contentEl.innerHTML = marked.parse(text);
+          await renderMarkdownDoc(text, contentEl);
         } else {
           const pre = document.createElement('pre');
           pre.textContent = text;
