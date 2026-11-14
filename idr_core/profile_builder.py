@@ -5,10 +5,9 @@ Generates the Golden Record (Unified Profile) by applying survivorship rules
 to the resolved identity clusters.
 """
 
-import json
-
 from .adapters.base import IDRAdapter, get_dialect_config
 from .config import validate_fqn, validate_identifier, validate_sql_expr
+from .survivorship import build_survivorship_expr
 
 
 class ProfileBuilder:
@@ -263,70 +262,11 @@ class ProfileBuilder:
         return " UNION ALL ".join(unions)
 
     def _build_column_selection(self, rule, source_id_lookup=None) -> str:
-        """
-        Generates the aggregation logic for a single attribute (e.g. ARG_MAX).
-        """
+        """Generates the aggregation logic for a single attribute via survivorship registry."""
         attr = validate_identifier(str(rule["attribute_name"]), "attribute_name")
-        strategy = rule["strategy"]
-        source_id_lookup = source_id_lookup or {}
-
-        # DuckDB / BigQuery / Snowflake / Databricks syntax differences handled here
-
-        if strategy == "RECENCY":
-            # ARG_MAX(attr, recency_ts) with fallback sentinel timestamp for un-watermarked dimension tables
-            # DuckDB: arg_max(val, ts) ignores NULL weights; coalesce NULL recency_ts so dimension values survive
-            # BigQuery: ARRAY_AGG(x IGNORE NULLS ORDER BY ts DESC LIMIT 1)[SAFE_OFFSET(0)]
-            # Snowflake / Databricks: MAX_BY(val, ts) ignores NULL weights; coalesce NULL recency_ts
-            if self.dialect_name == "duckdb":
-                return (
-                    f"arg_max({attr}, CASE WHEN {attr} IS NOT NULL "
-                    f"THEN COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00') ELSE NULL END) AS {attr}"
-                )
-            elif self.dialect_name in ("snowflake", "databricks"):
-                return (
-                    f"MAX_BY({attr}, CASE WHEN {attr} IS NOT NULL "
-                    f"THEN COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00') ELSE NULL END) AS {attr}"
-                )
-            elif self.dialect_name == "bigquery":
-                return f"ARRAY_AGG({attr} IGNORE NULLS ORDER BY recency_ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
-
-        elif strategy == "PRIORITY":
-            # Priority list logic
-            # Assign specific integer priority to source_id and use ARG_MIN / MIN_BY
-            try:
-                raw_list = rule.get("source_priority_list") or "[]"
-                if isinstance(raw_list, list):
-                    p_list = raw_list
-                else:
-                    p_list = json.loads(str(raw_list).replace("'", '"'))
-            except Exception:
-                p_list = []
-
-            # Generate Case-based priority map (penalize NULL attribute values so non-null wins)
-            when_clauses = [f"WHEN {attr} IS NULL THEN 999999"]
-            for idx, src in enumerate(p_list):
-                resolved_src = source_id_lookup.get(str(src), str(src).replace(".", "_"))
-                safe_src = validate_identifier(resolved_src, "source_priority_item")
-                when_clauses.append(f"WHEN source_id = '{safe_src}' THEN {idx}")
-            else_val = 999
-
-            priority_expr = f"CASE {' '.join(when_clauses)} ELSE {else_val} END"
-
-            if self.dialect_name == "duckdb":
-                return f"arg_min({attr}, {priority_expr}) AS {attr}"
-            elif self.dialect_name in ("snowflake", "databricks"):
-                return f"MIN_BY({attr}, {priority_expr}) AS {attr}"
-            elif self.dialect_name == "bigquery":
-                return f"ARRAY_AGG({attr} IGNORE NULLS ORDER BY {priority_expr} ASC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
-
-        elif strategy == "FREQUENCY":
-            # MODE calculation
-            if self.dialect_name == "duckdb":
-                return f"mode({attr}) AS {attr}"
-            elif self.dialect_name in ("snowflake", "databricks"):
-                return f"MODE({attr}) AS {attr}"
-            elif self.dialect_name == "bigquery":
-                return f"APPROX_TOP_COUNT({attr}, 1)[SAFE_OFFSET(0)].value AS {attr}"
-
-        # Default fallback
-        return f"MAX({attr}) AS {attr}"
+        return build_survivorship_expr(
+            attr=attr,
+            rule=rule,
+            dialect=self.dialect_name,
+            source_id_lookup=source_id_lookup or {},
+        )

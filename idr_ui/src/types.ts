@@ -16,6 +16,9 @@ export interface SourceConfig {
     id: string;
     table: string; // Table FQN
     entity_key?: string;
+    key_columns?: string[];
+    deduplicate?: boolean;
+    dedup_order_by?: string;
     watermark_column?: string;
     identifiers?: Identifier[];
     attributes?: Attribute[];
@@ -53,9 +56,23 @@ export interface OverrideRule {
 
 export interface SurvivorshipRule {
     attribute: string;
-    strategy: 'RECENCY' | 'PRIORITY' | 'FREQUENCY' | 'AGG_MAX' | 'AGG_SUM';
+    strategy:
+        | 'RECENCY'
+        | 'PRIORITY'
+        | 'PRIORITY_RECENCY'
+        | 'LATEST_FROM_SOURCE'
+        | 'FREQUENCY'
+        | 'ANY_TRUE'
+        | 'ALL_TRUE'
+        | 'EARLIEST'
+        | 'AGG_MAX'
+        | 'AGG_MIN'
+        | 'AGG_SUM'
+        | 'COLLECT_DISTINCT'
+        | (string & {});
     source_priority?: string[]; // List of table names or IDs
     recency_field?: string;
+    strict_source?: boolean;
 }
 
 export interface IDRConfig {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Layers, ArrowUp, Zap, Clock, Hash } from "lucide-react";
 import { IDRConfig, SurvivorshipRule } from '../../types';
+import { CustomSelect } from '../../components/CustomSelect';
 
 interface StepSurvivorshipProps {
     config: IDRConfig;
@@ -70,9 +71,16 @@ export default function StepSurvivorship({ config, onNext, onBack }: StepSurvivo
     const strategies = [
         { id: 'RECENCY', label: 'Recency (Newest Wins)', icon: Clock },
         { id: 'PRIORITY', label: 'Source Priority', icon: Layers },
+        { id: 'PRIORITY_RECENCY', label: 'Source Priority + Recency', icon: Layers },
+        { id: 'LATEST_FROM_SOURCE', label: 'Latest From Specific Source(s)', icon: Clock },
         { id: 'FREQUENCY', label: 'Frequency (Most Common)', icon: Zap },
+        { id: 'ANY_TRUE', label: 'Consent: Any True (Opt-Out Safe)', icon: Zap },
+        { id: 'ALL_TRUE', label: 'Consent: All True', icon: Zap },
+        { id: 'EARLIEST', label: 'Earliest (First Seen)', icon: Clock },
         { id: 'AGG_MAX', label: 'Max Value', icon: ArrowUp },
-        // { id: 'AGG_SUM', label: 'Sum', icon: Hash },
+        { id: 'AGG_MIN', label: 'Min Value', icon: ArrowUp },
+        { id: 'AGG_SUM', label: 'Sum (LTV / Counts)', icon: Hash },
+        { id: 'COLLECT_DISTINCT', label: 'Collect Distinct (List)', icon: Layers },
     ];
 
     const btnClass = "px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -105,19 +113,16 @@ export default function StepSurvivorship({ config, onNext, onBack }: StepSurvivo
                                     </div>
                                     <span className="font-semibold text-gray-200">{attr}</span>
                                 </div>
-                                <select
+                                <CustomSelect
                                     value={currentStrategy}
-                                    onChange={(e) => updateRule(attr, 'strategy', e.target.value)}
-                                    className="bg-gray-900 border border-gray-600 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
-                                >
-                                    {strategies.map(s => (
-                                        <option key={s.id} value={s.id}>{s.label}</option>
-                                    ))}
-                                </select>
+                                    onChange={(val) => updateRule(attr, 'strategy', val)}
+                                    options={strategies.map(s => ({ value: s.id, label: s.label }))}
+                                    buttonClassName="text-sm min-w-[230px]"
+                                />
                             </div>
 
                             {/* Strategy Specific Config */}
-                            {currentStrategy === 'PRIORITY' && (
+                            {(currentStrategy === 'PRIORITY' || currentStrategy === 'PRIORITY_RECENCY' || currentStrategy === 'LATEST_FROM_SOURCE') && (
                                 <div className="space-y-2 bg-gray-900/50 p-3 rounded text-sm">
                                     <label className="text-gray-400 text-xs uppercase tracking-wider font-semibold">Source Priority (High to Low)</label>
                                     <div className="flex flex-col gap-1">

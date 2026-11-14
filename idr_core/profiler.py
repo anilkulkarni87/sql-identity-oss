@@ -354,6 +354,18 @@ class IDRDataProfiler:
                 }
                 continue
 
+            # Check candidate entity_key uniqueness & nulls on sample rows
+            key_vals = []
+            has_null_keys = False
+            for r in sample_rows:
+                # Match case-insensitively on column name
+                val = next((v for k, v in r.items() if k.lower() == entity_key_col.lower()), None)
+                if val is None:
+                    has_null_keys = True
+                else:
+                    key_vals.append(val)
+            has_dup_keys = len(key_vals) != len(set(key_vals))
+
             table_id = fqn.replace(".", "_")
             source_entry = {
                 "id": table_id,
@@ -366,6 +378,10 @@ class IDRDataProfiler:
             }
             if watermark_col:
                 source_entry["watermark_column"] = watermark_col
+            if has_dup_keys:
+                source_entry["deduplicate"] = True
+                if watermark_col:
+                    source_entry["dedup_order_by"] = f"{watermark_col} DESC"
 
             sources.append(source_entry)
 
@@ -375,6 +391,8 @@ class IDRDataProfiler:
                 "selected_entity_key": entity_key_col,
                 "selected_watermark": watermark_col,
                 "identifiers_mapped": [i["expr"] for i in table_identifiers],
+                "duplicate_entity_keys_detected": has_dup_keys,
+                "null_entity_keys_detected": has_null_keys,
             }
 
         # 7. Adaptive Matching Rules based on observed frequency

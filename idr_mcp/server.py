@@ -1227,7 +1227,9 @@ sources:
   - id: customers                    # Unique logical source ID
     table: db.schema.customers       # Fully-qualified table name
     entity_type: PERSON
-    entity_key: customer_id          # Primary row key expression
+    entity_key: customer_id          # Primary row key expression, or AUTO (with optional key_columns)
+    deduplicate: false               # Optional: ROW_NUMBER() dedup on entity_key before extraction
+    dedup_order_by: "updated_at DESC" # Optional: ORDER BY used when deduplicate: true
     watermark: updated_at            # Optional incremental timestamp column
     watermark_lookback: 60           # Optional lookback minutes
     identifiers:
@@ -1251,7 +1253,7 @@ fuzzy_rules: []
 
 survivorship:
   - attribute: first_name
-    strategy: RECENCY                # RECENCY | PRIORITY | FREQUENCY | LONGEST
+    strategy: RECENCY                # RECENCY | PRIORITY | PRIORITY_RECENCY | LATEST_FROM_SOURCE | FREQUENCY | ANY_TRUE | ALL_TRUE | EARLIEST | AGG_MAX | AGG_MIN | AGG_SUM | COLLECT_DISTINCT | plugin
     source_priority: [customers]
 
 exclusions:                          # Optional custom exclusions (EXACT | LIKE)

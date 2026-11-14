@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2, ShieldAlert, Link2 } from "lucide-react";
 import { ExclusionRule, IDRConfig, MatchingRule, OverrideRule } from '../../types';
 import { api } from '../../api/client';
+import { CustomSelect } from '../../components/CustomSelect';
 
 const BUILTIN_CANONICALIZERS = [
     'EMAIL_STANDARD',
@@ -281,33 +282,33 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                     <div className="space-y-2">
                                         <div className="flex flex-wrap items-center gap-2">
                                             <label className="text-xs text-gray-500">Normalization:</label>
-                                            <select
+                                            <CustomSelect
                                                 value={
                                                     BUILTIN_CANONICALIZERS.includes((rule.canonicalize || 'LOWERCASE').toUpperCase())
                                                         ? (rule.canonicalize || 'LOWERCASE').toUpperCase()
                                                         : 'CUSTOM_SQL'
                                                 }
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
+                                                onChange={(val) => {
                                                     if (val === 'CUSTOM_SQL') {
                                                         updateRuleField(idx, 'canonicalize', 'LOWER(TRIM({val}))');
                                                     } else {
                                                         updateRuleField(idx, 'canonicalize', val);
                                                     }
                                                 }}
-                                                className="bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500"
-                                                onClick={(e) => e.stopPropagation()}
-                                            >
-                                                <option value="EMAIL_STANDARD">Email Standard (Trim + Lowercase, keeps +tag)</option>
-                                                <option value="EMAIL_STRIP_PLUS">Email Strip +Tag (user+tag@domain → user@domain)</option>
-                                                <option value="PHONE_US_10">Phone US 10-Digit (Strips +1 & punctuation)</option>
-                                                <option value="PHONE_DIGITS">Phone Digits Only (Strips non-digits)</option>
-                                                <option value="ALPHANUMERIC_UPPER">Alphanumeric Upper (Strips spaces/hyphens)</option>
-                                                <option value="LOWERCASE">Lowercase</option>
-                                                <option value="UPPERCASE">Uppercase</option>
-                                                <option value="EXACT">Exact / None</option>
-                                                <option value="CUSTOM_SQL">Custom Warehouse SQL (&#123;val&#125;)...</option>
-                                            </select>
+                                                options={[
+                                                    { value: 'EMAIL_STANDARD', label: 'Email Standard (Trim + Lowercase, keeps +tag)' },
+                                                    { value: 'EMAIL_STRIP_PLUS', label: 'Email Strip +Tag (user+tag@domain → user@domain)' },
+                                                    { value: 'PHONE_US_10', label: 'Phone US 10-Digit (Strips +1 & punctuation)' },
+                                                    { value: 'PHONE_DIGITS', label: 'Phone Digits Only (Strips non-digits)' },
+                                                    { value: 'ALPHANUMERIC_UPPER', label: 'Alphanumeric Upper (Strips spaces/hyphens)' },
+                                                    { value: 'LOWERCASE', label: 'Lowercase' },
+                                                    { value: 'UPPERCASE', label: 'Uppercase' },
+                                                    { value: 'EXACT', label: 'Exact / None' },
+                                                    { value: 'CUSTOM_SQL', label: 'Custom Warehouse SQL ({val})...' },
+                                                ]}
+                                                buttonClassName="text-xs py-1 px-2.5"
+                                                menuClassName="left-0 right-auto min-w-[320px]"
+                                            />
                                         </div>
                                         {!BUILTIN_CANONICALIZERS.includes((rule.canonicalize || 'LOWERCASE').toUpperCase()) && (
                                             <div className="flex items-center gap-2">

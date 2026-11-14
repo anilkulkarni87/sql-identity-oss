@@ -17,11 +17,15 @@ Supports:
    - Any safe SQL expression containing `{val}` or `{col}` (e.g., `REGEXP_REPLACE(LOWER({val}), '^0+', '')`)
 """
 
+import logging
+from importlib.metadata import entry_points
 from typing import Callable, Dict, List
 
 from .config import validate_sql_expr
 
+logger = logging.getLogger(__name__)
 CanonicalizerFn = Callable[[str, str], str]
+_CANON_PLUGINS_LOADED = False
 
 
 def _regexp_replace_all(expr: str, pattern: str, replacement: str, dialect: str) -> str:
@@ -109,13 +113,38 @@ def register_canonicalizer(name: str, fn: CanonicalizerFn) -> None:
     _CANONICALIZER_REGISTRY[name.strip().upper()] = fn
 
 
+def load_canonicalizer_plugins(force: bool = False) -> int:
+    """Load third-party canonicalizers registered via Python entry_points."""
+    global _CANON_PLUGINS_LOADED
+    if _CANON_PLUGINS_LOADED and not force:
+        return 0
+    _CANON_PLUGINS_LOADED = True
+    loaded = 0
+    try:
+        eps = entry_points(group="idr.canonicalizers")
+    except Exception as exc:
+        logger.warning("Failed to inspect idr.canonicalizers entry points: %s", exc)
+        return 0
+
+    for ep in eps:
+        try:
+            fn = ep.load()
+            register_canonicalizer(ep.name, fn)
+            loaded += 1
+        except Exception as exc:
+            logger.warning("Failed to load canonicalizer plugin '%s': %s", ep.name, exc)
+    return loaded
+
+
 def list_canonicalizers() -> List[str]:
     """Return sorted list of registered canonicalizer preset names."""
+    load_canonicalizer_plugins()
     return sorted(k for k in _CANONICALIZER_REGISTRY.keys() if k)
 
 
 def is_registered_canonicalizer(name: str) -> bool:
     """Check whether `name` is a registered preset canonicalizer."""
+    load_canonicalizer_plugins()
     return str(name or "").strip().upper() in _CANONICALIZER_REGISTRY
 
 
@@ -124,6 +153,7 @@ def validate_canonicalize_spec(spec: str, field_name: str = "canonicalize") -> s
     Validate a canonicalize specification (either a registered preset name
     or a custom SQL template containing `{val}` or `{col}`).
     """
+    load_canonicalizer_plugins()
     if spec is None:
         return "NONE"
     raw = str(spec).strip()

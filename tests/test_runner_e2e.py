@@ -474,7 +474,7 @@ def test_dry_run_mode_computes_diffs_without_mutating_production_tables(duck_env
             ('c1', 'alice@example.com', '111-1111', '2026-01-01 00:00:00'),
             ('c2', 'bob@example.com', '222-2222', '2026-01-01 00:00:00');
 
-        INSERT INTO idr_meta.source_table VALUES
+        INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES
             ('crm', 'raw_crm', 'PERSON', 'id', 'updated_at', 0, TRUE);
         INSERT INTO idr_meta.rule VALUES
             ('r_email', 'email', 'LOWERCASE', 1000, 1, TRUE),
@@ -539,7 +539,7 @@ def test_strict_mode_bypasses_fuzzy_matching(duck_env):
             ('u1', 'steven@a.com', 'miller', 'Steven', '2026-01-01 00:00:00'),
             ('u2', 'stephen@b.com', 'miller', 'Stephen', '2026-01-01 00:00:00');
 
-        INSERT INTO idr_meta.source_table VALUES
+        INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES
             ('users', 'raw_users', 'PERSON', 'id', 'updated_at', 0, TRUE);
         INSERT INTO idr_meta.rule VALUES
             ('r_email', 'email', 'LOWERCASE', 1000, 1, TRUE);
@@ -592,7 +592,7 @@ def test_four_hop_transitive_chain_across_three_sources(duck_env):
         INSERT INTO src_pos VALUES
             ('n3', '555-1234', 'LYL-777');
 
-        INSERT INTO idr_meta.source_table VALUES
+        INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES
             ('crm', 'src_crm', 'PERSON', 'id', NULL, 0, TRUE),
             ('web', 'src_web', 'PERSON', 'id', NULL, 0, TRUE),
             ('pos', 'src_pos', 'PERSON', 'id', NULL, 0, TRUE);
@@ -636,7 +636,7 @@ def test_identifier_exclusions_exact_and_like_patterns(duck_env):
             ('l3', 'bot1@noreply.org', '555-1111'),
             ('l4', 'bot2@noreply.org', '555-1111');
 
-        INSERT INTO idr_meta.source_table VALUES
+        INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES
             ('leads', 'raw_leads', 'PERSON', 'id', NULL, 0, TRUE);
         INSERT INTO idr_meta.rule VALUES
             ('r_email', 'email', 'LOWERCASE', 1000, 1, TRUE),
@@ -671,7 +671,7 @@ def test_preflight_blocks_concurrent_run_and_recovers_stale_run(duck_env):
     adapter.execute("""
         CREATE TABLE raw_c (id VARCHAR, email VARCHAR);
         INSERT INTO raw_c VALUES ('1', 'a@b.com');
-        INSERT INTO idr_meta.source_table VALUES ('c', 'raw_c', 'PERSON', 'id', NULL, 0, TRUE);
+        INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES ('c', 'raw_c', 'PERSON', 'id', NULL, 0, TRUE);
         INSERT INTO idr_meta.rule VALUES ('r_email', 'email', 'LOWERCASE', 100, 1, TRUE);
         INSERT INTO idr_meta.identifier_mapping VALUES ('c', 'email', 'email', FALSE);
     """)

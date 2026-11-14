@@ -353,6 +353,11 @@ Examples:
         "--no-persist", action="store_true", help="Do not write sampled pairs to idr_out.evaluation_sample"
     )
 
+    # === idr plugins ===
+    plugins_parser = subparsers.add_parser("plugins", help="Inspect registered plugins and extensions")
+    plugins_subparsers = plugins_parser.add_subparsers(dest="plugins_cmd", help="Plugin commands")
+    plugins_subparsers.add_parser("list", help="List registered canonicalizers, survivorship strategies, and adapters")
+
     # Parse arguments
     parsed_args = parser.parse_args(args)
 
@@ -404,6 +409,12 @@ Examples:
 
     if parsed_args.command == "evaluate":
         return handle_evaluate(parsed_args)
+
+    if parsed_args.command == "plugins":
+        if getattr(parsed_args, "plugins_cmd", None) == "list":
+            return handle_plugins_list()
+        plugins_parser.print_help()
+        return 0
 
     return 0
 
@@ -994,6 +1005,26 @@ def handle_evaluate(args) -> int:
     print(f"Near-Miss Singletons Found : {res['near_miss_candidates_found']:,}")
     print("-" * 70)
     print(f"Stratified Audit Samples   : {res['samples_extracted']} pairs extracted ({res['samples_persisted']} saved to idr_out.evaluation_sample)")
+    return 0
+
+
+def handle_plugins_list() -> int:
+    """List registered canonicalizers, survivorship strategies, and warehouse adapters."""
+    from idr_core.adapters import list_adapters
+    from idr_core.canonicalizers import list_canonicalizers
+    from idr_core.survivorship import list_survivorship_strategies
+
+    print("Registered IDR Plugins & Extensions")
+    print("=" * 50)
+    print(f"Adapters ({len(list_adapters())}):")
+    for a in list_adapters():
+        print(f"  - {a}")
+    print(f"\nCanonicalizers ({len(list_canonicalizers())}):")
+    for c in list_canonicalizers():
+        print(f"  - {c}")
+    print(f"\nSurvivorship Strategies ({len(list_survivorship_strategies())}):")
+    for s in list_survivorship_strategies():
+        print(f"  - {s}")
     return 0
 
 
