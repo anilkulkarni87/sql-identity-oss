@@ -83,6 +83,13 @@ idr run --platform <platform> --mode <FULL|INCR> [--dry-run] [--strict]
 idr evaluate --platform <platform>
 idr privacy forget --platform <platform> --identifier <val> [--dry-run]
 idr plugins list
+
+# Built-in AI Assistant (local Ollama or BYOK with automatic PII masking):
+idr ai models
+idr ai test --provider ollama --model llama3.2
+idr ai ask --platform <platform> "Why did cluster sizes spike?"
+idr explain <resolved_id> --platform <platform>
+idr triage --platform <platform>
 ```
 
 ---

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api/client'
 import { formatSourceName } from '../utils/colors'
+import { CustomSelect } from '../components/CustomSelect'
 
 export default function Settings() {
     const navigate = useNavigate()
@@ -15,6 +16,16 @@ export default function Settings() {
     const [testing, setTesting] = useState(false)
     const [connectingId, setConnectingId] = useState<string | null>(null)
     const [testMessage, setTestMessage] = useState<string | null>(null)
+
+    // AI Assistant config state
+    const [aiProvider, setAiProvider] = useState('ollama')
+    const [aiModel, setAiModel] = useState('llama3.2')
+    const [aiBaseUrl, setAiBaseUrl] = useState('http://localhost:11434/v1')
+    const [aiApiKey, setAiApiKey] = useState('')
+    const [aiMaskPii, setAiMaskPii] = useState<boolean>(false)
+    const [aiStatusMsg, setAiStatusMsg] = useState<string | null>(null)
+    const [aiTesting, setAiTesting] = useState(false)
+    const [ollamaModels, setOllamaModels] = useState<string[]>([])
 
     // Setup status (connection & configured flags)
     const { data: status, isLoading: statusLoading } = useQuery({
@@ -337,7 +348,211 @@ export default function Settings() {
                 </div>
             </div>
 
-            {/* 4. System Telemetry & Engine Information */}
+            {/* 4. AI Assistant (Local Ollama / BYOK) */}
+            <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-700/60">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-purple-600/15 border border-purple-500/20 rounded-xl text-purple-400">
+                            <Sparkles className="w-5 h-5" />
+                        </div>
+                        <div>
+                            <h2 className="text-base font-semibold text-white">AI Assistant (Ollama &amp; BYOK)</h2>
+                            <p className="text-xs text-gray-400">
+                                Run locally with Ollama for zero data movement, or bring any model key with automatic PII masking
+                            </p>
+                        </div>
+                    </div>
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+                        aiProvider === 'ollama'
+                            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/60'
+                            : aiProvider === 'disabled'
+                            ? 'bg-gray-900 text-gray-400 border-gray-700'
+                            : 'bg-amber-950/60 text-amber-300 border-amber-700/60'
+                    }`}>
+                        <Shield className="w-3.5 h-3.5" />
+                        {aiProvider === 'ollama'
+                            ? (aiMaskPii ? 'Local + PII Masked' : 'Local Mode (Zero Egress)')
+                            : aiProvider === 'disabled'
+                            ? 'Disabled'
+                            : 'Cloud + Auto PII Masking'}
+                    </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <div className="space-y-1.5">
+                        <label className="text-gray-400 font-medium block">AI Provider</label>
+                        <CustomSelect
+                            value={aiProvider}
+                            onChange={(val) => {
+                                setAiProvider(val)
+                                if (val === 'ollama') {
+                                    setAiBaseUrl('http://localhost:11434/v1')
+                                    setAiModel('llama3.2')
+                                    setAiMaskPii(false)
+                                } else if (val === 'openai') {
+                                    setAiBaseUrl('https://api.openai.com/v1')
+                                    setAiModel('gpt-4o-mini')
+                                    setAiMaskPii(true)
+                                } else if (val === 'anthropic') {
+                                    setAiBaseUrl('https://api.anthropic.com/v1')
+                                    setAiModel('claude-3-5-sonnet-latest')
+                                    setAiMaskPii(true)
+                                } else if (val === 'gemini') {
+                                    setAiBaseUrl('https://generativelanguage.googleapis.com/v1beta')
+                                    setAiModel('gemini-2.0-flash')
+                                    setAiMaskPii(true)
+                                } else if (val === 'openai_compatible') {
+                                    setAiBaseUrl('')
+                                    setAiMaskPii(true)
+                                }
+                            }}
+                            options={[
+                                { value: 'ollama', label: 'Ollama (Local / MacBook)' },
+                                { value: 'openai', label: 'OpenAI' },
+                                { value: 'anthropic', label: 'Anthropic Claude' },
+                                { value: 'gemini', label: 'Google Gemini' },
+                                { value: 'openai_compatible', label: 'Custom OpenAI-Compatible' },
+                                { value: 'disabled', label: 'Disabled' },
+                            ]}
+                            className="w-full"
+                            buttonClassName="text-xs py-2"
+                            menuClassName="left-0 right-auto w-full"
+                        />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                            <label className="text-gray-400 font-medium">Model</label>
+                            {aiProvider === 'ollama' && (
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        try {
+                                            const res = await api.getOllamaModels(aiBaseUrl)
+                                            setOllamaModels(res.models || [])
+                                            if (res.models?.length) {
+                                                setAiModel(res.models[0])
+                                                setAiStatusMsg(`Found ${res.models.length} local Ollama model(s).`)
+                                            } else {
+                                                setAiStatusMsg('No Ollama models found. Run `ollama pull llama3.2`.')
+                                            }
+                                        } catch (err: any) {
+                                            setAiStatusMsg(`Ollama lookup failed: ${err.message}`)
+                                        }
+                                    }}
+                                    className="text-[11px] text-purple-400 hover:text-purple-300"
+                                >
+                                    Refresh Local Models
+                                </button>
+                            )}
+                        </div>
+                        {aiProvider === 'ollama' && ollamaModels.length > 0 ? (
+                            <CustomSelect
+                                value={aiModel}
+                                onChange={setAiModel}
+                                options={ollamaModels.map(m => ({ value: m, label: m }))}
+                                className="w-full"
+                                buttonClassName="text-xs py-2"
+                            />
+                        ) : (
+                            <input
+                                type="text"
+                                value={aiModel}
+                                onChange={(e) => setAiModel(e.target.value)}
+                                placeholder="e.g. llama3.2, gpt-4o-mini"
+                                disabled={aiProvider === 'disabled'}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 disabled:opacity-50"
+                            />
+                        )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="text-gray-400 font-medium block">Base URL</label>
+                        <input
+                            type="text"
+                            value={aiBaseUrl}
+                            onChange={(e) => setAiBaseUrl(e.target.value)}
+                            placeholder="http://localhost:11434/v1"
+                            disabled={aiProvider === 'disabled'}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-purple-500 disabled:opacity-50"
+                        />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="text-gray-400 font-medium block">
+                            API Key {aiProvider === 'ollama' && <span className="text-gray-500">(optional for Ollama)</span>}
+                        </label>
+                        <input
+                            type="password"
+                            value={aiApiKey}
+                            onChange={(e) => setAiApiKey(e.target.value)}
+                            placeholder={aiProvider === 'ollama' ? 'Not required for local Ollama' : 'sk-... (stored in memory only)'}
+                            disabled={aiProvider === 'disabled'}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-purple-500 disabled:opacity-50"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                    <label className="inline-flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={aiProvider !== 'ollama' && aiProvider !== 'disabled' ? true : aiMaskPii}
+                            onChange={(e) => setAiMaskPii(e.target.checked)}
+                            disabled={aiProvider !== 'ollama'}
+                            className="rounded border-gray-600 bg-gray-900 text-purple-500 focus:ring-purple-500"
+                        />
+                        <span>
+                            Mask PII before sending to AI
+                            {aiProvider !== 'ollama' && aiProvider !== 'disabled' && (
+                                <span className="text-amber-400 ml-1">(enforced for non-local models)</span>
+                            )}
+                        </span>
+                    </label>
+
+                    <button
+                        type="button"
+                        disabled={aiTesting}
+                        onClick={async () => {
+                            setAiTesting(true)
+                            setAiStatusMsg(null)
+                            try {
+                                await api.updateAiConfig({
+                                    provider: aiProvider,
+                                    model: aiModel,
+                                    base_url: aiBaseUrl,
+                                    api_key: aiApiKey || undefined,
+                                    mask_pii: aiProvider === 'ollama' ? aiMaskPii : true,
+                                })
+                                if (aiProvider === 'disabled') {
+                                    setAiStatusMsg('AI Assistant disabled.')
+                                } else {
+                                    const res = await api.testAiConnection()
+                                    setAiStatusMsg(
+                                        `Connected to ${res.provider} (${res.model}) in ${res.latency_ms}ms — PII masking: ${res.mask_pii ? 'ON' : 'OFF (local)'}`
+                                    )
+                                }
+                            } catch (err: any) {
+                                setAiStatusMsg(`AI test failed: ${err.message || String(err)}`)
+                            } finally {
+                                setAiTesting(false)
+                            }
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium transition-colors disabled:opacity-50"
+                    >
+                        {aiTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        <span>Save &amp; Test AI</span>
+                    </button>
+                </div>
+
+                {aiStatusMsg && (
+                    <div className="p-3 rounded-lg bg-gray-900/80 border border-gray-700 text-xs text-gray-200">
+                        {aiStatusMsg}
+                    </div>
+                )}
+            </div>
+
+            {/* 5. System Telemetry & Engine Information */}
             <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl space-y-4">
                 <div className="flex items-center gap-3 pb-3 border-b border-gray-700/60">
                     <div className="p-2.5 bg-cyan-600/15 border border-cyan-500/20 rounded-xl text-cyan-400">

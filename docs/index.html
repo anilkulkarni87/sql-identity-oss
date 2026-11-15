@@ -229,17 +229,25 @@
     <section id="benchmarks" class="py-12 border-t border-white/10">
       <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
         <div>
-          <h2 class="text-2xl sm:text-3xl font-bold text-white">Production Cloud Benchmarks</h2>
+          <h2 class="text-2xl sm:text-3xl font-bold text-white">Production Benchmarks</h2>
           <p class="text-sm text-slate-400 mt-1">Exact same 15-table <code class="font-mono text-cyan-300">ecommerce_synth</code> workload: <strong class="text-slate-200">6,297,049 entities → 5,381,635 edges → 1,544,042 clusters</strong>.</p>
         </div>
-        <span class="font-mono text-xs text-slate-400">100% identical graph outputs across all 3 engines</span>
+        <span class="font-mono text-xs text-slate-400">100% identical graph outputs across all 4 engines</span>
       </div>
 
-      <div class="grid gap-4 md:grid-cols-3 mb-6">
+      <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+        <div class="glass-card rounded-2xl p-6 border-emerald-400/25">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-white">🦆 DuckDB Local</span>
+            <span class="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-mono text-emerald-300">2.1x vs BQ</span>
+          </div>
+          <div class="font-mono text-3xl font-extrabold text-emerald-300 mt-3">143s <span class="text-sm font-normal text-slate-400">(2.4 min)</span></div>
+          <div class="text-xs text-slate-400 mt-1 font-mono">~44,000 entities/sec · LP 39s · Output 92s</div>
+        </div>
         <div class="glass-card rounded-2xl p-6 border-cyan-400/25">
           <div class="flex items-center justify-between">
             <span class="text-sm font-semibold text-white">❄️ Snowflake</span>
-            <span class="rounded-full bg-cyan-500/15 px-2.5 py-0.5 text-[11px] font-mono text-cyan-300">1.8x Faster</span>
+            <span class="rounded-full bg-cyan-500/15 px-2.5 py-0.5 text-[11px] font-mono text-cyan-300">1.8x vs BQ</span>
           </div>
           <div class="font-mono text-3xl font-extrabold text-cyan-300 mt-3">170s <span class="text-sm font-normal text-slate-400">(2.8 min)</span></div>
           <div class="text-xs text-slate-400 mt-1 font-mono">~37,000 entities/sec · LP 58.8s · Output 66.7s</div>
@@ -264,7 +272,7 @@
 
       <!-- Stage Comparison Bars -->
       <div class="glass-card rounded-2xl p-6 space-y-4">
-        <div class="text-xs font-mono uppercase tracking-wider text-slate-400">Stage Duration Breakdown (Snowflake vs. Databricks vs. BigQuery)</div>
+        <div class="text-xs font-mono uppercase tracking-wider text-slate-400">Stage Duration Breakdown (DuckDB vs. Snowflake vs. Databricks vs. BigQuery)</div>
         <div id="stage-bars" class="space-y-3 text-xs font-mono"></div>
       </div>
     </section>
@@ -511,17 +519,18 @@ IDR_MCP_TRANSPORT=streamable-http idr-mcp
 
     // Stage comparison bars
     const stages = [
-      { name: 'Preflight', sf: 6.7, dbx: 24, bq: 26 },
-      { name: 'Entities', sf: 5.3, dbx: 6, bq: 5 },
-      { name: 'Identifiers', sf: 20.2, dbx: 52, bq: 54 },
-      { name: 'Edge Building', sf: 11.1, dbx: 14, bq: 12 },
-      { name: 'Label Prop', sf: 58.8, dbx: 108, bq: 110 },
-      { name: 'Output & Golden', sf: 66.7, dbx: 85, bq: 90 },
+      { name: 'Preflight', duck: 0, sf: 6.7, dbx: 24, bq: 26 },
+      { name: 'Entities', duck: 1, sf: 5.3, dbx: 6, bq: 5 },
+      { name: 'Identifiers', duck: 4, sf: 20.2, dbx: 52, bq: 54 },
+      { name: 'Edge Building', duck: 4, sf: 11.1, dbx: 14, bq: 12 },
+      { name: 'Label Prop', duck: 39, sf: 58.8, dbx: 108, bq: 110 },
+      { name: 'Output & Golden', duck: 92, sf: 66.7, dbx: 85, bq: 90 },
     ];
     document.getElementById('stage-bars').innerHTML = stages.map(s => `
       <div class="grid grid-cols-12 items-center gap-3">
         <div class="col-span-3 sm:col-span-2 text-slate-300">${s.name}</div>
         <div class="col-span-9 sm:col-span-10 space-y-1">
+          <div class="flex items-center gap-2"><div class="h-2 rounded bg-emerald-400" style="width:${(s.duck/115)*100}%"></div><span class="text-emerald-300">${s.duck}s</span></div>
           <div class="flex items-center gap-2"><div class="h-2 rounded bg-cyan-400" style="width:${(s.sf/115)*100}%"></div><span class="text-cyan-300">${s.sf}s</span></div>
           <div class="flex items-center gap-2"><div class="h-2 rounded bg-indigo-400/80" style="width:${(s.dbx/115)*100}%"></div><span class="text-indigo-300">${s.dbx}s</span></div>
           <div class="flex items-center gap-2"><div class="h-2 rounded bg-purple-400/70" style="width:${(s.bq/115)*100}%"></div><span class="text-purple-300">${s.bq}s</span></div>
@@ -531,7 +540,7 @@ IDR_MCP_TRANSPORT=streamable-http idr-mcp
 
     // Scale estimator
     let estPlat = 'snowflake';
-    const platRates = { snowflake: 37041, databricks: 21274, bigquery: 20578, duckdb: 20161 };
+    const platRates = { snowflake: 37041, databricks: 21274, bigquery: 20578, duckdb: 44035 };
     function updateEstimator() {
       const rows = Number(document.getElementById('est-slider').value);
       document.getElementById('est-rows-label').textContent = rows.toLocaleString();
