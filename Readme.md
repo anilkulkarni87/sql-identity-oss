@@ -170,7 +170,7 @@ pytest
 pytest tests/test_cloud_dialects_live.py -v
 ```
 
-See [Concepts & Architecture](docs/concepts-and-architecture.md) for detailed pipeline stage and schema design.
+See [Concepts & Architecture](docs/concepts-and-architecture.md) for detailed pipeline stage and schema design, and the [Downstream Consumption & Reverse-ETL SQL Cookbook](docs/getting-started.md#4-downstream-consumption--reverse-etl-sql-cookbook) for joining `idr_out` tables back to fact tables and incremental exports.
 
 ## 🤝 Contributing
 
