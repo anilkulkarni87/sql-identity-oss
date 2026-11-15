@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from idr_api.dependencies import get_manager
-from idr_api.routers import connection, dashboard, explorer, runs, schema, setup
+from idr_api.routers import ai, connection, dashboard, explorer, runs, schema, setup
 
 REQUEST_COUNT = Counter(
     "idr_http_requests_total",
@@ -172,7 +172,8 @@ async def lifespan(app: FastAPI):
 
     async with AsyncExitStack() as stack:
         try:
-            from idr_mcp.server import get_mcp_http_app, mcp as idr_fastmcp
+            from idr_mcp.server import get_mcp_http_app
+            from idr_mcp.server import mcp as idr_fastmcp
 
             if get_mcp_http_app() is not None and hasattr(idr_fastmcp, "session_manager"):
                 await stack.enter_async_context(idr_fastmcp.session_manager.run())
@@ -223,6 +224,7 @@ app.include_router(dashboard.router)
 app.include_router(explorer.router)
 app.include_router(runs.router)
 app.include_router(schema.router)
+app.include_router(ai.router)
 
 # Mount Remote MCP (Streamable HTTP) before SPA catch-all
 try:

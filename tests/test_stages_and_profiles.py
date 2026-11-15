@@ -677,6 +677,7 @@ class TestBuildStagingCte:
         rules = [{"attribute_name": "email", "strategy": "RECENCY"}]
         mappings = [
             {"table_id": "crm", "attribute_name": "email", "attribute_expr": "email_col"},
+            {"table_id": "web", "attribute_name": "email", "attribute_expr": "web_email"},
         ]
         sources = [
             {

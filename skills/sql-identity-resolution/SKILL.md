@@ -82,23 +82,33 @@ idr apply-config --platform <platform> --config idr_config.yaml
 idr run --platform <platform> --mode <FULL|INCR> [--dry-run] [--strict]
 idr evaluate --platform <platform>
 idr privacy forget --platform <platform> --identifier <val> [--dry-run]
+idr plugins list
+
+# Built-in AI Assistant (local Ollama or BYOK with automatic PII masking):
+idr ai models
+idr ai test --provider ollama --model llama3.2
+idr ai ask --platform <platform> "Why did cluster sizes spike?"
+idr explain <resolved_id> --platform <platform>
+idr triage --platform <platform>
 ```
 
 ---
 
 ## Config Modeling Reference (`idr_config.yaml` / `.json`)
 
-> **Prerequisite (`entity_key`)**: Every source table **must** have a unique, non-null `entity_key` expression per row (`<table_id>:<entity_key>`). Duplicate keys can fail warehouse `MERGE` steps, and `NULL` keys collapse or fail.
+> **Handling Duplicate or Keyless `entity_key`s**:
 > - **Composite key**: Use a SQL expression, e.g. `entity_key: "CONCAT(tenant_id, '_', id)"`.
-> - **Event/log tables**: Use the row's unique key (`order_id`, `event_id`) as `entity_key` and map `customer_id` under `identifiers:`.
-> - **Dirty duplicates**: Point `table:` at a deduplicated view (`QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`).
+> - **Keyless tables**: Set `entity_key: AUTO` (with optional `key_columns: [email, session_id]`) to synthesize a deterministic dialect-aware SHA-256 key.
+> - **Duplicate keys**: Set `deduplicate: true` and `dedup_order_by: "updated_at DESC"` on the source to deduplicate with `ROW_NUMBER()` before extraction. `NULL` entity keys are filtered automatically.
 
 ```yaml
 sources:
   - id: customers                    # Unique logical source ID
     table: db.schema.customers       # FQN (db.schema.table for Snowflake, project.dataset.table for BQ, schema.table for Databricks/DuckDB)
     entity_type: PERSON
-    entity_key: customer_id          # Primary row key expression
+    entity_key: customer_id          # Primary row key expression, or AUTO
+    deduplicate: false               # Optional: true to dedup duplicate entity_key rows
+    dedup_order_by: "updated_at DESC" # Optional: ORDER BY for deduplicate: true
     watermark: updated_at            # Optional incremental timestamp column
     watermark_lookback: 60           # Optional lookback minutes
     identifiers:
@@ -122,7 +132,7 @@ rules:
 
 survivorship:
   - attribute: first_name
-    strategy: RECENCY                # RECENCY | PRIORITY | FREQUENCY | LONGEST
+    strategy: RECENCY                # RECENCY | PRIORITY | PRIORITY_RECENCY | LATEST_FROM_SOURCE | FREQUENCY | ANY_TRUE | ALL_TRUE | EARLIEST | AGG_MAX | AGG_MIN | AGG_SUM | COLLECT_DISTINCT | plugin
     source_priority: [customers]
 
 exclusions:                          # Optional custom poison-pill exclusions

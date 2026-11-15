@@ -370,5 +370,90 @@ export const api = {
             is_pk: boolean
             description: string | null
         }>
-    }>>('/schema')
+    }>>('/schema'),
+
+    // AI Assistant (Ollama-first + BYOK)
+    getAiConfig: () => fetchJson<{
+        provider: string
+        enabled: boolean
+        model: string
+        base_url: string
+        has_api_key: boolean
+        is_local: boolean
+        mask_pii: boolean
+    }>('/ai/config'),
+
+    updateAiConfig: (payload: {
+        provider: string
+        model?: string
+        base_url?: string
+        api_key?: string
+        mask_pii?: boolean | null
+    }) => fetchJson<{
+        provider: string
+        enabled: boolean
+        model: string
+        base_url: string
+        has_api_key: boolean
+        is_local: boolean
+        mask_pii: boolean
+    }>('/ai/config', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    }),
+
+    getOllamaModels: (baseUrl?: string) =>
+        fetchJson<{ models: string[] }>(
+            `/ai/ollama/models${baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : ''}`
+        ),
+
+    testAiConnection: () => fetchJson<{
+        status: string
+        provider: string
+        model: string
+        is_local: boolean
+        mask_pii: boolean
+        latency_ms: number
+        reply: string
+    }>('/ai/test', { method: 'POST', body: '{}' }),
+
+    explainClusterAi: (resolvedId: string, prompt?: string) => fetchJson<{
+        resolved_id: string
+        pii_masked: boolean
+        provider: string
+        model: string
+        explanation: string
+    }>('/ai/explain', {
+        method: 'POST',
+        body: JSON.stringify({
+            resolved_id: resolvedId,
+            ...(prompt?.trim() ? { prompt: prompt.trim() } : {})
+        })
+    }),
+
+    runAiTriage: (maxConfidence = 0.65, limit = 8) => fetchJson<{
+        status: string
+        pii_masked: boolean
+        proposals: Array<{
+            resolved_id: string
+            action: string
+            entity_key_a?: string
+            entity_key_b?: string
+            reason: string
+        }>
+    }>('/ai/triage', {
+        method: 'POST',
+        body: JSON.stringify({ max_confidence: maxConfidence, limit })
+    }),
+
+    askAi: (question: string) => fetchJson<{
+        question: string
+        pii_masked: boolean
+        provider: string
+        model: string
+        answer: string
+    }>('/ai/ask', {
+        method: 'POST',
+        body: JSON.stringify({ question })
+    })
 }

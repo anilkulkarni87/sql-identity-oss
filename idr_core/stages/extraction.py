@@ -15,18 +15,59 @@ from .base import BaseStage
 class ExtractionStage(BaseStage):
     """Extracts entities, identifiers, and attributes from source tables."""
 
+    def _source_relation_sql(
+        self,
+        table_fqn: str,
+        entity_key_expr: str,
+        deduplicate: bool = False,
+        dedup_order_by: str = "",
+        watermark_col: str = "",
+    ) -> str:
+        """Return either `table_fqn` or a ROW_NUMBER()-deduplicated subquery."""
+        if not deduplicate:
+            return table_fqn
+        order_expr = (dedup_order_by or "").strip()
+        if order_expr:
+            order_expr = self._validate_metadata_value(
+                order_expr, "expr", "source_table.dedup_order_by"
+            )
+        elif watermark_col:
+            order_expr = f"{watermark_col} DESC"
+        else:
+            order_expr = "1"
+        return (
+            f"(SELECT * FROM ("
+            f"SELECT *, ROW_NUMBER() OVER (PARTITION BY ({entity_key_expr}) ORDER BY {order_expr}) AS _idr_rn "
+            f"FROM {table_fqn} WHERE ({entity_key_expr}) IS NOT NULL"
+            f") _idr_dedup WHERE _idr_rn = 1)"
+        )
+
     def extract_entities(self, run_mode: str) -> int:
         """Extract entities from source tables."""
-        sources = self.adapter.query("""
-            SELECT
-                st.table_id, st.table_fqn, st.entity_type,
-                st.entity_key_expr, st.watermark_column,
-                COALESCE(st.watermark_lookback_minutes, 0) as lookback,
-                rs.last_watermark_value
-            FROM idr_meta.source_table st
-            LEFT JOIN idr_meta.run_state rs ON st.table_id = rs.table_id
-            WHERE st.is_active = TRUE
-        """)
+        try:
+            sources = self.adapter.query("""
+                SELECT
+                    st.table_id, st.table_fqn, st.entity_type,
+                    st.entity_key_expr, st.watermark_column,
+                    COALESCE(st.watermark_lookback_minutes, 0) as lookback,
+                    COALESCE(st.deduplicate, FALSE) as deduplicate,
+                    st.dedup_order_by,
+                    rs.last_watermark_value
+                FROM idr_meta.source_table st
+                LEFT JOIN idr_meta.run_state rs ON st.table_id = rs.table_id
+                WHERE st.is_active = TRUE
+            """)
+        except Exception:
+            sources = self.adapter.query("""
+                SELECT
+                    st.table_id, st.table_fqn, st.entity_type,
+                    st.entity_key_expr, st.watermark_column,
+                    COALESCE(st.watermark_lookback_minutes, 0) as lookback,
+                    rs.last_watermark_value
+                FROM idr_meta.source_table st
+                LEFT JOIN idr_meta.run_state rs ON st.table_id = rs.table_id
+                WHERE st.is_active = TRUE
+            """)
 
         if not sources:
             # Create empty table to ensure downstream steps don't fail
@@ -57,6 +98,7 @@ class ExtractionStage(BaseStage):
         # Build UNION query for all sources
         union_parts = []
         self._no_watermark_table_ids = []
+        self._source_dedup_meta = {}
         for src in sources:
             # Validate DB-sourced metadata before SQL interpolation
             table_id = self._validate_metadata_value(
@@ -121,14 +163,31 @@ class ExtractionStage(BaseStage):
                 self.adapter.dialect,
             )
 
+            deduplicate = bool(src.get("deduplicate", False))
+            dedup_order_by = src.get("dedup_order_by") or ""
+            self._source_dedup_meta[table_id] = (
+                table_fqn,
+                entity_key_expr,
+                deduplicate,
+                dedup_order_by,
+                watermark_col,
+            )
+            source_rel = self._source_relation_sql(
+                table_fqn,
+                entity_key_expr,
+                deduplicate=deduplicate,
+                dedup_order_by=dedup_order_by,
+                watermark_col=watermark_col,
+            )
+
             union_parts.append(f"""
                 SELECT
                     '{self.run_id}' AS run_id,
                     '{table_id}' AS table_id,
                     CONCAT('{table_id}', ':', CAST(({entity_key_expr}) AS {self._dialect["string_type"]})) AS entity_key,
                     {watermark_expr} AS watermark_value
-                FROM {table_fqn}
-                WHERE {where_clause}
+                FROM {source_rel} _idr_src
+                WHERE ({where_clause}) AND ({entity_key_expr}) IS NOT NULL
             """)
 
         union_sql = " UNION ALL ".join(union_parts)
@@ -230,6 +289,12 @@ class ExtractionStage(BaseStage):
                 AND LOWER({raw_expr}) NOT IN ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', '0', 'default', '')
             """
 
+            dedup_meta = getattr(self, "_source_dedup_meta", {}).get(table_id)
+            if dedup_meta:
+                source_rel = self._source_relation_sql(*dedup_meta)
+            else:
+                source_rel = self.get_source_fqn(table_id)
+
             union_parts.append(f"""
                 SELECT
                     e.entity_key,
@@ -238,7 +303,7 @@ class ExtractionStage(BaseStage):
                     {is_hashed_literal} AS is_hashed,
                     {max_group_size} AS max_group_size
                 FROM idr_work.entities_delta e
-                JOIN {self.get_source_fqn(table_id)} src
+                JOIN {source_rel} src
                     ON e.table_id = '{table_id}'
                    AND e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {str_type}))
                 WHERE {where_condition}

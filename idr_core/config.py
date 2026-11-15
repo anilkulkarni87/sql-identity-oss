@@ -236,15 +236,31 @@ def validate_config(config: Dict[str, Any]) -> bool:
             raise ValueError(f"Source {i}: missing 'id'")
         if "table" not in src:
             raise ValueError(f"Source {i}: missing 'table'")
-        if "entity_key" not in src:
+        if "entity_key" not in src and not src.get("key_columns"):
             raise ValueError(f"Source {i}: missing 'entity_key'")
 
         # Validate values
         validate_identifier(src["id"], f"Source {i} id")
         validate_fqn(src["table"], f"Source {i} table")
 
+        if src.get("key_columns") is not None:
+            kc = src["key_columns"]
+            if not isinstance(kc, list) or not kc:
+                raise ValueError(f"Source {i}: 'key_columns' must be a non-empty list")
+            for col in kc:
+                validate_sql_expr(str(col), f"Source {i} key_columns item")
+
+        if "deduplicate" in src and src["deduplicate"] is not None:
+            if not isinstance(src["deduplicate"], bool):
+                raise ValueError(f"Source {i}: 'deduplicate' must be a boolean")
+
+        if src.get("dedup_order_by"):
+            validate_sql_expr(str(src["dedup_order_by"]), f"Source {i} dedup_order_by")
+
     # Validate survivorship if present
     if config.get("survivorship") is not None:
+        from .survivorship import is_registered_survivorship_strategy, list_survivorship_strategies
+
         if not isinstance(config["survivorship"], list):
             raise ValueError("Config 'survivorship' must be a list of rules")
         for rule in config["survivorship"]:
@@ -254,8 +270,12 @@ def validate_config(config: Dict[str, Any]) -> bool:
                 raise ValueError("Survivorship rule missing 'attribute'")
             if "strategy" not in rule:
                 raise ValueError(f"Survivorship rule for {rule['attribute']} missing 'strategy'")
-            if rule["strategy"] not in ("PRIORITY", "RECENCY", "FREQUENCY", "AGG_MAX", "AGG_SUM"):
-                raise ValueError(f"Invalid strategy {rule['strategy']} for {rule['attribute']}")
+            if not is_registered_survivorship_strategy(rule["strategy"]):
+                valid = ", ".join(list_survivorship_strategies())
+                raise ValueError(
+                    f"Invalid strategy {rule['strategy']} for {rule['attribute']}. "
+                    f"Supported: {valid}"
+                )
 
     # Validate rules if present
     if config.get("rules") is not None and not isinstance(config["rules"], list):
@@ -271,6 +291,52 @@ def validate_config(config: Dict[str, Any]) -> bool:
             raise ValueError("Config 'generate_evidence' must be a boolean (true/false)")
 
     return True
+
+
+def resolve_entity_key_expr(src: Dict[str, Any], dialect: str = "duckdb") -> str:
+    """
+    Resolve a source's `entity_key` into a SQL expression.
+
+    When `entity_key` is `'AUTO'` (or omitted with `key_columns` specified),
+    synthesizes a deterministic dialect-aware SHA-256 hash over `key_columns`
+    (or all mapped identifier + attribute expressions).
+    """
+    from .adapters.base import get_dialect_config
+
+    raw_key = src.get("entity_key")
+    is_auto = (
+        raw_key is None
+        or str(raw_key).strip().upper() == "AUTO"
+    )
+    if not is_auto:
+        return str(raw_key)
+
+    cols: List[str] = []
+    if src.get("key_columns"):
+        cols = [str(c) for c in src["key_columns"]]
+    else:
+        for item in (src.get("identifiers") or []):
+            if isinstance(item, dict):
+                expr = item.get("expr") or item.get("column") or item.get("type")
+                if expr:
+                    cols.append(str(expr))
+        for item in (src.get("attributes") or []):
+            if isinstance(item, dict):
+                expr = item.get("expr") or item.get("column") or item.get("name")
+                if expr:
+                    cols.append(str(expr))
+
+    if not cols:
+        raise ValueError(
+            f"Source '{src.get('id', '?')}': entity_key='AUTO' requires 'key_columns' "
+            "or at least one mapped identifier/attribute."
+        )
+
+    d_cfg = get_dialect_config(dialect)
+    str_type = d_cfg["string_type"]
+    parts = [f"COALESCE(CAST(({c}) AS {str_type}), '')" for c in cols]
+    concat_expr = f"CONCAT_WS('|', {', '.join(parts)})"
+    return d_cfg["sha256"](concat_expr)
 
 
 def config_to_sql(
@@ -464,8 +530,10 @@ ON {join_cond}
                 else src["table"]
             ),
             "entity_type": src.get("entity_type", "PERSON"),
-            "entity_key_expr": src.get("entity_key", "id"),
+            "entity_key_expr": resolve_entity_key_expr(src, dialect),
             "watermark_column": wm_col,
+            "deduplicate": bool(src.get("deduplicate", False)),
+            "dedup_order_by": src.get("dedup_order_by"),
             "is_active": True,
         }
         statements.append(generate_upsert("idr_meta.source_table", ["table_id"], data))
@@ -727,28 +795,37 @@ def sql_to_config(adapter) -> Dict[str, Any]:
     try:
         config = {"sources": [], "rules": [], "survivorship": []}
 
-        # Helper for adaptive querying (handles missing is_active column in legacy schemas)
+        # Helper for adaptive querying (handles missing columns in legacy schemas)
         def _query_active_sources(adapter):
             try:
                 return adapter.query("""
-                    SELECT table_id, table_fqn, entity_type, entity_key_expr, watermark_column
+                    SELECT table_id, table_fqn, entity_type, entity_key_expr,
+                           watermark_column, deduplicate, dedup_order_by
                     FROM idr_meta.source_table
                     WHERE is_active = TRUE
                 """)
             except Exception as e:
-                # Fallback: Query without is_active if column missing
+                err_l = str(e).lower()
                 if (
-                    "no such column" in str(e).lower()
-                    or "unrecognized name" in str(e).lower()
-                    or "invalid identifier" in str(e).lower()
+                    "no such column" in err_l
+                    or "unrecognized name" in err_l
+                    or "invalid identifier" in err_l
+                    or "binder error" in err_l
                 ):
-                    print(
-                        "Warning: 'is_active' column missing in source_table, assuming all active."
-                    )
-                    return adapter.query("""
-                        SELECT table_id, table_fqn, entity_type, entity_key_expr, watermark_column
-                        FROM idr_meta.source_table
-                    """)
+                    try:
+                        return adapter.query("""
+                            SELECT table_id, table_fqn, entity_type, entity_key_expr, watermark_column
+                            FROM idr_meta.source_table
+                            WHERE is_active = TRUE
+                        """)
+                    except Exception:
+                        print(
+                            "Warning: 'is_active' column missing in source_table, assuming all active."
+                        )
+                        return adapter.query("""
+                            SELECT table_id, table_fqn, entity_type, entity_key_expr, watermark_column
+                            FROM idr_meta.source_table
+                        """)
                 raise e
 
         # 1. Sources
@@ -810,6 +887,10 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 "identifiers": ids_map.get(tid, []),
                 "attributes": attrs_map.get(tid, []),
             }
+            if src_row.get("deduplicate"):
+                source["deduplicate"] = True
+            if src_row.get("dedup_order_by"):
+                source["dedup_order_by"] = src_row["dedup_order_by"]
             config["sources"].append(source)
 
         # 2. Matching Rules

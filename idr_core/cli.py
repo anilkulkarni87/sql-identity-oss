@@ -353,6 +353,56 @@ Examples:
         "--no-persist", action="store_true", help="Do not write sampled pairs to idr_out.evaluation_sample"
     )
 
+    # === idr plugins ===
+    plugins_parser = subparsers.add_parser("plugins", help="Inspect registered plugins and extensions")
+    plugins_subparsers = plugins_parser.add_subparsers(dest="plugins_cmd", help="Plugin commands")
+    plugins_subparsers.add_parser("list", help="List registered canonicalizers, survivorship strategies, and adapters")
+
+    # === idr ai ===
+    ai_parser = subparsers.add_parser("ai", help="Local Ollama & BYOK AI assistant commands")
+    ai_subparsers = ai_parser.add_subparsers(dest="ai_cmd", help="AI commands")
+
+    for sub_name, sub_help in [
+        ("test", "Test connection to configured AI model (defaults to local Ollama)"),
+        ("models", "List locally available Ollama models"),
+        ("ask", "Ask a natural-language question about the identity graph"),
+    ]:
+        p = ai_subparsers.add_parser(sub_name, help=sub_help)
+        p.add_argument("--provider", help="ollama | openai | anthropic | gemini | openai_compatible")
+        p.add_argument("--model", help="Model name (e.g. llama3.2, gpt-4o-mini)")
+        p.add_argument("--base-url", help="Custom base URL (e.g. http://localhost:11434/v1)")
+        p.add_argument("--api-key", help="API key (or set IDR_LLM_API_KEY)")
+        mask_grp = p.add_mutually_exclusive_group()
+        mask_grp.add_argument("--mask-pii", action="store_true", help="Force PII masking before sending")
+        mask_grp.add_argument("--no-mask-pii", action="store_true", help="Disable PII masking (local only)")
+        if sub_name == "ask":
+            p.add_argument("question", help="Natural-language question")
+            p.add_argument("--platform", "-p", choices=["duckdb", "bigquery", "snowflake", "databricks"])
+            p.add_argument("--db", help="DuckDB database path")
+            p.add_argument("--project", help="GCP project ID (BigQuery)")
+
+    # === idr explain ===
+    explain_parser = subparsers.add_parser("explain", help="Explain why an identity cluster merged using AI")
+    explain_parser.add_argument("resolved_id", help="Resolved cluster ID to explain")
+    explain_parser.add_argument("--platform", "-p", choices=["duckdb", "bigquery", "snowflake", "databricks"])
+    explain_parser.add_argument("--db", help="DuckDB database path")
+    explain_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    explain_parser.add_argument("--provider", help="LLM provider (default: IDR_LLM_PROVIDER or ollama)")
+    explain_parser.add_argument("--model", help="Model name")
+    explain_parser.add_argument("--base-url", help="Custom base URL")
+    explain_parser.add_argument("--prompt", help="Optional custom question/prompt about this cluster")
+
+    # === idr triage ===
+    triage_parser = subparsers.add_parser("triage", help="AI-assisted triage of low-confidence clusters")
+    triage_parser.add_argument("--platform", "-p", choices=["duckdb", "bigquery", "snowflake", "databricks"])
+    triage_parser.add_argument("--db", help="DuckDB database path")
+    triage_parser.add_argument("--project", help="GCP project ID (BigQuery)")
+    triage_parser.add_argument("--max-confidence", type=float, default=0.65, help="Max confidence threshold")
+    triage_parser.add_argument("--limit", type=int, default=8, help="Max clusters to review")
+    triage_parser.add_argument("--provider", help="LLM provider (default: IDR_LLM_PROVIDER or ollama)")
+    triage_parser.add_argument("--model", help="Model name")
+    triage_parser.add_argument("--base-url", help="Custom base URL")
+
     # Parse arguments
     parsed_args = parser.parse_args(args)
 
@@ -404,6 +454,24 @@ Examples:
 
     if parsed_args.command == "evaluate":
         return handle_evaluate(parsed_args)
+
+    if parsed_args.command == "plugins":
+        if getattr(parsed_args, "plugins_cmd", None) == "list":
+            return handle_plugins_list()
+        plugins_parser.print_help()
+        return 0
+
+    if parsed_args.command == "ai":
+        if not getattr(parsed_args, "ai_cmd", None):
+            ai_parser.print_help()
+            return 0
+        return handle_ai(parsed_args)
+
+    if parsed_args.command == "explain":
+        return handle_explain(parsed_args)
+
+    if parsed_args.command == "triage":
+        return handle_triage(parsed_args)
 
     return 0
 
@@ -994,6 +1062,122 @@ def handle_evaluate(args) -> int:
     print(f"Near-Miss Singletons Found : {res['near_miss_candidates_found']:,}")
     print("-" * 70)
     print(f"Stratified Audit Samples   : {res['samples_extracted']} pairs extracted ({res['samples_persisted']} saved to idr_out.evaluation_sample)")
+    return 0
+
+
+def handle_plugins_list() -> int:
+    """List registered canonicalizers, survivorship strategies, and warehouse adapters."""
+    from idr_core.adapters import list_adapters
+    from idr_core.canonicalizers import list_canonicalizers
+    from idr_core.survivorship import list_survivorship_strategies
+
+    print("Registered IDR Plugins & Extensions")
+    print("=" * 50)
+    print(f"Adapters ({len(list_adapters())}):")
+    for a in list_adapters():
+        print(f"  - {a}")
+    print(f"\nCanonicalizers ({len(list_canonicalizers())}):")
+    for c in list_canonicalizers():
+        print(f"  - {c}")
+    print(f"\nSurvivorship Strategies ({len(list_survivorship_strategies())}):")
+    for s in list_survivorship_strategies():
+        print(f"  - {s}")
+    return 0
+
+
+def _build_llm_client_from_args(args) -> "LLMClient":
+    from idr_core.llm import LLMClient, LLMConfig
+
+    cfg = LLMConfig.from_env()
+    if getattr(args, "provider", None):
+        cfg.provider = args.provider
+    elif not cfg.is_enabled:
+        cfg.provider = "ollama"
+    if getattr(args, "model", None):
+        cfg.model = args.model
+    if getattr(args, "base_url", None):
+        cfg.base_url = args.base_url
+    if getattr(args, "api_key", None):
+        cfg.api_key = args.api_key
+    if getattr(args, "mask_pii", False):
+        cfg.mask_pii = True
+    elif getattr(args, "no_mask_pii", False):
+        cfg.mask_pii = False
+    return LLMClient(cfg)
+
+
+def handle_ai(args) -> int:
+    """Handle `idr ai test|models|ask` commands."""
+    from idr_core.ai_assistant import ask_identity_graph, test_llm_connection
+    from idr_core.llm import list_ollama_models
+
+    if args.ai_cmd == "models":
+        models = list_ollama_models(getattr(args, "base_url", None))
+        if not models:
+            print("No local Ollama models found (is `ollama serve` running on localhost:11434?).")
+            return 1
+        print(f"Local Ollama Models ({len(models)}):")
+        for m in models:
+            print(f"  - {m}")
+        return 0
+
+    client = _build_llm_client_from_args(args)
+    if args.ai_cmd == "test":
+        res = test_llm_connection(client)
+        print(
+            f"✓ Connected to {res['provider']} ({res['model']}) in {res['latency_ms']}ms "
+            f"[local={res['is_local']}, pii_masking={res['mask_pii']}]"
+        )
+        return 0
+
+    if args.ai_cmd == "ask":
+        adapter = get_adapter(args)
+        res = ask_identity_graph(adapter, args.question, client=client)
+        print(f"[{res['provider']}:{res['model']} | pii_masked={res['pii_masked']}]\n")
+        print(res["answer"])
+        return 0
+
+    return 0
+
+
+def handle_explain(args) -> int:
+    """Handle `idr explain <resolved_id>`."""
+    from idr_core.ai_assistant import explain_cluster_with_ai
+
+    adapter = get_adapter(args)
+    client = _build_llm_client_from_args(args)
+    res = explain_cluster_with_ai(
+        adapter,
+        args.resolved_id,
+        client=client,
+        custom_prompt=getattr(args, "prompt", None),
+    )
+    print(f"Cluster {res['resolved_id']} ({res['provider']}:{res['model']} | pii_masked={res['pii_masked']})")
+    print("-" * 60)
+    print(res["explanation"])
+    return 0
+
+
+def handle_triage(args) -> int:
+    """Handle `idr triage`."""
+    from idr_core.ai_assistant import triage_with_ai
+
+    adapter = get_adapter(args)
+    client = _build_llm_client_from_args(args)
+    res = triage_with_ai(
+        adapter,
+        client=client,
+        max_confidence=getattr(args, "max_confidence", 0.65),
+        limit=getattr(args, "limit", 8),
+    )
+    print(f"AI Triage ({res.get('provider', 'n/a')}:{res.get('model', 'n/a')} | pii_masked={res['pii_masked']})")
+    print("-" * 60)
+    proposals = res.get("proposals", [])
+    if not proposals:
+        print(res.get("message", "No proposals."))
+        return 0
+    for p in proposals:
+        print(f"- {p.get('resolved_id')}: [{p.get('action')}] {p.get('reason')}")
     return 0
 
 

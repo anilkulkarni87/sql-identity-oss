@@ -194,8 +194,9 @@ export default function Dashboard() {
                                 }}
                             />
                             <Tooltip
-                                contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px' }}
-                                labelStyle={{ color: '#fff', fontSize: '12px' }}
+                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
+                                labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
+                                itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
                                 formatter={(value: number) => [value.toLocaleString(), 'Count']}
                             />
                             <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
@@ -225,7 +226,9 @@ export default function Dashboard() {
                                         ))}
                                     </Pie>
                                     <Tooltip
-                                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }}
+                                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
+                                        labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
+                                        itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
                                         formatter={(val: number) => [val.toLocaleString(), 'Edges Created']}
                                     />
                                 </PieChart>
@@ -273,8 +276,9 @@ export default function Dashboard() {
                             />
                             <YAxis stroke="#94a3b8" fontSize={11} width={50} tickFormatter={formatCompact} />
                             <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }}
-                                labelStyle={{ color: '#fff', fontSize: '12px' }}
+                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
+                                labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
+                                itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
                                 formatter={(value: number) => [value.toLocaleString(), 'Clusters']}
                             />
                             <Bar dataKey="count" radius={[4, 4, 0, 0]}>
@@ -301,8 +305,9 @@ export default function Dashboard() {
                             <XAxis type="number" stroke="#94a3b8" fontSize={11} tickFormatter={formatCompact} />
                             <YAxis type="category" dataKey="label" stroke="#94a3b8" fontSize={10} width={96} />
                             <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }}
-                                labelStyle={{ color: '#fff', fontSize: '12px' }}
+                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
+                                labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
+                                itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
                                 formatter={(value: number) => [value.toLocaleString(), 'Entities']}
                             />
                             <Bar dataKey="entities" fill="#3b82f6" radius={[0, 4, 4, 0]} />
@@ -339,8 +344,9 @@ export default function Dashboard() {
                             <XAxis dataKey="label" stroke="#94a3b8" fontSize={10} />
                             <YAxis stroke="#94a3b8" fontSize={11} width={44} tickFormatter={(v: number) => `${v}s`} />
                             <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }}
-                                labelStyle={{ color: '#fff', fontSize: '12px' }}
+                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
+                                labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
+                                itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
                                 formatter={(value: number) => [`${value}s`, 'Duration']}
                             />
                             <Area

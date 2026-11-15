@@ -99,11 +99,18 @@ idr run --platform [platform] --db demo.duckdb --mode FULL
 idr ui --db demo.duckdb
 ```
 
-### Option 2: AI Agent (MCP)
+### Option 2: AI Agent (MCP) & Local Ollama / BYOK AI Assistant
 
-Enable your AI assistant (Antigravity, Codex, Cursor, Claude) to understand and query your identity graph.
+Enable your AI assistant (Antigravity, Codex, Cursor, Claude) to understand and query your identity graph via MCP, **or** use the built-in AI Assistant with **local Ollama** (zero data movement) or any BYOK model (OpenAI, Anthropic, Gemini) with automatic PII masking:
 
 ```bash
+# Built-in AI Assistant (local Ollama on MacBook/Linux)
+ollama pull llama3.2
+idr ai test --provider ollama --model llama3.2
+idr ai ask --db my_warehouse.duckdb "How many multi-entity clusters exist?"
+idr explain <resolved_id> --db my_warehouse.duckdb
+idr triage --db my_warehouse.duckdb
+
 # Start MCP Server
 export IDR_PLATFORM=duckdb
 export IDR_DATABASE=./my_data.duckdb
@@ -148,7 +155,8 @@ Pre-built configurations for common use cases:
 
 ## 🧪 Testing & Production Benchmarks
 
-- **Live Cloud Benchmarks (6.3M Entities, 15 Source Tables → 5.38M Edges → 1.54M Clusters)**:
+- **Live Benchmarks (6.3M Entities, 15 Source Tables → 5.38M Edges → 1.54M Clusters)**:
+  - **DuckDB (Local)**: **94s (1.6 min)** (~67,000 entities/sec)
   - **Snowflake**: **170s (2.8 min)** (~37,000 entities/sec)
   - **Databricks SQL Warehouse**: **296s (4.9 min)** (~21,300 entities/sec)
   - **Google BigQuery (Serverless)**: **306s (5.1 min)** (~20,600 entities/sec)
@@ -162,7 +170,7 @@ pytest
 pytest tests/test_cloud_dialects_live.py -v
 ```
 
-See [Concepts & Architecture](docs/concepts-and-architecture.md) for detailed pipeline stage and schema design.
+See [Concepts & Architecture](docs/concepts-and-architecture.md) for detailed pipeline stage and schema design, and the [Downstream Consumption & Reverse-ETL SQL Cookbook](docs/getting-started.md#4-downstream-consumption--reverse-etl-sql-cookbook) for joining `idr_out` tables back to fact tables and incremental exports.
 
 ## 🤝 Contributing
 

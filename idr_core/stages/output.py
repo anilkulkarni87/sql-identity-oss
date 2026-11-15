@@ -312,18 +312,22 @@ class OutputStage(BaseStage):
         )
 
         # 3. Update edges table (Insert / Upsert) BEFORE clusters to enable scoring
+        edges_dedup_query = f"""
+            SELECT
+                left_entity_key,
+                right_entity_key,
+                identifier_type,
+                MAX(identifier_value_norm) AS identifier_value_norm,
+                {current_ts} AS first_seen_ts,
+                '{self.run_id}' AS run_id
+            FROM idr_work.edges_new
+            GROUP BY left_entity_key, right_entity_key, identifier_type
+        """
         if self.adapter.dialect in ("duckdb", "postgres"):
             self.adapter.execute(f"""
                 INSERT INTO idr_out.identity_edges_current
                 (left_entity_key, right_entity_key, identifier_type, identifier_value_norm, first_seen_ts, run_id)
-                SELECT
-                    left_entity_key,
-                    right_entity_key,
-                    identifier_type,
-                    identifier_value_norm,
-                    {current_ts},
-                    '{self.run_id}'
-                FROM idr_work.edges_new
+                {edges_dedup_query}
                 ON CONFLICT (left_entity_key, right_entity_key, identifier_type)
                 DO UPDATE SET last_seen_ts = EXCLUDED.first_seen_ts, run_id = EXCLUDED.run_id
             """)
@@ -331,16 +335,7 @@ class OutputStage(BaseStage):
             # MERGE for inserting new edges and updating last_seen_ts
             self.adapter.execute(f"""
                 MERGE INTO idr_out.identity_edges_current T
-                USING (
-                    SELECT
-                        left_entity_key,
-                        right_entity_key,
-                        identifier_type,
-                        identifier_value_norm,
-                        {current_ts} AS first_seen_ts,
-                        '{self.run_id}' AS run_id
-                    FROM idr_work.edges_new
-                ) S
+                USING ({edges_dedup_query}) S
                 ON T.left_entity_key = S.left_entity_key
                    AND T.right_entity_key = S.right_entity_key
                    AND T.identifier_type = S.identifier_type
@@ -363,14 +358,15 @@ class OutputStage(BaseStage):
             self.upsert(
                 target_table="idr_out.identity_identifiers_current",
                 source_query=f"""
-                    SELECT DISTINCT
+                    SELECT
                         entity_key,
                         identifier_type,
-                        identifier_value_norm,
-                        is_hashed,
+                        MAX(identifier_value_norm) AS identifier_value_norm,
+                        MAX(CAST(is_hashed AS INTEGER)) = 1 AS is_hashed,
                         {current_ts} AS updated_at,
                         '{self.run_id}' AS run_id
                     FROM idr_work.identifiers_all
+                    GROUP BY entity_key, identifier_type
                 """,
                 key_cols=["entity_key", "identifier_type"],
                 update_cols=["identifier_value_norm", "is_hashed", "updated_at", "run_id"],

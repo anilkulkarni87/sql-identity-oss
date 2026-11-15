@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.source_table (
   entity_key_expr VARCHAR,
   watermark_column VARCHAR,
   watermark_lookback_minutes INTEGER,
+  deduplicate BOOLEAN DEFAULT FALSE,
+  dedup_order_by VARCHAR,
   is_active BOOLEAN
 );
 

@@ -51,6 +51,10 @@ def connect(request: ConnectionRequest, current_user: dict = Depends(get_current
             # Sanitize path: strip quotes if user pasted them
             db_path = db_path.strip("'\"")
 
+            # Close any existing connection for this user before opening a new DuckDB handle
+            # so file locks are released cleanly on reconnect.
+            _manager.disconnect_user(user_key)
+
             # Read-write allows first-time setup by creating DB if it doesn't exist.
             conn = duckdb.connect(db_path, read_only=False)
             from idr_core.adapters.duckdb import DuckDBAdapter

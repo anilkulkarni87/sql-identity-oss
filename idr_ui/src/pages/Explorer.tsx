@@ -28,6 +28,9 @@ export default function Explorer() {
     const debouncedSearchQuery = useDebounce(searchQuery, 300)
 
     const [selectedCluster, setSelectedCluster] = useState<string | null>(null)
+    const [aiExplanation, setAiExplanation] = useState<string | null>(null)
+    const [aiExplaining, setAiExplaining] = useState(false)
+    const [aiCustomPrompt, setAiCustomPrompt] = useState('')
     const [selectedNode, setSelectedNode] = useState<GraphNodeData | null>(null)
     const [layoutName, setLayoutName] = useState<GraphLayoutName>('concentric')
     const [hiddenSources, setHiddenSources] = useState<Set<string>>(new Set())
@@ -456,6 +459,55 @@ export default function Explorer() {
 
             {selectedCluster && clusterDetail && (
                 <div className="space-y-6">
+                    {/* AI Cluster Explanation Bar */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-800/70 border border-gray-700/70 rounded-xl px-4 py-2.5">
+                        <div className="text-xs text-gray-300">
+                            Cluster <span className="font-mono text-white font-semibold">{selectedCluster}</span>
+                        </div>
+                        <div className="flex flex-1 sm:flex-initial items-center gap-2 min-w-[260px] max-w-xl">
+                            <input
+                                type="text"
+                                value={aiCustomPrompt}
+                                onChange={(e) => setAiCustomPrompt(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !aiExplaining) {
+                                        e.preventDefault()
+                                        document.getElementById('btn-explain-cluster-ai')?.click()
+                                    }
+                                }}
+                                placeholder="Optional: ask a specific question about this cluster..."
+                                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                            />
+                            <button
+                                id="btn-explain-cluster-ai"
+                                type="button"
+                                disabled={aiExplaining}
+                                onClick={async () => {
+                                    setAiExplaining(true)
+                                    setAiExplanation(null)
+                                    try {
+                                        const res = await api.explainClusterAi(selectedCluster, aiCustomPrompt)
+                                        setAiExplanation(
+                                            `[${res.provider}:${res.model} | PII Masking: ${res.pii_masked ? 'ON' : 'OFF (local)'}]\n\n${res.explanation}`
+                                        )
+                                    } catch (err: any) {
+                                        setAiExplanation(`AI Explain unavailable: ${err.message || String(err)} (Configure Ollama or a BYOK key in Settings.)`)
+                                    } finally {
+                                        setAiExplaining(false)
+                                    }
+                                }}
+                                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 text-xs font-medium transition-colors disabled:opacity-50"
+                            >
+                                {aiExplaining ? 'Analyzing...' : (aiCustomPrompt.trim() ? 'Ask AI' : 'Explain with AI')}
+                            </button>
+                        </div>
+                    </div>
+                    {aiExplanation && (
+                        <div className="bg-purple-950/30 border border-purple-700/50 rounded-xl p-4 text-xs text-purple-100 whitespace-pre-wrap">
+                            {aiExplanation}
+                        </div>
+                    )}
+
                     {/* Persistent resolved_id Crosswalk History Banner */}
                     {clusterDetail.crosswalk_history && clusterDetail.crosswalk_history.length > 0 && (
                         <div className="bg-indigo-950/40 border border-indigo-700/60 rounded-xl p-3.5 text-xs text-indigo-200 space-y-1.5">

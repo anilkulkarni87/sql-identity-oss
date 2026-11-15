@@ -75,6 +75,17 @@ SYSTEM_TABLES: List[TableDef] = [
                 description="Buffer time for late arriving data",
             ),
             ColumnDef(
+                "deduplicate",
+                ColumnType.BOOL,
+                default="FALSE",
+                description="Whether to deduplicate duplicate entity_key rows before extraction",
+            ),
+            ColumnDef(
+                "dedup_order_by",
+                ColumnType.STRING,
+                description="ORDER BY expression used to pick the winning row when deduplicate=TRUE",
+            ),
+            ColumnDef(
                 "is_active",
                 ColumnType.BOOL,
                 default="TRUE",

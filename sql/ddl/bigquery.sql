@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.source_table (
   entity_key_expr STRING,
   watermark_column STRING,
   watermark_lookback_minutes INT64,
+  deduplicate BOOL,
+  dedup_order_by STRING,
   is_active BOOL
 );
 

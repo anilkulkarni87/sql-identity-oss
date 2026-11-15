@@ -14,8 +14,10 @@
 - Agent Skill (`SKILL.md`): https://github.com/anilkulkarni87/sql-identity-oss/blob/main/skills/sql-identity-resolution/SKILL.md
 
 ## Headless Interfaces
-- **CLI**: `idr init`, `idr doctor`, `idr bootstrap`, `idr apply-config`, `idr run --mode FULL|INCR`, `idr evaluate`, `idr privacy forget`
+- **CLI**: `idr init`, `idr doctor`, `idr bootstrap`, `idr apply-config`, `idr run --mode FULL|INCR`, `idr evaluate`, `idr privacy forget`, `idr plugins list`, `idr ai test|models|ask`, `idr explain`, `idr triage`
+- **AI Assistant (Ollama-first + BYOK)**: `IDR_LLM_PROVIDER` (`ollama` | `openai` | `anthropic` | `gemini` | `openai_compatible`), `IDR_LLM_MODEL`, `IDR_LLM_BASE_URL`, `IDR_LLM_API_KEY`, `IDR_LLM_MASK_PII` (auto-enabled for non-local endpoints)
 - **Python SDK**: `from idr_core.runner import IDRRunner, RunConfig`
+- **Plugin Entry Points**: `idr.canonicalizers`, `idr.survivorship_strategies`, `idr.adapters`
 - **dbt Package**: `dbt_idr`
 - **MCP Server**: `idr-mcp` (`stdio`) or FastAPI `POST /mcp` (`streamable-http`)
 - **Webhooks**: set `IDR_WEBHOOK_URL` (+ optional `IDR_WEBHOOK_SECRET`) for `run.completed`, `run.failed`, `guardrail.skipped_groups_spike`, `crosswalk.cluster_changes`, `privacy.erasure_completed`
@@ -33,7 +35,7 @@ sources:
   - id: customers
     table: db.schema.customers
     entity_type: PERSON
-    entity_key: customer_id
+    entity_key: customer_id # or AUTO with key_columns; supports deduplicate: true + dedup_order_by
     watermark: updated_at
     identifiers:
       - type: email
@@ -50,11 +52,12 @@ rules:
     canonicalize: EMAIL_STANDARD
 survivorship:
   - attribute: first_name
-    strategy: RECENCY
+    strategy: RECENCY # RECENCY | PRIORITY | PRIORITY_RECENCY | LATEST_FROM_SOURCE | FREQUENCY | ANY_TRUE | ALL_TRUE | EARLIEST | AGG_MAX | AGG_MIN | AGG_SUM | COLLECT_DISTINCT
     source_priority: [customers]
 ```
 
 ## Production Benchmarks (6.3M Entities, 15 Source Tables)
+- **DuckDB (Local)**: 94s (1.6 min, ~67k entities/sec)
 - **Snowflake**: 170s (2.8 min, ~37k entities/sec)
 - **Databricks SQL Warehouse**: 296s (4.9 min, ~21k entities/sec)
 - **Google BigQuery**: 306s (5.1 min, ~21k entities/sec)

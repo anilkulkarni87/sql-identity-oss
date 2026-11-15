@@ -133,3 +133,95 @@ Both the CLI (`idr`) and the Web UI (`idr ui`) automatically discover local clou
 !!! note "Automatic `--platform` Detection"
     If you pass `--db my_file.duckdb`, `--project my-gcp-project`, or set `IDR_PLATFORM`, the `idr` CLI automatically resolves `--platform` for you.
 
+---
+
+## 4. Downstream Consumption & Reverse-ETL SQL Cookbook
+
+Once `idr run` finishes, all resolved outputs live in `idr_out.*` inside your warehouse—ready for BI, dbt models, or Reverse ETL tools (Hightouch, Census, RudderStack).
+
+### Recipe 1: Join `resolved_id` Back to Fact & Event Tables
+
+Every source row maps to its cluster via `entity_key = CONCAT('<source_id>:', CAST(<entity_key_col> AS VARCHAR))` (or `STRING` on BigQuery/Databricks):
+
+```sql
+-- Enrich online orders with the unified resolved_id and golden email
+SELECT
+    o.order_id,
+    o.order_total,
+    o.order_ts,
+    m.resolved_id,
+    gp.email AS golden_email
+FROM raw.orders_online o
+LEFT JOIN idr_out.identity_resolved_membership_current m
+    ON m.entity_key = CONCAT('orders_online:', CAST(o.order_id AS VARCHAR))
+LEFT JOIN idr_out.golden_profiles gp
+    ON gp.resolved_id = m.resolved_id;
+```
+
+### Recipe 2: Incremental Reverse-ETL Export (Only Changed Profiles)
+
+Avoid re-syncing millions of unchanged profiles to your CRM or ad platforms by filtering `idr_out.golden_profiles` to the latest run (or `updated_at`) and gating on cluster confidence:
+
+```sql
+-- Export only golden profiles updated in the latest successful run
+WITH latest_run AS (
+    SELECT run_id
+    FROM idr_out.run_history
+    WHERE status = 'SUCCESS'
+    ORDER BY started_at DESC
+    LIMIT 1
+)
+SELECT
+    gp.*,
+    c.cluster_size,
+    c.confidence_score
+FROM idr_out.golden_profiles gp
+JOIN latest_run lr
+    ON gp.run_id = lr.run_id
+JOIN idr_out.identity_clusters_current c
+    ON gp.resolved_id = c.resolved_id
+WHERE c.confidence_score >= 0.50;
+```
+
+### Recipe 3: Handle Merged / Retired `resolved_id`s Downstream
+
+When two clusters merge on a subsequent incremental run, `idr_out.resolved_id_crosswalk` records which `previous_resolved_id` folded into `current_resolved_id` so downstream systems can merge or retire stale IDs:
+
+```sql
+SELECT
+    previous_resolved_id,
+    current_resolved_id,
+    change_type,
+    entities_moved,
+    run_id,
+    updated_at
+FROM idr_out.resolved_id_crosswalk
+WHERE updated_at >= CURRENT_TIMESTAMP - INTERVAL '1' DAY
+ORDER BY updated_at DESC;
+```
+
+### Recipe 4: Customer 360 Summary Mart
+
+Roll up multi-channel transactions to the unified `resolved_id` grain:
+
+```sql
+SELECT
+    gp.resolved_id,
+    gp.email,
+    gp.first_name,
+    gp.last_name,
+    c.cluster_size,
+    c.confidence_score,
+    COUNT(DISTINCT o.order_id) AS lifetime_orders,
+    COALESCE(SUM(o.order_total), 0) AS lifetime_revenue
+FROM idr_out.golden_profiles gp
+JOIN idr_out.identity_clusters_current c
+    ON gp.resolved_id = c.resolved_id
+LEFT JOIN idr_out.identity_resolved_membership_current m
+    ON m.resolved_id = gp.resolved_id
+   AND m.entity_key LIKE 'orders_online:%'
+LEFT JOIN raw.orders_online o
+    ON m.entity_key = CONCAT('orders_online:', CAST(o.order_id AS VARCHAR))
+GROUP BY 1, 2, 3, 4, 5, 6;
+```
+
