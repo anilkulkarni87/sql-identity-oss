@@ -124,7 +124,8 @@ export default function StepMap({ tables, initialConfig, onNext, onBack }: StepM
             if (exists) {
                 newAttrs = currentAttrs.filter(a => a.name !== colName);
             } else {
-                newAttrs = [...currentAttrs, { name: colName, column: colName, expr: colName }];
+                const colMeta = (columns[table] || []).find(c => c.name === colName);
+                newAttrs = [...currentAttrs, { name: colName, column: colName, expr: colName, data_type: colMeta?.type }];
                 // Remove from identifiers if it was there
                 prev[table].identifiers = (prev[table].identifiers || []).filter(i => i.column !== colName);
             }
@@ -253,7 +254,10 @@ export default function StepMap({ tables, initialConfig, onNext, onBack }: StepM
                     column: i.column,
                     expr: i.column // Use column name as expression by default
                 })),
-                attributes: config[t].attributes || []
+                attributes: (config[t].attributes || []).map(a => {
+                    const colMeta = (columns[t] || []).find(c => c.name === (a.column || a.name));
+                    return a.data_type || !colMeta?.type ? a : { ...a, data_type: colMeta.type };
+                })
             })),
             rules: initialConfig?.rules && initialConfig.rules.length > 0 ? initialConfig.rules : dynamicRules,
             fuzzy_rules: initialConfig?.fuzzy_rules || [],

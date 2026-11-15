@@ -239,10 +239,10 @@
         <div class="glass-card rounded-2xl p-6 border-emerald-400/25">
           <div class="flex items-center justify-between">
             <span class="text-sm font-semibold text-white">🦆 DuckDB Local</span>
-            <span class="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-mono text-emerald-300">2.1x vs BQ</span>
+            <span class="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-mono text-emerald-300">3.3x vs BQ</span>
           </div>
-          <div class="font-mono text-3xl font-extrabold text-emerald-300 mt-3">143s <span class="text-sm font-normal text-slate-400">(2.4 min)</span></div>
-          <div class="text-xs text-slate-400 mt-1 font-mono">~44,000 entities/sec · LP 39s · Output 92s</div>
+          <div class="font-mono text-3xl font-extrabold text-emerald-300 mt-3">94s <span class="text-sm font-normal text-slate-400">(1.6 min)</span></div>
+          <div class="text-xs text-slate-400 mt-1 font-mono">~67,000 entities/sec · LP 44.3s · Output 37.5s</div>
         </div>
         <div class="glass-card rounded-2xl p-6 border-cyan-400/25">
           <div class="flex items-center justify-between">
@@ -520,11 +520,11 @@ IDR_MCP_TRANSPORT=streamable-http idr-mcp
     // Stage comparison bars
     const stages = [
       { name: 'Preflight', duck: 0, sf: 6.7, dbx: 24, bq: 26 },
-      { name: 'Entities', duck: 1, sf: 5.3, dbx: 6, bq: 5 },
-      { name: 'Identifiers', duck: 4, sf: 20.2, dbx: 52, bq: 54 },
-      { name: 'Edge Building', duck: 4, sf: 11.1, dbx: 14, bq: 12 },
-      { name: 'Label Prop', duck: 39, sf: 58.8, dbx: 108, bq: 110 },
-      { name: 'Output & Golden', duck: 92, sf: 66.7, dbx: 85, bq: 90 },
+      { name: 'Entities', duck: 2.9, sf: 5.3, dbx: 6, bq: 5 },
+      { name: 'Identifiers', duck: 5, sf: 20.2, dbx: 52, bq: 54 },
+      { name: 'Edge Building', duck: 4.4, sf: 11.1, dbx: 14, bq: 12 },
+      { name: 'Label Prop', duck: 44.3, sf: 58.8, dbx: 108, bq: 110 },
+      { name: 'Output & Golden', duck: 37.5, sf: 66.7, dbx: 85, bq: 90 },
     ];
     document.getElementById('stage-bars').innerHTML = stages.map(s => `
       <div class="grid grid-cols-12 items-center gap-3">
@@ -540,7 +540,7 @@ IDR_MCP_TRANSPORT=streamable-http idr-mcp
 
     // Scale estimator
     let estPlat = 'snowflake';
-    const platRates = { snowflake: 37041, databricks: 21274, bigquery: 20578, duckdb: 44035 };
+    const platRates = { snowflake: 37041, databricks: 21274, bigquery: 20578, duckdb: 66989 };
     function updateEstimator() {
       const rows = Number(document.getElementById('est-slider').value);
       document.getElementById('est-rows-label').textContent = rows.toLocaleString();

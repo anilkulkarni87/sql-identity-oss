@@ -156,7 +156,7 @@ Pre-built configurations for common use cases:
 ## 🧪 Testing & Production Benchmarks
 
 - **Live Benchmarks (6.3M Entities, 15 Source Tables → 5.38M Edges → 1.54M Clusters)**:
-  - **DuckDB (Local)**: **143s (2.4 min)** (~44,000 entities/sec)
+  - **DuckDB (Local)**: **94s (1.6 min)** (~67,000 entities/sec)
   - **Snowflake**: **170s (2.8 min)** (~37,000 entities/sec)
   - **Databricks SQL Warehouse**: **296s (4.9 min)** (~21,300 entities/sec)
   - **Google BigQuery (Serverless)**: **306s (5.1 min)** (~20,600 entities/sec)

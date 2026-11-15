@@ -192,6 +192,9 @@ class ProfileBuilder:
         # {attr_name: rule}
         rule_map = {r["attribute_name"]: r for r in rules}
 
+        if not sources or not rule_map:
+            return ""
+
         for src in sources:
             tid = src["table_id"]
             fqn = src["table_fqn"]
@@ -220,8 +223,16 @@ class ProfileBuilder:
         # Let's switch to Wide Table UNION strategy
         # SELECT m.resolved_id, 'digital' as source_id, s.final_at as recency, s.email, s.phone FROM ...
 
+        if not sources or not rule_map:
+            return ""
+
         for src in sources:
             tid = validate_identifier(str(src["table_id"]), "source_table.table_id")
+            # Skip sources that have zero attributes mapped for golden profile survivorship.
+            # This avoids full-scanning large event/clickstream tables just to emit NULLs.
+            if tid not in table_vars or not any(attr in table_vars[tid] for attr in rule_map):
+                continue
+
             fqn = validate_fqn(str(src["table_fqn"]), "source_table.table_fqn")
             key_expr = validate_sql_expr(str(src["entity_key_expr"]), "source_table.entity_key_expr")
             raw_wm = src.get("watermark_column")
@@ -256,8 +267,25 @@ class ProfileBuilder:
                 FROM {fqn} src
                 JOIN idr_out.identity_resolved_membership_current m
                   ON m.entity_key = CONCAT('{tid}:', CAST(({key_expr}) AS {self.dialect["string_type"]}))
+                 AND m.entity_key LIKE '{tid}:%'
                 {where_clause}
             """)
+
+        if not unions:
+            ts_type = self.dialect.get("timestamp_type", "TIMESTAMP")
+            str_type = self.dialect["string_type"]
+            null_cols = ",\n                ".join(
+                f"CAST(NULL AS {str_type}) AS {validate_identifier(str(attr), 'attribute_name')}"
+                for attr in rule_map
+            )
+            return f"""
+                SELECT
+                    CAST(NULL AS {str_type}) AS resolved_id,
+                    CAST(NULL AS {str_type}) AS source_id,
+                    CAST(NULL AS {ts_type}) AS recency_ts,
+                    {null_cols}
+                WHERE 1 = 0
+            """
 
         return " UNION ALL ".join(unions)
 

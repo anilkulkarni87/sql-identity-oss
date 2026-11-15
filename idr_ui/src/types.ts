@@ -10,6 +10,7 @@ export interface Attribute {
     name: string;
     column: string; // Used in UI state
     expr?: string; // Used in final config
+    data_type?: string; // Warehouse SQL column type (UI metadata)
 }
 
 export interface SourceConfig {

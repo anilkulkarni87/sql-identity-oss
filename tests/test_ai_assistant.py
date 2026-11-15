@@ -181,7 +181,11 @@ def test_explain_and_triage_with_duckdb():
         assert triage["proposals"][0]["action"] == "DO_NOT_LINK"
 
 
-def test_api_ai_endpoints_and_cli(capsys):
+def test_api_ai_endpoints_and_cli(capsys, monkeypatch):
+    import idr_api.dependencies as deps
+
+    monkeypatch.setattr(deps, "OIDC_ISSUER", "")
+    monkeypatch.setattr(deps, "ALLOW_INSECURE_DEV_AUTH", True)
     tc = TestClient(app)
     resp = tc.post(
         "/api/ai/config",
@@ -245,3 +249,21 @@ def test_duckdb_adapter_thread_safety_and_reconnect(tmp_path, monkeypatch):
     r2 = tc.post("/api/connect", json={"platform": "duckdb", "database": db_file})
     assert r2.status_code == 200
     tc.post("/api/disconnect")
+
+
+def test_profile_builder_skips_unmapped_sources_and_pushes_prefix():
+    from idr_core.profile_builder import ProfileBuilder
+
+    adapter = DuckDBAdapter(":memory:")
+    builder = ProfileBuilder(adapter)
+    sql = builder._build_staging_cte(
+        rules=[{"attribute_name": "email", "strategy": "RECENCY"}],
+        mappings=[{"table_id": "crm", "attribute_name": "email", "attribute_expr": "src.email"}],
+        sources=[
+            {"table_id": "crm", "table_fqn": "raw.crm", "entity_key_expr": "id", "watermark_column": "updated_at"},
+            {"table_id": "clickstream", "table_fqn": "raw.clickstream", "entity_key_expr": "event_id", "watermark_column": "ts"},
+        ],
+    )
+    assert "raw.crm" in sql
+    assert "m.entity_key LIKE 'crm:%'" in sql
+    assert "raw.clickstream" not in sql

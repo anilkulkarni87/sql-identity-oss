@@ -57,7 +57,7 @@ survivorship:
 ```
 
 ## Production Benchmarks (6.3M Entities, 15 Source Tables)
-- **DuckDB (Local)**: 143s (2.4 min, ~44k entities/sec)
+- **DuckDB (Local)**: 94s (1.6 min, ~67k entities/sec)
 - **Snowflake**: 170s (2.8 min, ~37k entities/sec)
 - **Databricks SQL Warehouse**: 296s (4.9 min, ~21k entities/sec)
 - **Google BigQuery**: 306s (5.1 min, ~21k entities/sec)
