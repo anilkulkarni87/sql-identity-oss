@@ -1543,7 +1543,13 @@ def parse_config_snapshot_row(row: Dict[str, Any]) -> Dict[str, Any]:
             config_dict["rules"] = parsed_rules
 
     if row.get("mappings_json"):
-        config_dict["survivorship"] = json.loads(row["mappings_json"])
+        parsed_surv = json.loads(row["mappings_json"])
+        if isinstance(parsed_surv, list):
+            config_dict["survivorship"] = [
+                s
+                for s in parsed_surv
+                if isinstance(s, dict) and ("attribute" in s or "attribute_name" in s)
+            ]
 
     return config_dict
 
