@@ -1,3 +1,4 @@
+import hashlib
 import os
 import secrets
 import sys
@@ -140,16 +141,25 @@ def get_system_status() -> Dict[str, Any]:
     Lifecycle states: DISCONNECTED, CONNECTED_UNINITIALIZED, CONNECTED_UNCONFIGURED, CONFIGURED_READY, RESOLVED.
     """
     manager = ConnectionManager.instance()
-    state = manager.get_state()
     adapter = manager.get_adapter()
-    platform = manager._connection_params.get("platform")
+    if adapter is None:
+        try:
+            adapter = get_adapter()
+        except Exception:
+            adapter = None
+    state = manager.get_state() if manager.is_connected() else (
+        ConnectionState.CONNECTED_READY if adapter is not None else ConnectionState.DISCONNECTED
+    )
+    platform = manager._connection_params.get("platform") or (
+        getattr(adapter, "dialect", None) if adapter is not None else None
+    )
 
     is_configured = False
     has_runs = False
     cluster_count = 0
     suggested_action = "connect_warehouse"
 
-    if state in (ConnectionState.CONNECTED_READY, ConnectionState.CONNECTED_UNINITIALIZED):
+    if state in (ConnectionState.CONNECTED_READY, ConnectionState.CONNECTED_UNINITIALIZED) and adapter is not None:
         try:
             if adapter and adapter.table_exists("idr_meta.source_table"):
                 cnt = adapter.query_one("SELECT COUNT(*) FROM idr_meta.source_table")
@@ -1103,6 +1113,7 @@ def manage_identity_override(
             from idr_core.adapters.base import get_dialect_config
 
             current_ts = get_dialect_config(adapter.dialect)["current_timestamp"]
+            override_id = f"ov_{hashlib.md5(f'{otype}:{ek_a}:{ek_b}'.encode()).hexdigest()[:12]}"
             adapter.execute(f"""
                 DELETE FROM idr_meta.identity_override
                 WHERE UPPER(override_type) = '{otype}'
@@ -1111,10 +1122,10 @@ def manage_identity_override(
             """)
             adapter.execute(f"""
                 INSERT INTO idr_meta.identity_override
-                (override_type, entity_key_a, entity_key_b, reason, is_active, created_at)
-                VALUES ('{otype}', '{ek_a}', '{ek_b}', '{rsn}', TRUE, {current_ts})
+                (override_id, override_type, entity_key_a, entity_key_b, reason, created_by, is_active, created_at)
+                VALUES ('{override_id}', '{otype}', '{ek_a}', '{ek_b}', '{rsn}', 'mcp', TRUE, {current_ts})
             """)
-            return {"status": "SUCCESS", "action": "added", "override_type": otype, "entity_key_a": ek_a, "entity_key_b": ek_b}
+            return {"status": "SUCCESS", "action": "added", "override_id": override_id, "override_type": otype, "entity_key_a": ek_a, "entity_key_b": ek_b}
 
         return {"status": "ERROR", "error": f"Unknown action '{action}'. Use 'list', 'add', or 'remove'."}
     except Exception as e:

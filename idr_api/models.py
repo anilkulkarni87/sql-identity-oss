@@ -106,6 +106,7 @@ class ClusterDetail(BaseModel):
     edges: List[EdgeInfo]
     golden_profile: Optional[Dict[str, Any]] = None
     crosswalk_history: Optional[List[Dict[str, Any]]] = None
+    truncated: bool = False
 
 
 class OverrideRequest(BaseModel):
@@ -114,6 +115,14 @@ class OverrideRequest(BaseModel):
     entity_key_a: Optional[str] = None
     entity_key_b: Optional[str] = None
     reason: Optional[str] = "UI stewardship override"
+
+
+class ExclusionRequest(BaseModel):
+    action: str = "add"  # add, remove, list
+    identifier_type: Optional[str] = None
+    identifier_value_pattern: Optional[str] = None
+    match_type: str = "EXACT"
+    reason: Optional[str] = "UI stewardship exclusion"
 
 
 class PrivacyForgetRequest(BaseModel):

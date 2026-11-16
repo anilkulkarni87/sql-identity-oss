@@ -311,7 +311,32 @@ class OutputStage(BaseStage):
             insert_cols=["entity_key", "resolved_id", "updated_at", "run_id", "super_cluster_id"],
         )
 
-        # 3. Update edges table (Insert / Upsert) BEFORE clusters to enable scoring
+        # 3. Update edges table (Insert / Upsert) BEFORE clusters to enable scoring.
+        # In INCR mode, remove stale historical edges for re-extracted entities and
+        # any edges invalidated by new exclusions before upserting freshly computed edges.
+        if self.config and self.config.run_mode == "INCR":
+            if self.adapter.table_exists("idr_work.reextracted_entities"):
+                self.adapter.execute("""
+                    DELETE FROM idr_out.identity_edges_current
+                    WHERE left_entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
+                       OR right_entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
+                """)
+            if self.adapter.table_exists("idr_meta.identifier_exclusion"):
+                self.adapter.execute("""
+                    DELETE FROM idr_out.identity_edges_current
+                    WHERE EXISTS (
+                        SELECT 1 FROM idr_meta.identifier_exclusion ex
+                        WHERE (
+                            UPPER(idr_out.identity_edges_current.identifier_type) = UPPER(ex.identifier_type)
+                            OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                        )
+                        AND (
+                            (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(idr_out.identity_edges_current.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
+                            OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(idr_out.identity_edges_current.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
+                        )
+                    )
+                """)
+
         edges_dedup_query = f"""
             SELECT
                 left_entity_key,
@@ -355,6 +380,27 @@ class OutputStage(BaseStage):
 
         # 3c. Update persistent identifiers store (if table exists)
         if self.adapter.table_exists("idr_out.identity_identifiers_current"):
+            if self.config and self.config.run_mode == "INCR":
+                if self.adapter.table_exists("idr_work.reextracted_entities"):
+                    self.adapter.execute("""
+                        DELETE FROM idr_out.identity_identifiers_current
+                        WHERE entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
+                    """)
+                if self.adapter.table_exists("idr_meta.identifier_exclusion"):
+                    self.adapter.execute("""
+                        DELETE FROM idr_out.identity_identifiers_current
+                        WHERE EXISTS (
+                            SELECT 1 FROM idr_meta.identifier_exclusion ex
+                            WHERE (
+                                UPPER(idr_out.identity_identifiers_current.identifier_type) = UPPER(ex.identifier_type)
+                                OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                            )
+                            AND (
+                                (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(idr_out.identity_identifiers_current.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
+                                OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(idr_out.identity_identifiers_current.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
+                            )
+                        )
+                    """)
             self.upsert(
                 target_table="idr_out.identity_identifiers_current",
                 source_query=f"""
@@ -453,7 +499,18 @@ class OutputStage(BaseStage):
                 )
             """)
 
-        # 4. Update watermarks (ignore NULL watermark_value rows from candidate expansion / overrides)
+        # 4. Build Unified Profiles (Golden Record) BEFORE advancing watermarks so
+        # a failed profile build does not advance watermarks and skip entities on retry.
+        try:
+            builder = ProfileBuilder(self.adapter)
+            run_mode = self.config.run_mode if self.config else "FULL"
+            builder.build_profiles(self.run_id, run_mode=run_mode)
+        except Exception as e:
+            self.logger.error(f"Profile generation failed: {e}", extra={"run_id": self.run_id})
+            self._warnings.append(f"Profile generation failed: {str(e)}")
+            raise RuntimeError(f"Golden profile generation failed: {e}") from e
+
+        # 5. Update watermarks (ignore NULL watermark_value rows from candidate expansion / overrides)
         self.upsert(
             target_table="idr_meta.run_state",
             source_query=f"""
@@ -470,16 +527,6 @@ class OutputStage(BaseStage):
             update_cols=["last_watermark_value", "last_run_id", "updated_at"],
             insert_cols=["table_id", "last_watermark_value", "last_run_id", "updated_at"],
         )
-
-        # 5. Build Unified Profiles (Golden Record)
-        try:
-            builder = ProfileBuilder(self.adapter)
-            run_mode = self.config.run_mode if self.config else "FULL"
-            builder.build_profiles(self.run_id, run_mode=run_mode)
-        except Exception as e:
-            self.logger.error(f"Profile generation failed: {e}", extra={"run_id": self.run_id})
-            self._warnings.append(f"Profile generation failed: {str(e)}")
-            raise RuntimeError(f"Golden profile generation failed: {e}") from e
 
         # Return total golden profiles or clusters generated
         try:

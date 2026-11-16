@@ -247,7 +247,11 @@ export default function StepMap({ tables, initialConfig, onNext, onBack }: StepM
                 id: config[t].id,
                 table: t,
                 entity_key: config[t].entity_key,
+                ...(config[t].key_columns && config[t].key_columns!.length > 0 ? { key_columns: config[t].key_columns } : {}),
+                ...(config[t].deduplicate !== undefined ? { deduplicate: config[t].deduplicate } : {}),
+                ...(config[t].dedup_order_by ? { dedup_order_by: config[t].dedup_order_by } : {}),
                 watermark_column: config[t].watermark_column,
+                watermark_lookback_minutes: config[t].watermark_lookback_minutes || 0,
                 // Ensure identifiers have 'expr' set
                 identifiers: (config[t].identifiers || []).map(i => ({
                     type: i.type,
@@ -339,6 +343,7 @@ export default function StepMap({ tables, initialConfig, onNext, onBack }: StepM
                                                     onChange={e => updateConfig(table, 'entity_key', e.target.value)}
                                                     className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                                 >
+                                                    <option value="AUTO">AUTO (Synthetic Hash Key)</option>
                                                     {tableCols.map(c => (
                                                         <option key={c.name} value={c.name}>
                                                             {c.name} ({c.type})
@@ -375,11 +380,39 @@ export default function StepMap({ tables, initialConfig, onNext, onBack }: StepM
                                                 </label>
                                                 <input
                                                     type="number"
-                                                    value={(tableConfig as any).watermark_lookback_minutes || 0}
-                                                    onChange={e => updateConfig(table, 'watermark_lookback_minutes' as any, parseInt(e.target.value) || 0)}
+                                                    value={tableConfig.watermark_lookback_minutes || 0}
+                                                    onChange={e => updateConfig(table, 'watermark_lookback_minutes', parseInt(e.target.value) || 0)}
                                                     className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                                 />
                                                 <p className="text-xs text-gray-500">Buffer to handle late-arriving data (0 = strict).</p>
+                                            </div>
+
+                                            {/* Deduplicate Source Rows */}
+                                            <div className="space-y-2 pt-1">
+                                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={Boolean(tableConfig.deduplicate)}
+                                                        onChange={e => updateConfig(table, 'deduplicate', e.target.checked)}
+                                                        className="rounded border-gray-700 bg-gray-900 text-blue-500 focus:ring-blue-500"
+                                                    />
+                                                    Deduplicate source rows
+                                                </label>
+                                                {tableConfig.deduplicate && (
+                                                    <select
+                                                        value={tableConfig.dedup_order_by || ''}
+                                                        onChange={e => updateConfig(table, 'dedup_order_by', e.target.value)}
+                                                        className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-xs text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    >
+                                                        <option value="">Default order (watermark DESC)</option>
+                                                        {tableCols.map(c => (
+                                                            <option key={c.name} value={`${c.name} DESC`}>
+                                                                {c.name} DESC
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
+                                                <p className="text-xs text-gray-500">Enable when source tables can contain duplicate entity_key rows in a batch.</p>
                                             </div>
 
                                         </div>

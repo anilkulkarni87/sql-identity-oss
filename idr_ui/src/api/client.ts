@@ -165,6 +165,7 @@ export const api = {
             run_id: string
             updated_at: string
         }> | null
+        truncated?: boolean
     }>(`/clusters/${encodeURIComponent(clusterId)}`),
 
     manageOverride: (payload: {
@@ -178,6 +179,21 @@ export const api = {
         action?: string
         overrides?: Array<Record<string, unknown>>
     }>('/overrides', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }),
+
+    manageExclusion: (payload: {
+        action?: 'add' | 'remove' | 'list'
+        identifier_type?: string
+        identifier_value_pattern?: string
+        match_type?: 'EXACT' | 'LIKE'
+        reason?: string
+    }) => fetchJson<{
+        status: string
+        action?: string
+        exclusions?: Array<Record<string, unknown>>
+    }>('/exclusions', {
         method: 'POST',
         body: JSON.stringify(payload),
     }),

@@ -2,6 +2,7 @@
 Explorer router — entity search and cluster detail.
 """
 
+import hashlib
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +13,7 @@ from ..models import (
     ClusterSummary,
     EdgeInfo,
     EntityInfo,
+    ExclusionRequest,
     OverrideRequest,
     PrivacyForgetRequest,
 )
@@ -94,8 +96,15 @@ def search_entities(q: str = Query(..., min_length=3), adapter=Depends(get_adapt
 
 
 @router.get("/api/clusters/{resolved_id}", response_model=ClusterDetail)
-def get_cluster(resolved_id: str, adapter=Depends(get_adapter)):
-    """Get full cluster detail with entities and edges."""
+def get_cluster(
+    resolved_id: str,
+    max_entities: int = Query(500, ge=1, le=5000),
+    max_edges: int = Query(1000, ge=1, le=10000),
+    adapter=Depends(get_adapter),
+):
+    """Get cluster detail with bounded entities and edges to handle large superclusters safely."""
+    safe_max_entities = max(1, min(int(max_entities), 5000))
+    safe_max_edges = max(1, min(int(max_edges), 10000))
 
     # Cluster info
     try:
@@ -126,12 +135,13 @@ def get_cluster(resolved_id: str, adapter=Depends(get_adapter)):
     if not cluster:
         raise HTTPException(404, f"Cluster {resolved_id} not found")
 
-    # Entities
+    # Entities (bounded for superclusters)
     entities_raw = adapter.query(
-        """
+        f"""
         SELECT entity_key
         FROM idr_out.identity_resolved_membership_current
         WHERE resolved_id = ?
+        LIMIT {safe_max_entities}
     """,
         params=[resolved_id],
     )
@@ -149,9 +159,9 @@ def get_cluster(resolved_id: str, adapter=Depends(get_adapter)):
             )
         )
 
-    # Edges
+    # Edges (bounded for superclusters)
     edges_raw = adapter.query(
-        """
+        f"""
         SELECT DISTINCT
             left_entity_key,
             right_entity_key,
@@ -163,9 +173,11 @@ def get_cluster(resolved_id: str, adapter=Depends(get_adapter)):
             FROM idr_out.identity_resolved_membership_current
             WHERE resolved_id = ?
         )
+        LIMIT {safe_max_edges}
     """,
         params=[resolved_id],
     )
+    truncated = len(entities) >= safe_max_entities or len(edges_raw) >= safe_max_edges
     edges = [
         EdgeInfo(
             left_entity_key=e["left_entity_key"],
@@ -233,6 +245,7 @@ def get_cluster(resolved_id: str, adapter=Depends(get_adapter)):
         edges=edges,
         golden_profile=golden_profile,
         crosswalk_history=crosswalk_history,
+        truncated=truncated,
     )
 
 
@@ -275,6 +288,7 @@ def manage_override(
     from idr_core.adapters.base import get_dialect_config
 
     current_ts = get_dialect_config(adapter.dialect)["current_timestamp"]
+    override_id = f"ov_{hashlib.md5(f'{otype}:{ek_a}:{ek_b}'.encode()).hexdigest()[:12]}"
     adapter.execute(f"""
         DELETE FROM idr_meta.identity_override
         WHERE UPPER(override_type) = '{otype}'
@@ -283,10 +297,61 @@ def manage_override(
     """)
     adapter.execute(f"""
         INSERT INTO idr_meta.identity_override
-        (override_type, entity_key_a, entity_key_b, reason, created_by, is_active, created_at)
-        VALUES ('{otype}', '{ek_a}', '{ek_b}', '{rsn}', 'ui', TRUE, {current_ts})
+        (override_id, override_type, entity_key_a, entity_key_b, reason, created_by, is_active, created_at)
+        VALUES ('{override_id}', '{otype}', '{ek_a}', '{ek_b}', '{rsn}', 'ui', TRUE, {current_ts})
     """)
-    return {"status": "ok", "action": "added", "override_type": otype, "entity_key_a": ek_a, "entity_key_b": ek_b}
+    return {"status": "ok", "action": "added", "override_id": override_id, "override_type": otype, "entity_key_a": ek_a, "entity_key_b": ek_b}
+
+
+@router.post("/api/exclusions")
+def manage_exclusion(
+    req: ExclusionRequest,
+    adapter=Depends(get_adapter),
+    _user: Dict[str, Any] = Depends(require_write_access),
+):
+    """Manage identifier exclusion rules (poison-pill suppression) directly from the UI."""
+    act = (req.action or "add").strip().lower()
+    if act == "list":
+        if not adapter.table_exists("idr_meta.identifier_exclusion"):
+            return {"status": "ok", "exclusions": []}
+        rows = adapter.query("SELECT * FROM idr_meta.identifier_exclusion")
+        return {"status": "ok", "exclusions": rows}
+
+    if not req.identifier_type or not req.identifier_value_pattern:
+        raise HTTPException(400, "identifier_type and identifier_value_pattern are required")
+
+    id_type = req.identifier_type.strip().upper().replace("'", "''")
+    pattern = req.identifier_value_pattern.strip().replace("'", "''")
+    mtype = (req.match_type or "EXACT").strip().upper()
+    if mtype not in ("EXACT", "LIKE"):
+        raise HTTPException(400, f"Invalid match_type '{mtype}'. Use EXACT or LIKE.")
+    rsn = (req.reason or "UI stewardship exclusion").replace("'", "''")
+
+    adapter.execute(f"""
+        DELETE FROM idr_meta.identifier_exclusion
+        WHERE UPPER(identifier_type) = '{id_type}'
+          AND LOWER(identifier_value_pattern) = LOWER('{pattern}')
+    """)
+    if act == "remove":
+        return {
+            "status": "ok",
+            "action": "removed",
+            "identifier_type": id_type,
+            "identifier_value_pattern": pattern,
+        }
+
+    adapter.execute(f"""
+        INSERT INTO idr_meta.identifier_exclusion
+        (identifier_type, identifier_value_pattern, match_type, reason)
+        VALUES ('{id_type}', '{pattern}', '{mtype}', '{rsn}')
+    """)
+    return {
+        "status": "ok",
+        "action": "added",
+        "identifier_type": id_type,
+        "identifier_value_pattern": pattern,
+        "match_type": mtype,
+    }
 
 
 @router.post("/api/privacy/forget")

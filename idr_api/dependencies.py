@@ -81,6 +81,12 @@ class IDRManager:
 
     def set_adapter_for_user(self, user_key: str, adapter: IDRAdapter, config: Dict[str, Any]):
         self._store.set_adapter(user_key, adapter, config)
+        try:
+            from idr_core.connection_manager import ConnectionManager
+
+            ConnectionManager.instance().set_adapter(adapter, config, close_previous=False)
+        except Exception:
+            pass
 
     def get_adapter_for_user(self, user_key: str) -> Optional[IDRAdapter]:
         return self._store.get_adapter(user_key)
@@ -114,6 +120,14 @@ class IDRManager:
 
     def disconnect(self) -> None:
         self._store.disconnect_all()
+        try:
+            from idr_core.connection_manager import ConnectionManager
+
+            cm = ConnectionManager.instance()
+            cm._adapter = None
+            cm._connection_params = {}
+        except Exception:
+            pass
 
     def get_runner(self) -> IDRRunner:
         adapter = self.get_any_adapter()

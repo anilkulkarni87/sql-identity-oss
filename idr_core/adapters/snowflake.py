@@ -24,13 +24,15 @@ class SnowflakeAdapter(IDRAdapter):
             result = runner.run()
     """
 
-    def __init__(self, session_or_conn):
+    def __init__(self, session_or_conn, schema_mapping: Optional[Dict[str, str]] = None):
         """
         Initialize with Snowpark Session OR Python Connector.
 
         Args:
             session_or_conn: snowflake.snowpark.Session OR snowflake.connector.SnowflakeConnection
+            schema_mapping: Optional mapping for idr_meta/idr_work/idr_out schemas
         """
+        self.init_schema_mapping(schema_mapping)
         self.conn_obj = session_or_conn
         # Detect mode
         self.is_snowpark = hasattr(session_or_conn, "sql") and hasattr(
@@ -43,6 +45,7 @@ class SnowflakeAdapter(IDRAdapter):
 
     def execute(self, sql: str) -> None:
         """Execute a single SQL statement."""
+        sql = self._rewrite_schemas(sql)
         if self.is_snowpark:
             self.conn_obj.sql(sql).collect()
         else:
@@ -53,6 +56,7 @@ class SnowflakeAdapter(IDRAdapter):
         """Execute multiple SQL statements separated by semicolons."""
         # Snowpark doesn't support multi-statement easily without splitting
         # DBAPI does execute_string but standard execute usually one statement
+        sql = self._rewrite_schemas(sql)
         for stmt in sql.split(";"):
             stmt = stmt.strip()
             if stmt:
@@ -64,6 +68,7 @@ class SnowflakeAdapter(IDRAdapter):
 
     def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
         """Execute SQL and return results as list of dicts."""
+        sql = self._rewrite_schemas(sql)
         if self.is_snowpark:
             # Snowpark supports params in sql() (usually ? placeholders)
             # Do NOT replace ? with %s here.
@@ -88,6 +93,7 @@ class SnowflakeAdapter(IDRAdapter):
 
     def query_one(self, sql: str, params: Optional[List[Any]] = None) -> Any:
         """Execute SQL and return first value of first row."""
+        sql = self._rewrite_schemas(sql)
         if self.is_snowpark:
             # Snowpark supports params
             result = self.conn_obj.sql(sql, params).collect()
@@ -109,6 +115,7 @@ class SnowflakeAdapter(IDRAdapter):
 
     def table_exists(self, table_fqn: str) -> bool:
         """Check if table exists."""
+        table_fqn = self._rewrite_table_fqn(table_fqn)
         try:
             if self.is_snowpark:
                 self.conn_obj.sql(f"SELECT 1 FROM {table_fqn} LIMIT 0").collect()
@@ -123,6 +130,7 @@ class SnowflakeAdapter(IDRAdapter):
         """Get column names for a table (lowercase)."""
         # DESCRIBE returns: name, type, kind, null?, default, primary key, unique key, check, expression, comment
         # We need name (0) and type (1)
+        table_fqn = self._rewrite_table_fqn(table_fqn)
         if self.is_snowpark:
             result = self.conn_obj.sql(f"DESCRIBE TABLE {table_fqn}").collect()
             return [{"name": row[0].lower(), "type": row[1]} for row in result]
@@ -134,6 +142,8 @@ class SnowflakeAdapter(IDRAdapter):
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
         """List tables in a schema (case-insensitive, supports optional db.schema)."""
+        if schema:
+            schema = self.schema_mapping.get(schema.lower(), schema)
         info_schema = "information_schema.tables"
         schema_filter = schema
         if schema and "." in schema:

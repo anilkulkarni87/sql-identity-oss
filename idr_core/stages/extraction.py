@@ -210,8 +210,173 @@ class ExtractionStage(BaseStage):
                     WHERE {sha_expr} IN (SELECT entity_key_hash FROM idr_meta.privacy_suppression)
                 """)
 
+        self._has_retroactive_governance_changes = False
+        if run_mode == "INCR" and has_membership:
+            self._apply_retroactive_governance_in_incr()
+
         count = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.entities_delta")
         return count or 0
+
+    def _apply_retroactive_governance_in_incr(self) -> None:
+        """Seed INCR delta with clusters impacted by new exclusions or active overrides."""
+        try:
+            str_type = self._dialect["string_type"]
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.gov_affected_entities (
+                    entity_key {str_type}
+                )
+            """)
+            impacted_branches = []
+
+            if self.adapter.table_exists("idr_meta.identifier_exclusion"):
+                ex_cnt = (
+                    self.adapter.query_one("SELECT COUNT(*) FROM idr_meta.identifier_exclusion") or 0
+                )
+                if ex_cnt > 0:
+                    if self.adapter.table_exists("idr_out.identity_identifiers_current"):
+                        impacted_branches.append("""
+                            SELECT DISTINCT h.entity_key
+                            FROM idr_out.identity_identifiers_current h
+                            WHERE EXISTS (
+                                SELECT 1 FROM idr_meta.identifier_exclusion ex
+                                WHERE (
+                                    UPPER(h.identifier_type) = UPPER(ex.identifier_type)
+                                    OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                                )
+                                AND (
+                                    (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(h.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
+                                    OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(h.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
+                                )
+                            )
+                        """)
+                    if self.adapter.table_exists("idr_out.identity_edges_current"):
+                        impacted_branches.append("""
+                            SELECT DISTINCT e.left_entity_key AS entity_key
+                            FROM idr_out.identity_edges_current e
+                            WHERE EXISTS (
+                                SELECT 1 FROM idr_meta.identifier_exclusion ex
+                                WHERE (
+                                    UPPER(e.identifier_type) = UPPER(ex.identifier_type)
+                                    OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                                )
+                                AND (
+                                    (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(e.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
+                                    OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(e.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
+                                )
+                            )
+                            UNION
+                            SELECT DISTINCT e.right_entity_key AS entity_key
+                            FROM idr_out.identity_edges_current e
+                            WHERE EXISTS (
+                                SELECT 1 FROM idr_meta.identifier_exclusion ex
+                                WHERE (
+                                    UPPER(e.identifier_type) = UPPER(ex.identifier_type)
+                                    OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                                )
+                                AND (
+                                    (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(e.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
+                                    OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(e.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
+                                )
+                            )
+                        """)
+
+            if self.adapter.table_exists("idr_meta.identity_override"):
+                ov_cnt = (
+                    self.adapter.query_one(
+                        "SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE"
+                    )
+                    or 0
+                )
+                if ov_cnt > 0:
+                    # Clusters where DO_NOT_LINK pairs are currently merged together
+                    impacted_branches.append("""
+                        SELECT DISTINCT m1.entity_key
+                        FROM idr_meta.identity_override o
+                        JOIN idr_out.identity_resolved_membership_current m1
+                          ON m1.entity_key = o.entity_key_a
+                        JOIN idr_out.identity_resolved_membership_current m2
+                          ON m2.entity_key = o.entity_key_b
+                        WHERE o.is_active = TRUE
+                          AND UPPER(o.override_type) = 'DO_NOT_LINK'
+                          AND m1.resolved_id = m2.resolved_id
+                    """)
+                    # Clusters where ISOLATE entity still shares a cluster with others
+                    impacted_branches.append("""
+                        SELECT DISTINCT m.entity_key
+                        FROM idr_meta.identity_override o
+                        JOIN idr_out.identity_resolved_membership_current m
+                          ON m.entity_key = o.entity_key_a
+                        WHERE o.is_active = TRUE
+                          AND UPPER(o.override_type) = 'ISOLATE'
+                          AND EXISTS (
+                              SELECT 1 FROM idr_out.identity_resolved_membership_current m2
+                              WHERE m2.resolved_id = m.resolved_id
+                                AND m2.entity_key != m.entity_key
+                          )
+                    """)
+                    # Clusters where FORCE_LINK pairs are currently in different clusters
+                    impacted_branches.append("""
+                        SELECT DISTINCT m1.entity_key
+                        FROM idr_meta.identity_override o
+                        JOIN idr_out.identity_resolved_membership_current m1
+                          ON m1.entity_key = o.entity_key_a
+                        JOIN idr_out.identity_resolved_membership_current m2
+                          ON m2.entity_key = o.entity_key_b
+                        WHERE o.is_active = TRUE
+                          AND UPPER(o.override_type) = 'FORCE_LINK'
+                          AND m1.resolved_id != m2.resolved_id
+                        UNION
+                        SELECT DISTINCT m2.entity_key
+                        FROM idr_meta.identity_override o
+                        JOIN idr_out.identity_resolved_membership_current m1
+                          ON m1.entity_key = o.entity_key_a
+                        JOIN idr_out.identity_resolved_membership_current m2
+                          ON m2.entity_key = o.entity_key_b
+                        WHERE o.is_active = TRUE
+                          AND UPPER(o.override_type) = 'FORCE_LINK'
+                          AND m1.resolved_id != m2.resolved_id
+                    """)
+
+            if not impacted_branches:
+                return
+
+            seed_union = " UNION ".join(impacted_branches)
+            # Expand impacted seed entities to full cluster co-members
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.gov_affected_entities AS
+                WITH seed AS ({seed_union}),
+                target_clusters AS (
+                    SELECT DISTINCT m.resolved_id
+                    FROM seed s
+                    JOIN idr_out.identity_resolved_membership_current m
+                      ON m.entity_key = s.entity_key
+                )
+                SELECT DISTINCT m2.entity_key
+                FROM target_clusters tc
+                JOIN idr_out.identity_resolved_membership_current m2
+                  ON tc.resolved_id = m2.resolved_id
+                UNION
+                SELECT DISTINCT entity_key FROM seed
+            """)
+
+            gov_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.gov_affected_entities") or 0
+            if gov_cnt > 0:
+                split_expr = self._dialect["split_part"]("g.entity_key", ":", 1)
+                self.adapter.execute(f"""
+                    INSERT INTO idr_work.entities_delta (run_id, table_id, entity_key, watermark_value)
+                    SELECT
+                        '{self.run_id}' AS run_id,
+                        {split_expr} AS table_id,
+                        g.entity_key,
+                        CAST(NULL AS {self._dialect["timestamp_type"]}) AS watermark_value
+                    FROM idr_work.gov_affected_entities g
+                    WHERE g.entity_key NOT IN (
+                        SELECT entity_key FROM idr_work.entities_delta WHERE run_id = '{self.run_id}'
+                    )
+                """)
+                self._has_retroactive_governance_changes = True
+        except Exception as e:
+            self.logger.warning(f"Retroactive governance seed in INCR mode failed: {e}")
 
     def extract_identifiers(self, run_mode: str = "FULL") -> int:
         """Extract and canonicalize identifiers from entities."""
@@ -397,6 +562,9 @@ class ExtractionStage(BaseStage):
                       AND entity_key NOT IN (
                           SELECT entity_key FROM idr_work.changed_no_wm_entities
                       )
+                      AND entity_key NOT IN (
+                          SELECT entity_key FROM idr_work.gov_affected_entities
+                      )
                 """)
                 self.adapter.execute("""
                     DELETE FROM idr_work.identifiers_delta
@@ -412,7 +580,14 @@ class ExtractionStage(BaseStage):
         # pull in their cluster co-members, and union them into identifiers_all.
         if run_mode == "INCR" and self.adapter.table_exists("idr_out.identity_identifiers_current"):
             try:
-                # Step 2a: Find matching historical entities sharing any delta identifier
+                # Snapshot entities directly re-extracted in this delta BEFORE cluster expansion
+                self.adapter.execute("""
+                    CREATE OR REPLACE TABLE idr_work.reextracted_entities AS
+                    SELECT DISTINCT entity_key FROM idr_work.entities_delta
+                """)
+
+                # Step 2a: Find matching historical entities sharing any delta identifier,
+                # plus re-extracted entities so changed identifiers also pull old cluster co-members
                 self.adapter.execute("""
                     CREATE OR REPLACE TABLE idr_work.matched_hist_entities AS
                     SELECT DISTINCT h.entity_key
@@ -420,6 +595,9 @@ class ExtractionStage(BaseStage):
                     JOIN idr_out.identity_identifiers_current h
                       ON d.identifier_type = h.identifier_type
                      AND d.identifier_value_norm = h.identifier_value_norm
+                    UNION
+                    SELECT DISTINCT entity_key
+                    FROM idr_work.reextracted_entities
                 """)
 
                 # Step 2b: Expand to all cluster co-members of the matched entities
@@ -455,8 +633,25 @@ class ExtractionStage(BaseStage):
                     )
                 """)
 
-                # Step 2d: Combine delta identifiers with historical cluster identifiers
-                self.adapter.execute("""
+                # Step 2d: Combine delta identifiers with historical cluster identifiers.
+                # For re-extracted entities, prefer fresh identifiers_delta over stale historical ones,
+                # and filter out any values matched by active exclusions.
+                excl_filter_sql = ""
+                if self.adapter.table_exists("idr_meta.identifier_exclusion"):
+                    excl_filter_sql = """
+                        AND NOT EXISTS (
+                            SELECT 1 FROM idr_meta.identifier_exclusion ex
+                            WHERE (
+                                UPPER(h.identifier_type) = UPPER(ex.identifier_type)
+                                OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                            )
+                            AND (
+                                (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(h.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
+                                OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(h.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
+                            )
+                        )
+                    """
+                self.adapter.execute(f"""
                     CREATE OR REPLACE TABLE idr_work.identifiers_all AS
                     SELECT entity_key, identifier_type, identifier_value_norm, is_hashed, max_group_size
                     FROM idr_work.identifiers_delta
@@ -465,6 +660,10 @@ class ExtractionStage(BaseStage):
                     FROM idr_work.expanded_cluster_entities exp
                     JOIN idr_out.identity_identifiers_current h
                       ON exp.entity_key = h.entity_key
+                    WHERE h.entity_key NOT IN (
+                        SELECT entity_key FROM idr_work.reextracted_entities
+                    )
+                    {excl_filter_sql}
                 """)
             except Exception as e:
                 self.logger.warning(f"Candidate expansion failed, falling back to delta: {e}")

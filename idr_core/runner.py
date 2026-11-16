@@ -193,6 +193,7 @@ class IDRRunner:
             warnings=self._warnings,
             generate_evidence=False,  # Updated after preflight
             progress_callback=self.progress_callback,
+            dry_run=config.dry_run,
         )
         self._emit_progress(
             {
@@ -247,8 +248,10 @@ class IDRRunner:
 
             # In INCR mode, state-diffing prunes unchanged rows from no-watermark tables.
             # Refresh delta entities count (excluding candidate-expanded historical rows where watermark_value IS NULL)
-            # and short-circuit immediately if no delta entities remain.
-            if config.run_mode == "INCR":
+            # and short-circuit immediately if no delta entities remain (unless retroactive governance changes apply).
+            if config.run_mode == "INCR" and not getattr(
+                extraction, "_has_retroactive_governance_changes", False
+            ):
                 entities = (
                     self.adapter.query_one(
                         "SELECT COUNT(*) FROM idr_work.entities_delta WHERE watermark_value IS NOT NULL"
@@ -401,6 +404,29 @@ class IDRRunner:
         # Compute hash of metadata configuration for reproducibility
         config_hash = self._compute_config_hash()
 
+        # Check for config drift in INCR mode against the last successful run
+        if config.run_mode == "INCR" and config_hash != "unknown":
+            try:
+                prev_hash = self.adapter.query_one("""
+                    SELECT config_hash
+                    FROM idr_out.run_history
+                    WHERE status LIKE 'SUCCESS%'
+                      AND config_hash IS NOT NULL
+                      AND config_hash != 'unknown'
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                """)
+                if prev_hash and prev_hash != config_hash:
+                    msg = (
+                        f"Configuration drift detected in INCR mode "
+                        f"(previous={prev_hash}, current={config_hash}). "
+                        f"Run with --mode FULL to re-evaluate all historical entities."
+                    )
+                    self._warnings.append(msg)
+                    self.logger.warning(msg, extra={"run_id": self.run_id})
+            except Exception:
+                pass
+
         # Note: We track dry run via run_id prefix (dry_run_*) instead of a column
         # This ensures compatibility with existing DDL schemas
         self.adapter.execute(f"""
@@ -417,6 +443,8 @@ class IDRRunner:
         - source_table definitions
         - rule definitions
         - identifier_mapping definitions
+        - survivorship_rule definitions
+        - attribute_mapping definitions
         """
         try:
             # Query key metadata tables
@@ -425,12 +453,26 @@ class IDRRunner:
             mappings = self.adapter.query(
                 "SELECT * FROM idr_meta.identifier_mapping ORDER BY table_id, identifier_type"
             )
+            try:
+                survivorship = self.adapter.query(
+                    "SELECT * FROM idr_meta.survivorship_rule ORDER BY attribute_name"
+                )
+            except Exception:
+                survivorship = []
+            try:
+                attr_mappings = self.adapter.query(
+                    "SELECT * FROM idr_meta.attribute_mapping ORDER BY table_id, attribute_name"
+                )
+            except Exception:
+                attr_mappings = []
 
             # Convert to serializable format
             config_data = {
                 "sources": sources or [],
                 "rules": rules or [],
                 "mappings": mappings or [],
+                "survivorship": survivorship or [],
+                "attribute_mappings": attr_mappings or [],
             }
 
             # Compute hash

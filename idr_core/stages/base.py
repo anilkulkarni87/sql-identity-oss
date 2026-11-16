@@ -34,6 +34,7 @@ class StageContext:
     warnings: List[str]
     generate_evidence: bool = False
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    dry_run: bool = False
 
 
 class BaseStage:

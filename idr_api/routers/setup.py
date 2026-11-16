@@ -3,7 +3,7 @@ import copy
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -647,7 +647,10 @@ async def get_run_progress(current_user: Dict[str, Any] = Depends(get_current_us
 
 
 @router.get("/run/events")
-async def stream_run_events(current_user: Dict[str, Any] = Depends(get_current_user)):
+async def stream_run_events(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """Server-Sent Events (SSE) streaming live stage transitions and iterations."""
     user_key = get_user_key(current_user)
     q: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -659,14 +662,24 @@ async def stream_run_events(current_user: Dict[str, Any] = Depends(get_current_u
             initial = _get_active_progress(user_key)
             if initial:
                 yield f"data: {json.dumps(copy.deepcopy(initial))}\n\n"
+            # When no run is actively executing, close stream cleanly instead of hanging forever
+            if not initial or initial.get("status") not in ("RUNNING", "STARTING"):
+                return
+            idle_ticks = 0
             while True:
+                if await request.is_disconnected():
+                    break
                 try:
-                    evt = await asyncio.wait_for(q.get(), timeout=15.0)
+                    evt = await asyncio.wait_for(q.get(), timeout=1.0)
+                    idle_ticks = 0
                     yield f"data: {json.dumps(evt)}\n\n"
                     if evt.get("event") == "run_complete":
                         break
                 except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
+                    idle_ticks += 1
+                    if idle_ticks >= 15:
+                        idle_ticks = 0
+                        yield ": keepalive\n\n"
         finally:
             if user_key in _RUN_EVENT_QUEUES and q in _RUN_EVENT_QUEUES[user_key]:
                 _RUN_EVENT_QUEUES[user_key].remove(q)

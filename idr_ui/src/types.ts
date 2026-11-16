@@ -21,6 +21,7 @@ export interface SourceConfig {
     deduplicate?: boolean;
     dedup_order_by?: string;
     watermark_column?: string;
+    watermark_lookback_minutes?: number;
     identifiers?: Identifier[];
     attributes?: Attribute[];
     // UI specific helpers might be added here if needed, but keeping it clean

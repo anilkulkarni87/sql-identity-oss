@@ -5,6 +5,8 @@ All platform adapters (DuckDB, BigQuery, Snowflake, Databricks) must
 implement this interface to work with the unified IDR runner.
 """
 
+import os
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -113,6 +115,71 @@ class IDRAdapter(ABC):
             List of fully qualified table names or simple names depending on context.
         """
         pass
+
+    def init_schema_mapping(self, schema_mapping: Optional[Dict[str, str]] = None) -> None:
+        """Configure logical schema mapping (idr_meta/idr_work/idr_out -> custom schemas)."""
+        mapping: Dict[str, str] = {}
+        prefix = os.environ.get("IDR_SCHEMA_PREFIX", "").strip()
+        if prefix:
+            for base in ("idr_meta", "idr_work", "idr_out"):
+                mapping[base] = f"{prefix}{base}"
+        for base, env_key in (
+            ("idr_meta", "IDR_META_SCHEMA"),
+            ("idr_work", "IDR_WORK_SCHEMA"),
+            ("idr_out", "IDR_OUT_SCHEMA"),
+        ):
+            env_val = os.environ.get(env_key, "").strip()
+            if env_val:
+                mapping[base] = env_val
+        if schema_mapping:
+            for k, v in schema_mapping.items():
+                if k in ("idr_meta", "idr_work", "idr_out") and v and str(v).strip():
+                    mapping[k] = str(v).strip()
+        self.schema_mapping: Dict[str, str] = {
+            k: v for k, v in mapping.items() if v != k
+        }
+
+    def _rewrite_schemas(self, sql: str) -> str:
+        """Rewrite canonical idr_meta/idr_work/idr_out references using self.schema_mapping."""
+        mapping = getattr(self, "schema_mapping", None)
+        if not mapping or not sql:
+            return sql
+
+        def _repl_dot(m: re.Match) -> str:
+            return mapping.get(m.group(1).lower(), m.group(1))
+
+        def _repl_stmt(m: re.Match) -> str:
+            return f"{m.group(1)}{mapping.get(m.group(2).lower(), m.group(2))}"
+
+        def _repl_quote(m: re.Match) -> str:
+            return f"{m.group(1)}{mapping.get(m.group(2).lower(), m.group(2))}{m.group(3)}"
+
+        sql = re.sub(r"\b(idr_meta|idr_work|idr_out)(?=\s*\.)", _repl_dot, sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"(\b(?:CREATE|DROP)\s+SCHEMA(?:\s+IF\s+(?:NOT\s+)?EXISTS)?\s+|\bUSE(?:\s+SCHEMA)?\s+|\bSHOW\s+TABLES\s+IN\s+)(idr_meta|idr_work|idr_out)\b",
+            _repl_stmt,
+            sql,
+            flags=re.IGNORECASE,
+        )
+        sql = re.sub(
+            r"(\btable_schema\s*=\s*['\"])(idr_meta|idr_work|idr_out)(['\"])",
+            _repl_quote,
+            sql,
+            flags=re.IGNORECASE,
+        )
+        return sql
+
+    def _rewrite_table_fqn(self, table_fqn: str) -> str:
+        """Rewrite schema prefix in a dot-separated table_fqn."""
+        mapping = getattr(self, "schema_mapping", None)
+        if not mapping or not table_fqn or "." not in table_fqn:
+            return table_fqn
+        return re.sub(
+            r"\b(idr_meta|idr_work|idr_out)(?=\s*\.)",
+            lambda m: mapping.get(m.group(1).lower(), m.group(1)),
+            table_fqn,
+            flags=re.IGNORECASE,
+        )
 
     def close(self) -> None:
         """

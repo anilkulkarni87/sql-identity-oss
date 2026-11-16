@@ -255,17 +255,47 @@ class GraphStage(BaseStage):
             try:
                 edge_count = self.adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_edges_current")
                 if edge_count and edge_count > 0:
-                    existing_edges_sql = """
+                    reextracted_filter = ""
+                    if self.adapter.table_exists("idr_work.reextracted_entities"):
+                        reextracted_filter = """
+                          AND NOT EXISTS (
+                              SELECT 1 FROM idr_work.reextracted_entities r
+                              WHERE r.entity_key = e.left_entity_key
+                                 OR r.entity_key = e.right_entity_key
+                          )
+                        """
+                    excl_edge_filter = ""
+                    if self.adapter.table_exists("idr_meta.identifier_exclusion"):
+                        excl_edge_filter = """
+                          AND NOT EXISTS (
+                              SELECT 1 FROM idr_meta.identifier_exclusion ex
+                              WHERE (
+                                  UPPER(e.identifier_type) = UPPER(ex.identifier_type)
+                                  OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                              )
+                              AND (
+                                  (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(e.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
+                                  OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(e.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
+                              )
+                          )
+                        """
+                    existing_edges_sql = f"""
                         UNION ALL
                         SELECT e.left_entity_key AS src, e.right_entity_key AS dst
                         FROM idr_out.identity_edges_current e
                         JOIN idr_work.entities_delta ed1 ON e.left_entity_key = ed1.entity_key
                         JOIN idr_work.entities_delta ed2 ON e.right_entity_key = ed2.entity_key
+                        WHERE 1=1
+                        {reextracted_filter}
+                        {excl_edge_filter}
                         UNION ALL
                         SELECT e.right_entity_key AS src, e.left_entity_key AS dst
                         FROM idr_out.identity_edges_current e
                         JOIN idr_work.entities_delta ed1 ON e.left_entity_key = ed1.entity_key
                         JOIN idr_work.entities_delta ed2 ON e.right_entity_key = ed2.entity_key
+                        WHERE 1=1
+                        {reextracted_filter}
+                        {excl_edge_filter}
                     """
             except Exception:
                 pass
