@@ -71,65 +71,23 @@ def connect(request: ConnectionRequest, current_user: dict = Depends(get_current
             _manager.set_adapter_for_user(user_key, BigQueryAdapter(client, project), request.model_dump())
 
         elif request.platform == "snowflake":
-            # Use Snowflake Python Connector (not Snowpark)
             import snowflake.connector
 
-            raw_account = (request.account or _get_env("SNOWFLAKE_ACCOUNT") or "").strip()
-            for prefix in ("https://", "http://"):
-                if raw_account.lower().startswith(prefix):
-                    raw_account = raw_account[len(prefix):]
-            raw_account = raw_account.split("/")[0].strip()
-            if raw_account.lower().endswith(".snowflakecomputing.com"):
-                raw_account = raw_account[: -len(".snowflakecomputing.com")]
-
-            conn = snowflake.connector.connect(
-                account=raw_account,
-                user=(request.user or _get_env("SNOWFLAKE_USER") or "").strip(),
-                password=request.password or _get_env("SNOWFLAKE_PASSWORD"),
-                warehouse=request.warehouse or _get_env("SNOWFLAKE_WAREHOUSE"),
-                database=request.sf_database or _get_env("SNOWFLAKE_DATABASE"),
-                schema=request.schema_name or _get_env("SNOWFLAKE_SCHEMA", "PUBLIC"),
-                login_timeout=20,
-            )
             from idr_core.adapters.snowflake import SnowflakeAdapter
+            from idr_core.connection_manager import build_snowflake_connect_kwargs
 
+            sf_kwargs = build_snowflake_connect_kwargs(request.model_dump())
+            conn = snowflake.connector.connect(**sf_kwargs)
             _manager.set_adapter_for_user(user_key, SnowflakeAdapter(conn), request.model_dump())
 
         elif request.platform == "databricks":
-            # Use Databricks SQL Connector
             from databricks import sql
 
-            raw_host = (
-                request.server_hostname
-                or _get_env("DATABRICKS_HOST")
-                or _get_env("DATABRICKS_SERVER_HOSTNAME")
-                or _get_env("DATABRICKS_URL")
-                or _get_env("DATABRICKS_WORKSPACE_URL")
-                or ""
-            )
-            clean_host = raw_host.strip("'\" \t").replace("https://", "").replace("http://", "").split("/")[0]
-            http_path = (
-                request.http_path
-                or _get_env("DATABRICKS_HTTP_PATH")
-                or _get_env("DATABRICKS_SQL_HTTP_PATH")
-                or ""
-            ).strip("'\" \t")
-            token = (
-                request.access_token
-                or _get_env("DATABRICKS_TOKEN")
-                or _get_env("DATABRICKS_ACCESS_TOKEN")
-                or _get_env("DATABRICKS_PAT")
-                or ""
-            ).strip("'\" \t")
-            catalog = (request.catalog or _get_env("DATABRICKS_CATALOG") or "main").strip("'\" \t")
-
-            conn = sql.connect(
-                server_hostname=clean_host,
-                http_path=http_path,
-                access_token=token,
-            )
             from idr_core.adapters.databricks import DatabricksAdapter
+            from idr_core.connection_manager import build_databricks_connect_kwargs
 
+            dbx_kwargs, catalog = build_databricks_connect_kwargs(request.model_dump())
+            conn = sql.connect(**dbx_kwargs)
             _manager.set_adapter_for_user(
                 user_key, DatabricksAdapter(conn, catalog=catalog), request.model_dump()
             )

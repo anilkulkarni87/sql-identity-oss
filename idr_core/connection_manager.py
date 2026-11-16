@@ -1,7 +1,11 @@
+import base64
+import json
 import os
 import threading
+import urllib.parse
+import urllib.request
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from idr_core.adapters.base import IDRAdapter
 
@@ -9,6 +13,168 @@ from idr_core.adapters.base import IDRAdapter
 def _env(key: str, default: Optional[str] = None) -> Optional[str]:
     val = os.environ.get(key, default)
     return val if val else default
+
+
+def build_snowflake_connect_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Build snowflake.connector.connect kwargs supporting Password, OAuth, and RSA Key-Pair JWT."""
+    raw_account = (config.get("account") or _env("SNOWFLAKE_ACCOUNT") or "").strip()
+    for prefix in ("https://", "http://"):
+        if raw_account.lower().startswith(prefix):
+            raw_account = raw_account[len(prefix) :]
+    raw_account = raw_account.split("/")[0].strip()
+    if raw_account.lower().endswith(".snowflakecomputing.com"):
+        raw_account = raw_account[: -len(".snowflakecomputing.com")]
+
+    kwargs: Dict[str, Any] = {
+        "account": raw_account,
+        "user": (config.get("user") or _env("SNOWFLAKE_USER") or "").strip() or None,
+        "warehouse": (config.get("warehouse") or _env("SNOWFLAKE_WAREHOUSE") or "").strip() or None,
+        "database": (
+            config.get("sf_database") or config.get("database") or _env("SNOWFLAKE_DATABASE") or ""
+        ).strip()
+        or None,
+        "schema": (
+            config.get("schema_name") or config.get("schema") or _env("SNOWFLAKE_SCHEMA") or "PUBLIC"
+        ).strip(),
+        "login_timeout": 20,
+    }
+
+    role = (config.get("role") or _env("SNOWFLAKE_ROLE") or "").strip()
+    if role:
+        kwargs["role"] = role
+
+    authenticator = (config.get("authenticator") or _env("SNOWFLAKE_AUTHENTICATOR") or "").strip()
+    if authenticator:
+        kwargs["authenticator"] = authenticator
+
+    oauth_token = (config.get("token") or _env("SNOWFLAKE_OAUTH_TOKEN") or "").strip()
+    if oauth_token:
+        kwargs["token"] = oauth_token
+
+    # RSA Key-Pair JWT authentication (preferred over single-factor password)
+    key_path = (
+        config.get("private_key_file")
+        or config.get("private_key_path")
+        or _env("SNOWFLAKE_PRIVATE_KEY_PATH")
+        or _env("SNOWFLAKE_PRIVATE_KEY_FILE")
+        or ""
+    ).strip()
+    key_pem = (config.get("private_key") or _env("SNOWFLAKE_PRIVATE_KEY") or "").strip()
+    passphrase = (
+        config.get("private_key_passphrase")
+        or config.get("private_key_file_pwd")
+        or _env("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
+    )
+
+    if key_path:
+        kwargs["private_key_file"] = os.path.expanduser(key_path)
+        if passphrase:
+            kwargs["private_key_file_pwd"] = passphrase
+        if not authenticator:
+            kwargs["authenticator"] = "SNOWFLAKE_JWT"
+    elif key_pem and "-----BEGIN" in key_pem:
+        from cryptography.hazmat.primitives import serialization
+
+        pwd_bytes = passphrase.encode("utf-8") if isinstance(passphrase, str) and passphrase else None
+        try:
+            p_key = serialization.load_pem_private_key(key_pem.encode("utf-8"), password=pwd_bytes)
+        except TypeError:
+            p_key = serialization.load_pem_private_key(key_pem.encode("utf-8"), password=None)
+        kwargs["private_key"] = p_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        if not authenticator:
+            kwargs["authenticator"] = "SNOWFLAKE_JWT"
+    else:
+        password = config.get("password") or _env("SNOWFLAKE_PASSWORD")
+        if password:
+            kwargs["password"] = password
+
+    return {k: v for k, v in kwargs.items() if v is not None}
+
+
+def _fetch_databricks_oauth_token(host: str, client_id: str, client_secret: str) -> str:
+    """Exchange Databricks Service Principal client_id/secret for an OAuth M2M bearer token."""
+    token_url = f"https://{host}/oidc/v1/token"
+    body = urllib.parse.urlencode(
+        {"grant_type": "client_credentials", "scope": "all-apis"}
+    ).encode("utf-8")
+    basic = base64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("ascii")
+    req = urllib.request.Request(
+        token_url,
+        data=body,
+        headers={
+            "Authorization": f"Basic {basic}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15.0) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    tok = payload.get("access_token")
+    if not tok:
+        raise RuntimeError(f"Databricks OAuth token response missing access_token: {payload}")
+    return str(tok)
+
+
+def build_databricks_connect_kwargs(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Build databricks.sql.connect kwargs supporting PAT and OAuth M2M Service Principal."""
+    raw_host = (
+        config.get("server_hostname")
+        or config.get("host")
+        or _env("DATABRICKS_HOST")
+        or _env("DATABRICKS_SERVER_HOSTNAME")
+        or _env("DATABRICKS_URL")
+        or _env("DATABRICKS_WORKSPACE_URL")
+        or ""
+    )
+    clean_host = (
+        raw_host.strip("'\" \t").replace("https://", "").replace("http://", "").split("/")[0]
+    )
+    http_path = (
+        config.get("http_path")
+        or _env("DATABRICKS_HTTP_PATH")
+        or _env("DATABRICKS_SQL_HTTP_PATH")
+        or ""
+    ).strip("'\" \t")
+    token = (
+        config.get("access_token")
+        or config.get("token")
+        or _env("DATABRICKS_TOKEN")
+        or _env("DATABRICKS_ACCESS_TOKEN")
+        or _env("DATABRICKS_PAT")
+        or ""
+    ).strip("'\" \t")
+    client_id = (config.get("client_id") or _env("DATABRICKS_CLIENT_ID") or "").strip("'\" \t")
+    client_secret = (
+        config.get("client_secret") or _env("DATABRICKS_CLIENT_SECRET") or ""
+    ).strip("'\" \t")
+    catalog = (config.get("catalog") or _env("DATABRICKS_CATALOG") or "main").strip("'\" \t") or None
+
+    connect_kwargs: Dict[str, Any] = {
+        "server_hostname": clean_host,
+        "http_path": http_path,
+    }
+    if token:
+        connect_kwargs["access_token"] = token
+    elif client_id and client_secret:
+        try:
+            from databricks.sdk.core import Config, oauth_service_principal
+
+            sdk_cfg = Config(
+                host=f"https://{clean_host}",
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+            connect_kwargs["credentials_provider"] = lambda: oauth_service_principal(sdk_cfg)
+        except ImportError:
+            connect_kwargs["access_token"] = _fetch_databricks_oauth_token(
+                clean_host, client_id, client_secret
+            )
+
+    return connect_kwargs, catalog
 
 
 def is_reconnectable_config(config: Optional[Dict[str, Any]]) -> bool:
@@ -68,23 +234,8 @@ def create_adapter(config: Dict[str, Any]) -> IDRAdapter:
 
         from idr_core.adapters.snowflake import SnowflakeAdapter
 
-        raw_account = (config.get("account") or _env("SNOWFLAKE_ACCOUNT") or "").strip()
-        for prefix in ("https://", "http://"):
-            if raw_account.lower().startswith(prefix):
-                raw_account = raw_account[len(prefix) :]
-        raw_account = raw_account.split("/")[0].strip()
-        if raw_account.lower().endswith(".snowflakecomputing.com"):
-            raw_account = raw_account[: -len(".snowflakecomputing.com")]
-
-        conn = snowflake.connector.connect(
-            account=raw_account,
-            user=(config.get("user") or _env("SNOWFLAKE_USER") or "").strip(),
-            password=config.get("password") or _env("SNOWFLAKE_PASSWORD"),
-            warehouse=config.get("warehouse") or _env("SNOWFLAKE_WAREHOUSE"),
-            database=config.get("sf_database") or config.get("database") or _env("SNOWFLAKE_DATABASE"),
-            schema=config.get("schema_name") or config.get("schema") or _env("SNOWFLAKE_SCHEMA", "PUBLIC"),
-            login_timeout=20,
-        )
+        sf_kwargs = build_snowflake_connect_kwargs(config)
+        conn = snowflake.connector.connect(**sf_kwargs)
         return SnowflakeAdapter(conn, schema_mapping=schema_mapping)
 
     if platform == "databricks":
@@ -92,34 +243,8 @@ def create_adapter(config: Dict[str, Any]) -> IDRAdapter:
 
         from idr_core.adapters.databricks import DatabricksAdapter
 
-        raw_host = (
-            config.get("server_hostname")
-            or config.get("host")
-            or _env("DATABRICKS_HOST")
-            or _env("DATABRICKS_SERVER_HOSTNAME")
-            or _env("DATABRICKS_URL")
-            or _env("DATABRICKS_WORKSPACE_URL")
-            or ""
-        )
-        clean_host = (
-            raw_host.strip("'\" \t").replace("https://", "").replace("http://", "").split("/")[0]
-        )
-        http_path = (
-            config.get("http_path")
-            or _env("DATABRICKS_HTTP_PATH")
-            or _env("DATABRICKS_SQL_HTTP_PATH")
-            or ""
-        ).strip("'\" \t")
-        token = (
-            config.get("access_token")
-            or config.get("token")
-            or _env("DATABRICKS_TOKEN")
-            or _env("DATABRICKS_ACCESS_TOKEN")
-            or _env("DATABRICKS_PAT")
-            or ""
-        ).strip("'\" \t")
-        catalog = (config.get("catalog") or _env("DATABRICKS_CATALOG") or "main").strip("'\" \t")
-        conn = sql.connect(server_hostname=clean_host, http_path=http_path, access_token=token)
+        dbx_kwargs, catalog = build_databricks_connect_kwargs(config)
+        conn = sql.connect(**dbx_kwargs)
         return DatabricksAdapter(conn, catalog=catalog, schema_mapping=schema_mapping)
 
     raise ValueError(f"Unsupported or unspecified platform: '{platform}'")

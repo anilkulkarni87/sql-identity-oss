@@ -25,10 +25,17 @@ class ConnectionRequest(BaseModel):
     warehouse: Optional[str] = None
     sf_database: Optional[str] = None
     schema_name: Optional[str] = "PUBLIC"
+    role: Optional[str] = None
+    authenticator: Optional[str] = None
+    private_key_path: Optional[str] = None
+    private_key: Optional[str] = None
+    private_key_passphrase: Optional[str] = None
     # Databricks fields
     server_hostname: Optional[str] = None
     http_path: Optional[str] = None
     access_token: Optional[str] = None
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
     catalog: Optional[str] = None
 
 

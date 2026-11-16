@@ -266,19 +266,10 @@ class GraphStage(BaseStage):
                         """
                     excl_edge_filter = ""
                     if self.adapter.table_exists("idr_meta.identifier_exclusion"):
-                        excl_edge_filter = """
-                          AND NOT EXISTS (
-                              SELECT 1 FROM idr_meta.identifier_exclusion ex
-                              WHERE (
-                                  UPPER(e.identifier_type) = UPPER(ex.identifier_type)
-                                  OR UPPER(ex.identifier_type) IN ('ANY', '*')
-                              )
-                              AND (
-                                  (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(e.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
-                                  OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(e.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
-                              )
-                          )
-                        """
+                        excl_e = self._exclusion_match_predicate(
+                            "e.identifier_type", "e.identifier_value_norm"
+                        )
+                        excl_edge_filter = f"AND NOT {excl_e}"
                     existing_edges_sql = f"""
                         UNION ALL
                         SELECT e.left_entity_key AS src, e.right_entity_key AS dst

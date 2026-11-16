@@ -42,6 +42,7 @@ This environment simulates a production-grade deployment with SSO, RBAC, and Obs
     *   `IDR_SESSION_STORE_CLASS`: Optional enterprise session backend class path
     *   `IDR_REDIS_URL`: Redis connection URL for `RedisConnectionSessionStore`
     *   `IDR_REDIS_NAMESPACE`: Redis key prefix for session leases
+    *   `IDR_SESSION_SECRET_KEY`: Optional 32-byte URL-safe base64 key (or passphrase derived via SHA-256) enabling authenticated Fernet encryption for warehouse credentials in `RedisConnectionSessionStore`. When omitted, `RedisConnectionSessionStore` strips secret fields (`password`, `access_token`, `token`, `client_secret`, `private_key`, `private_key_passphrase`, `private_key_file_pwd`, `credentials_json`, `credentials`) before writing to Redis.
     *   `IDR_PIP_EXTRAS`: API image dependency extras (default includes `enterprise`)
 
 4.  **Dev Mode (No Auth)**:

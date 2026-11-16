@@ -7,6 +7,8 @@ pluggable connection-session lifecycle behavior.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -17,6 +19,20 @@ from idr_api.session_store import InMemoryConnectionSessionStore
 from idr_core.adapters.base import IDRAdapter
 
 LOGGER = logging.getLogger(__name__)
+
+# Sensitive keys that must never be stored in plaintext inside Redis.
+REDIS_SECRET_KEYS = frozenset({
+    "password",
+    "access_token",
+    "token",
+    "client_secret",
+    "private_key",
+    "private_key_passphrase",
+    "private_key_file_pwd",
+    "credentials_json",
+    "credentials",
+})
+_ENC_MARKER = "__idr_enc__"
 
 
 def _default_adapter_factory(config: Dict[str, Any]) -> Optional[IDRAdapter]:
@@ -37,15 +53,9 @@ def _default_adapter_factory(config: Dict[str, Any]) -> Optional[IDRAdapter]:
         import snowflake.connector
 
         from idr_core.adapters.snowflake import SnowflakeAdapter
+        from idr_core.connection_manager import build_snowflake_connect_kwargs
 
-        conn = snowflake.connector.connect(
-            user=config.get("user"),
-            password=config.get("password"),
-            account=config.get("account"),
-            warehouse=config.get("warehouse"),
-            database=config.get("database") or config.get("sf_database"),
-            schema=config.get("schema") or config.get("schema_name"),
-        )
+        conn = snowflake.connector.connect(**build_snowflake_connect_kwargs(config))
         return SnowflakeAdapter(conn)
 
     if platform == "bigquery":
@@ -72,13 +82,11 @@ def _default_adapter_factory(config: Dict[str, Any]) -> Optional[IDRAdapter]:
         from databricks import sql
 
         from idr_core.adapters.databricks import DatabricksAdapter
+        from idr_core.connection_manager import build_databricks_connect_kwargs
 
-        conn = sql.connect(
-            server_hostname=config.get("server_hostname"),
-            http_path=config.get("http_path"),
-            access_token=config.get("access_token"),
-        )
-        return DatabricksAdapter(conn, catalog=config.get("catalog"))
+        dbx_kwargs, catalog = build_databricks_connect_kwargs(config)
+        conn = sql.connect(**dbx_kwargs)
+        return DatabricksAdapter(conn, catalog=catalog)
 
     return None
 
@@ -146,12 +154,76 @@ class RedisConnectionSessionStore(InMemoryConnectionSessionStore):
     def _lease_key(self, user_key: str) -> str:
         return f"{self._namespace}:user:{user_key}"
 
+    @staticmethod
+    def _get_fernet() -> Optional[Any]:
+        secret = (os.environ.get("IDR_SESSION_SECRET_KEY") or "").strip()
+        if not secret:
+            return None
+        try:
+            from cryptography.fernet import Fernet
+        except Exception as exc:
+            raise RuntimeError(
+                "IDR_SESSION_SECRET_KEY is configured, but the 'cryptography' package is not installed."
+            ) from exc
+        derived_key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
+        return Fernet(derived_key)
+
+    def _sanitize_config_for_redis(self, config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Strip plaintext secrets by default, or encrypt them if IDR_SESSION_SECRET_KEY is set."""
+        sanitized: Dict[str, Any] = dict(config or {})
+        fernet = self._get_fernet()
+        for key in list(sanitized.keys()):
+            if key.lower() not in REDIS_SECRET_KEYS:
+                continue
+            val = sanitized[key]
+            if val is None or val == "":
+                sanitized.pop(key, None)
+                continue
+            if fernet is not None:
+                raw_bytes = json.dumps(val).encode("utf-8")
+                sanitized[key] = {_ENC_MARKER: fernet.encrypt(raw_bytes).decode("ascii")}
+            else:
+                sanitized.pop(key, None)
+        return sanitized
+
+    def _restore_config_from_redis(self, raw_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Decrypt encrypted secret fields when possible, or drop unrecoverable secrets safely."""
+        restored: Dict[str, Any] = dict(raw_config or {})
+        fernet = self._get_fernet()
+        for key in list(restored.keys()):
+            val = restored[key]
+            if isinstance(val, dict) and _ENC_MARKER in val:
+                if fernet is None:
+                    LOGGER.warning(
+                        "Encrypted session secret '%s' found in Redis without IDR_SESSION_SECRET_KEY; "
+                        "falling back to environment credentials.",
+                        key,
+                    )
+                    restored.pop(key, None)
+                    continue
+                try:
+                    decrypted = fernet.decrypt(str(val[_ENC_MARKER]).encode("ascii"))
+                    restored[key] = json.loads(decrypted.decode("utf-8"))
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Failed to decrypt session secret '%s' from Redis (%s); "
+                        "falling back to environment credentials.",
+                        key,
+                        exc,
+                    )
+                    restored.pop(key, None)
+            elif key.lower() in REDIS_SECRET_KEYS:
+                # Defensive scrub: reject/ignore any legacy plaintext secret stored in Redis.
+                restored.pop(key, None)
+        return restored
+
     def _write_lease(self, user_key: str, config: Optional[Dict[str, Any]] = None) -> None:
         try:
             ttl = max(0, int(self._ttl_seconds))
             if config is None:
                 config = super().get_config(user_key)
-            payload = json.dumps({"updated_at": int(time.time()), "config": config or {}})
+            safe_config = self._sanitize_config_for_redis(config)
+            payload = json.dumps({"updated_at": int(time.time()), "config": safe_config})
             if ttl > 0:
                 self._redis.set(self._lease_key(user_key), payload, ex=ttl)
             else:
@@ -166,7 +238,7 @@ class RedisConnectionSessionStore(InMemoryConnectionSessionStore):
                 return None
             parsed = json.loads(raw)
             if isinstance(parsed, dict) and isinstance(parsed.get("config"), dict):
-                return parsed["config"]
+                return self._restore_config_from_redis(parsed["config"])
         except Exception as exc:
             LOGGER.warning("Failed to read Redis session for user %s: %s", user_key, exc)
         return None

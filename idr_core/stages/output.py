@@ -5,8 +5,17 @@ Handles confidence scoring, output table generation (membership, edges, clusters
 watermarks, profiles), dry run analysis, and platform-specific upserts.
 """
 
+from typing import Dict
+
 from ..profile_builder import ProfileBuilder
 from .base import BaseStage, StageContext
+
+_CURRENT_OUTPUT_TABLES = (
+    "identity_resolved_membership_current",
+    "identity_edges_current",
+    "identity_identifiers_current",
+    "identity_clusters_current",
+)
 
 
 class OutputStage(BaseStage):
@@ -279,265 +288,303 @@ class OutputStage(BaseStage):
         except Exception as e:
             self.logger.warning(f"Failed to record resolved_id_crosswalk: {e}")
 
-    def generate_output(self) -> None:
-        """Update output tables with resolved identities."""
-        current_ts = self._dialect["current_timestamp"]
+    def _snapshot_current_outputs(self) -> Dict[str, bool]:
+        """Snapshot mutable idr_out.*_current tables before Stage 8 writes begin."""
+        snapshots: Dict[str, bool] = {}
+        for tbl in _CURRENT_OUTPUT_TABLES:
+            exists = bool(self.adapter.table_exists(f"idr_out.{tbl}"))
+            if exists:
+                self.adapter.execute(
+                    f"CREATE OR REPLACE TABLE idr_work._backup_{tbl} AS SELECT * FROM idr_out.{tbl}"
+                )
+            snapshots[tbl] = exists
+        return snapshots
 
-        # 1. Identify impacted clusters for confidence scoring
-        self.adapter.execute("""
-            CREATE OR REPLACE TABLE idr_work.impacted_resolved_ids AS
-            SELECT DISTINCT label AS resolved_id
-            FROM idr_work.lp_labels
-        """)
-
-        # 1b. Record resolved_id crosswalk for any clusters that merged or split
-        self._record_resolved_id_crosswalk()
-
-        # 2. Update membership table
-        self.upsert(
-            target_table="idr_out.identity_resolved_membership_current",
-            source_query=f"""
-                SELECT
-                    l.entity_key,
-                    l.label AS resolved_id,
-                    {current_ts} AS updated_at,
-                    '{self.run_id}' AS run_id,
-                    COALESCE(fr.super_cluster_id, l.label) AS super_cluster_id
-                FROM idr_work.lp_labels l
-                LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
-            """,
-            key_cols=["entity_key"],
-            update_cols=["resolved_id", "updated_at", "run_id", "super_cluster_id"],
-            insert_cols=["entity_key", "resolved_id", "updated_at", "run_id", "super_cluster_id"],
-        )
-
-        # 3. Update edges table (Insert / Upsert) BEFORE clusters to enable scoring.
-        # In INCR mode, remove stale historical edges for re-extracted entities and
-        # any edges invalidated by new exclusions before upserting freshly computed edges.
-        if self.config and self.config.run_mode == "INCR":
-            if self.adapter.table_exists("idr_work.reextracted_entities"):
-                self.adapter.execute("""
-                    DELETE FROM idr_out.identity_edges_current
-                    WHERE left_entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
-                       OR right_entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
-                """)
-            if self.adapter.table_exists("idr_meta.identifier_exclusion"):
-                self.adapter.execute("""
-                    DELETE FROM idr_out.identity_edges_current
-                    WHERE EXISTS (
-                        SELECT 1 FROM idr_meta.identifier_exclusion ex
-                        WHERE (
-                            UPPER(idr_out.identity_edges_current.identifier_type) = UPPER(ex.identifier_type)
-                            OR UPPER(ex.identifier_type) IN ('ANY', '*')
-                        )
-                        AND (
-                            (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(idr_out.identity_edges_current.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
-                            OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(idr_out.identity_edges_current.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
-                        )
+    def _restore_current_outputs(self, snapshots: Dict[str, bool]) -> None:
+        """Restore idr_out.*_current tables from pre-Stage-8 snapshots after a failure."""
+        for tbl, existed in snapshots.items():
+            if not existed:
+                continue
+            try:
+                if self.adapter.table_exists(f"idr_work._backup_{tbl}"):
+                    # Preserve table DDL constraints (e.g., DuckDB/Postgres PRIMARY KEY) while restoring rows.
+                    self.adapter.execute(f"DELETE FROM idr_out.{tbl} WHERE 1=1")
+                    self.adapter.execute(
+                        f"INSERT INTO idr_out.{tbl} SELECT * FROM idr_work._backup_{tbl}"
                     )
-                """)
+            except Exception as restore_err:
+                self.logger.error(
+                    f"Failed to rollback idr_out.{tbl} from idr_work._backup_{tbl}: {restore_err}",
+                    extra={"run_id": self.run_id},
+                )
 
-        edges_dedup_query = f"""
-            SELECT
-                left_entity_key,
-                right_entity_key,
-                identifier_type,
-                MAX(identifier_value_norm) AS identifier_value_norm,
-                {current_ts} AS first_seen_ts,
-                '{self.run_id}' AS run_id
-            FROM idr_work.edges_new
-            GROUP BY left_entity_key, right_entity_key, identifier_type
-        """
-        if self.adapter.dialect in ("duckdb", "postgres"):
-            self.adapter.execute(f"""
-                INSERT INTO idr_out.identity_edges_current
-                (left_entity_key, right_entity_key, identifier_type, identifier_value_norm, first_seen_ts, run_id)
-                {edges_dedup_query}
-                ON CONFLICT (left_entity_key, right_entity_key, identifier_type)
-                DO UPDATE SET last_seen_ts = EXCLUDED.first_seen_ts, run_id = EXCLUDED.run_id
-            """)
-        else:
-            # MERGE for inserting new edges and updating last_seen_ts
-            self.adapter.execute(f"""
-                MERGE INTO idr_out.identity_edges_current T
-                USING ({edges_dedup_query}) S
-                ON T.left_entity_key = S.left_entity_key
-                   AND T.right_entity_key = S.right_entity_key
-                   AND T.identifier_type = S.identifier_type
-                WHEN MATCHED THEN
-                    UPDATE SET last_seen_ts = S.first_seen_ts, run_id = S.run_id
-                WHEN NOT MATCHED THEN
-                    INSERT (left_entity_key, right_entity_key, identifier_type, identifier_value_norm, first_seen_ts, last_seen_ts, run_id)
-                    VALUES (S.left_entity_key, S.right_entity_key, S.identifier_type, S.identifier_value_norm, S.first_seen_ts, S.first_seen_ts, S.run_id)
+    def _cleanup_output_snapshots(self, snapshots: Dict[str, bool]) -> None:
+        """Remove temporary Stage 8 backup tables from idr_work."""
+        for tbl, existed in snapshots.items():
+            if not existed:
+                continue
+            try:
+                self.adapter.execute(f"DROP TABLE IF EXISTS idr_work._backup_{tbl}")
+            except Exception as cleanup_err:
+                self.logger.warning(
+                    f"Failed to cleanup idr_work._backup_{tbl}: {cleanup_err}",
+                    extra={"run_id": self.run_id},
+                )
+
+    def generate_output(self) -> int:
+        """Update output tables with resolved identities with rollback on mid-stage failure."""
+        current_ts = self._dialect["current_timestamp"]
+        snapshots = self._snapshot_current_outputs()
+
+        try:
+            # 1. Identify impacted clusters for confidence scoring
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.impacted_resolved_ids AS
+                SELECT DISTINCT label AS resolved_id
+                FROM idr_work.lp_labels
             """)
 
-        # 3b. Cleanup stale edges (FULL run only)
-        if self.config and self.config.run_mode == "FULL":
-            self.adapter.execute(f"""
-                DELETE FROM idr_out.identity_edges_current
-                WHERE run_id != '{self.run_id}'
-            """)
+            # 1b. Record resolved_id crosswalk for any clusters that merged or split
+            self._record_resolved_id_crosswalk()
 
-        # 3c. Update persistent identifiers store (if table exists)
-        if self.adapter.table_exists("idr_out.identity_identifiers_current"):
+            # 2. Update membership table
+            self.upsert(
+                target_table="idr_out.identity_resolved_membership_current",
+                source_query=f"""
+                    SELECT
+                        l.entity_key,
+                        l.label AS resolved_id,
+                        {current_ts} AS updated_at,
+                        '{self.run_id}' AS run_id,
+                        COALESCE(fr.super_cluster_id, l.label) AS super_cluster_id
+                    FROM idr_work.lp_labels l
+                    LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
+                """,
+                key_cols=["entity_key"],
+                update_cols=["resolved_id", "updated_at", "run_id", "super_cluster_id"],
+                insert_cols=["entity_key", "resolved_id", "updated_at", "run_id", "super_cluster_id"],
+            )
+
+            # 3. Update edges table (Insert / Upsert) BEFORE clusters to enable scoring.
+            # In INCR mode, remove stale historical edges for re-extracted entities and
+            # any edges invalidated by new exclusions before upserting freshly computed edges.
             if self.config and self.config.run_mode == "INCR":
                 if self.adapter.table_exists("idr_work.reextracted_entities"):
                     self.adapter.execute("""
-                        DELETE FROM idr_out.identity_identifiers_current
-                        WHERE entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
+                        DELETE FROM idr_out.identity_edges_current
+                        WHERE left_entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
+                           OR right_entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
                     """)
                 if self.adapter.table_exists("idr_meta.identifier_exclusion"):
-                    self.adapter.execute("""
-                        DELETE FROM idr_out.identity_identifiers_current
-                        WHERE EXISTS (
-                            SELECT 1 FROM idr_meta.identifier_exclusion ex
-                            WHERE (
-                                UPPER(idr_out.identity_identifiers_current.identifier_type) = UPPER(ex.identifier_type)
-                                OR UPPER(ex.identifier_type) IN ('ANY', '*')
-                            )
-                            AND (
-                                (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(idr_out.identity_identifiers_current.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
-                                OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(idr_out.identity_identifiers_current.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
-                            )
-                        )
+                    excl_edge = self._exclusion_match_predicate(
+                        "idr_out.identity_edges_current.identifier_type",
+                        "idr_out.identity_edges_current.identifier_value_norm",
+                    )
+                    self.adapter.execute(f"""
+                        DELETE FROM idr_out.identity_edges_current
+                        WHERE {excl_edge}
                     """)
-            self.upsert(
-                target_table="idr_out.identity_identifiers_current",
-                source_query=f"""
-                    SELECT
-                        entity_key,
-                        identifier_type,
-                        MAX(identifier_value_norm) AS identifier_value_norm,
-                        MAX(CAST(is_hashed AS INTEGER)) = 1 AS is_hashed,
-                        {current_ts} AS updated_at,
-                        '{self.run_id}' AS run_id
-                    FROM idr_work.identifiers_all
-                    GROUP BY entity_key, identifier_type
-                """,
-                key_cols=["entity_key", "identifier_type"],
-                update_cols=["identifier_value_norm", "is_hashed", "updated_at", "run_id"],
-                insert_cols=["entity_key", "identifier_type", "identifier_value_norm", "is_hashed", "updated_at", "run_id"],
-            )
+
+            edges_dedup_query = f"""
+                SELECT
+                    left_entity_key,
+                    right_entity_key,
+                    identifier_type,
+                    MAX(identifier_value_norm) AS identifier_value_norm,
+                    {current_ts} AS first_seen_ts,
+                    '{self.run_id}' AS run_id
+                FROM idr_work.edges_new
+                GROUP BY left_entity_key, right_entity_key, identifier_type
+            """
+            if self.adapter.dialect in ("duckdb", "postgres"):
+                self.adapter.execute(f"""
+                    INSERT INTO idr_out.identity_edges_current
+                    (left_entity_key, right_entity_key, identifier_type, identifier_value_norm, first_seen_ts, run_id)
+                    {edges_dedup_query}
+                    ON CONFLICT (left_entity_key, right_entity_key, identifier_type)
+                    DO UPDATE SET last_seen_ts = EXCLUDED.first_seen_ts, run_id = EXCLUDED.run_id
+                """)
+            else:
+                # MERGE for inserting new edges and updating last_seen_ts
+                self.adapter.execute(f"""
+                    MERGE INTO idr_out.identity_edges_current T
+                    USING ({edges_dedup_query}) S
+                    ON T.left_entity_key = S.left_entity_key
+                       AND T.right_entity_key = S.right_entity_key
+                       AND T.identifier_type = S.identifier_type
+                    WHEN MATCHED THEN
+                        UPDATE SET last_seen_ts = S.first_seen_ts, run_id = S.run_id
+                    WHEN NOT MATCHED THEN
+                        INSERT (left_entity_key, right_entity_key, identifier_type, identifier_value_norm, first_seen_ts, last_seen_ts, run_id)
+                        VALUES (S.left_entity_key, S.right_entity_key, S.identifier_type, S.identifier_value_norm, S.first_seen_ts, S.first_seen_ts, S.run_id)
+                """)
+
+            # 3b. Cleanup stale edges (FULL run only)
             if self.config and self.config.run_mode == "FULL":
                 self.adapter.execute(f"""
-                    DELETE FROM idr_out.identity_identifiers_current
+                    DELETE FROM idr_out.identity_edges_current
                     WHERE run_id != '{self.run_id}'
                 """)
 
-        # 4. Compute Confidence Scores
-        self.compute_confidence_scores()
-
-        # 5. Update clusters table (Now with calibrated confidence, fanout, & corroboration signals)
-        self.upsert(
-            target_table="idr_out.identity_clusters_current",
-            source_query=f"""
-                SELECT
-                    l.label AS resolved_id,
-                    COUNT(*) AS cluster_size,
-                    {current_ts} AS updated_at,
-                    '{self.run_id}' AS run_id,
-                    COALESCE(fr.super_cluster_id, l.label) AS super_cluster_id,
-                    COALESCE(cc.confidence_score, 1.0) AS confidence_score,
-                    COALESCE(cc.edge_diversity, 0) AS edge_diversity,
-                    COALESCE(cc.edge_count, 0) AS edge_count,
-                    COALESCE(cc.max_fanout, 1) AS max_fanout,
-                    COALESCE(cc.connectivity_ratio, 1.0) AS match_density,
-                    COALESCE(cc.primary_reason, 'Single-node cluster') AS primary_reason
-                FROM idr_work.lp_labels l
-                LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
-                LEFT JOIN idr_work.cluster_confidence cc ON l.label = cc.resolved_id
-                GROUP BY
-                    l.label,
-                    COALESCE(fr.super_cluster_id, l.label),
-                    cc.confidence_score,
-                    cc.edge_diversity,
-                    cc.edge_count,
-                    cc.max_fanout,
-                    cc.connectivity_ratio,
-                    cc.primary_reason
-            """,
-            key_cols=["resolved_id"],
-            update_cols=[
-                "cluster_size",
-                "updated_at",
-                "run_id",
-                "super_cluster_id",
-                "confidence_score",
-                "edge_diversity",
-                "edge_count",
-                "max_fanout",
-                "match_density",
-                "primary_reason",
-            ],
-            insert_cols=[
-                "resolved_id",
-                "cluster_size",
-                "updated_at",
-                "run_id",
-                "super_cluster_id",
-                "confidence_score",
-                "edge_diversity",
-                "edge_count",
-                "max_fanout",
-                "match_density",
-                "primary_reason",
-            ],
-        )
-
-        # 5b. Cleanup stale clusters (FULL run or merged phantom clusters in INCR run)
-        if self.config and self.config.run_mode == "FULL":
-            self.adapter.execute(f"""
-                DELETE FROM idr_out.identity_clusters_current
-                WHERE run_id != '{self.run_id}'
-            """)
-        else:
-            self.adapter.execute("""
-                DELETE FROM idr_out.identity_clusters_current
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM idr_out.identity_resolved_membership_current m
-                    WHERE m.resolved_id = idr_out.identity_clusters_current.resolved_id
+            # 3c. Update persistent identifiers store (if table exists)
+            if self.adapter.table_exists("idr_out.identity_identifiers_current"):
+                if self.config and self.config.run_mode == "INCR":
+                    if self.adapter.table_exists("idr_work.reextracted_entities"):
+                        self.adapter.execute("""
+                            DELETE FROM idr_out.identity_identifiers_current
+                            WHERE entity_key IN (SELECT entity_key FROM idr_work.reextracted_entities)
+                        """)
+                    if self.adapter.table_exists("idr_meta.identifier_exclusion"):
+                        excl_id = self._exclusion_match_predicate(
+                            "idr_out.identity_identifiers_current.identifier_type",
+                            "idr_out.identity_identifiers_current.identifier_value_norm",
+                        )
+                        self.adapter.execute(f"""
+                            DELETE FROM idr_out.identity_identifiers_current
+                            WHERE {excl_id}
+                        """)
+                self.upsert(
+                    target_table="idr_out.identity_identifiers_current",
+                    source_query=f"""
+                        SELECT
+                            entity_key,
+                            identifier_type,
+                            MAX(identifier_value_norm) AS identifier_value_norm,
+                            MAX(CAST(is_hashed AS INTEGER)) = 1 AS is_hashed,
+                            {current_ts} AS updated_at,
+                            '{self.run_id}' AS run_id
+                        FROM idr_work.identifiers_all
+                        GROUP BY entity_key, identifier_type
+                    """,
+                    key_cols=["entity_key", "identifier_type"],
+                    update_cols=["identifier_value_norm", "is_hashed", "updated_at", "run_id"],
+                    insert_cols=["entity_key", "identifier_type", "identifier_value_norm", "is_hashed", "updated_at", "run_id"],
                 )
-            """)
+                if self.config and self.config.run_mode == "FULL":
+                    self.adapter.execute(f"""
+                        DELETE FROM idr_out.identity_identifiers_current
+                        WHERE run_id != '{self.run_id}'
+                    """)
 
-        # 4. Build Unified Profiles (Golden Record) BEFORE advancing watermarks so
-        # a failed profile build does not advance watermarks and skip entities on retry.
-        try:
-            builder = ProfileBuilder(self.adapter)
-            run_mode = self.config.run_mode if self.config else "FULL"
-            builder.build_profiles(self.run_id, run_mode=run_mode)
-        except Exception as e:
-            self.logger.error(f"Profile generation failed: {e}", extra={"run_id": self.run_id})
-            self._warnings.append(f"Profile generation failed: {str(e)}")
-            raise RuntimeError(f"Golden profile generation failed: {e}") from e
+            # 4. Compute Confidence Scores
+            self.compute_confidence_scores()
 
-        # 5. Update watermarks (ignore NULL watermark_value rows from candidate expansion / overrides)
-        self.upsert(
-            target_table="idr_meta.run_state",
-            source_query=f"""
-                SELECT
-                    table_id,
-                    MAX(watermark_value) AS last_watermark_value,
-                    '{self.run_id}' AS last_run_id,
-                    {current_ts} AS updated_at
-                FROM idr_work.entities_delta
-                WHERE watermark_value IS NOT NULL
-                GROUP BY table_id
-            """,
-            key_cols=["table_id"],
-            update_cols=["last_watermark_value", "last_run_id", "updated_at"],
-            insert_cols=["table_id", "last_watermark_value", "last_run_id", "updated_at"],
-        )
+            # 5. Update clusters table (Now with calibrated confidence, fanout, & corroboration signals)
+            self.upsert(
+                target_table="idr_out.identity_clusters_current",
+                source_query=f"""
+                    SELECT
+                        l.label AS resolved_id,
+                        COUNT(*) AS cluster_size,
+                        {current_ts} AS updated_at,
+                        '{self.run_id}' AS run_id,
+                        COALESCE(fr.super_cluster_id, l.label) AS super_cluster_id,
+                        COALESCE(cc.confidence_score, 1.0) AS confidence_score,
+                        COALESCE(cc.edge_diversity, 0) AS edge_diversity,
+                        COALESCE(cc.edge_count, 0) AS edge_count,
+                        COALESCE(cc.max_fanout, 1) AS max_fanout,
+                        COALESCE(cc.connectivity_ratio, 1.0) AS match_density,
+                        COALESCE(cc.primary_reason, 'Single-node cluster') AS primary_reason
+                    FROM idr_work.lp_labels l
+                    LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
+                    LEFT JOIN idr_work.cluster_confidence cc ON l.label = cc.resolved_id
+                    GROUP BY
+                        l.label,
+                        COALESCE(fr.super_cluster_id, l.label),
+                        cc.confidence_score,
+                        cc.edge_diversity,
+                        cc.edge_count,
+                        cc.max_fanout,
+                        cc.connectivity_ratio,
+                        cc.primary_reason
+                """,
+                key_cols=["resolved_id"],
+                update_cols=[
+                    "cluster_size",
+                    "updated_at",
+                    "run_id",
+                    "super_cluster_id",
+                    "confidence_score",
+                    "edge_diversity",
+                    "edge_count",
+                    "max_fanout",
+                    "match_density",
+                    "primary_reason",
+                ],
+                insert_cols=[
+                    "resolved_id",
+                    "cluster_size",
+                    "updated_at",
+                    "run_id",
+                    "super_cluster_id",
+                    "confidence_score",
+                    "edge_diversity",
+                    "edge_count",
+                    "max_fanout",
+                    "match_density",
+                    "primary_reason",
+                ],
+            )
 
-        # Return total golden profiles or clusters generated
-        try:
-            res = self.adapter.query("SELECT COUNT(*) as cnt FROM idr_out.golden_profiles")
-            return int(res[0]["cnt"]) if res else 0
-        except Exception:
+            # 5b. Cleanup stale clusters (FULL run or merged phantom clusters in INCR run)
+            if self.config and self.config.run_mode == "FULL":
+                self.adapter.execute(f"""
+                    DELETE FROM idr_out.identity_clusters_current
+                    WHERE run_id != '{self.run_id}'
+                """)
+            else:
+                self.adapter.execute("""
+                    DELETE FROM idr_out.identity_clusters_current
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM idr_out.identity_resolved_membership_current m
+                        WHERE m.resolved_id = idr_out.identity_clusters_current.resolved_id
+                    )
+                """)
+
+            # 4. Build Unified Profiles (Golden Record) BEFORE advancing watermarks so
+            # a failed profile build does not advance watermarks and skip entities on retry.
             try:
-                res = self.adapter.query("SELECT COUNT(*) as cnt FROM idr_out.identity_clusters_current")
+                builder = ProfileBuilder(self.adapter)
+                run_mode = self.config.run_mode if self.config else "FULL"
+                builder.build_profiles(self.run_id, run_mode=run_mode)
+            except Exception as e:
+                self.logger.error(f"Profile generation failed: {e}", extra={"run_id": self.run_id})
+                self._warnings.append(f"Profile generation failed: {str(e)}")
+                raise RuntimeError(f"Golden profile generation failed: {e}") from e
+
+            # 5. Update watermarks (ignore NULL watermark_value rows from candidate expansion / overrides)
+            self.upsert(
+                target_table="idr_meta.run_state",
+                source_query=f"""
+                    SELECT
+                        table_id,
+                        MAX(watermark_value) AS last_watermark_value,
+                        '{self.run_id}' AS last_run_id,
+                        {current_ts} AS updated_at
+                    FROM idr_work.entities_delta
+                    WHERE watermark_value IS NOT NULL
+                    GROUP BY table_id
+                """,
+                key_cols=["table_id"],
+                update_cols=["last_watermark_value", "last_run_id", "updated_at"],
+                insert_cols=["table_id", "last_watermark_value", "last_run_id", "updated_at"],
+            )
+
+            # Return total golden profiles or clusters generated
+            try:
+                res = self.adapter.query("SELECT COUNT(*) as cnt FROM idr_out.golden_profiles")
                 return int(res[0]["cnt"]) if res else 0
             except Exception:
-                return 0
+                try:
+                    res = self.adapter.query("SELECT COUNT(*) as cnt FROM idr_out.identity_clusters_current")
+                    return int(res[0]["cnt"]) if res else 0
+                except Exception:
+                    return 0
+        except Exception:
+            self._restore_current_outputs(snapshots)
+            raise
+        finally:
+            self._cleanup_output_snapshots(snapshots)
 
     def generate_dry_run_output(self) -> None:
         """Generate dry run analysis without updating production tables."""

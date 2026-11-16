@@ -21,7 +21,7 @@ const NAV_ITEMS = [
     { to: '/explorer', label: 'Explorer', icon: Network, section: 'Observe' },
     { to: '/runs', label: 'Run History', icon: History, section: 'Observe' },
     { to: '/model', label: 'Data Model', icon: Database, section: 'Configure' },
-    { to: '/setup', label: 'Setup Wizard', icon: Wand2, section: 'Configure' },
+    { to: '/setup', label: 'Identity Studio', icon: Wand2, section: 'Configure' },
     { to: '/settings', label: 'Settings', icon: SettingsIcon, section: 'Configure' },
 ]
 

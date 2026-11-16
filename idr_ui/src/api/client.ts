@@ -344,12 +344,24 @@ export const api = {
         error?: string
     }>('/setup/config/save/progress'),
 
+    getConfigHistory: (limit = 15) => fetchJson<{
+        snapshots: Array<{
+            config_hash: string
+            created_at: string
+            sources_count: number
+            rules_count: number
+            exclusions_count: number
+            config: Record<string, unknown>
+        }>
+    }>(`/setup/config/history?limit=${limit}`),
+
     runSetup: (payload: {
         mode: 'INCR' | 'FULL'
         strict: boolean
         max_iterations: number
         dry_run: boolean
         max_group_size?: number
+        config?: unknown
     }) => fetchJson<Record<string, unknown>>('/setup/run', {
         method: 'POST',
         body: JSON.stringify(payload),

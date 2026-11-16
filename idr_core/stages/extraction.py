@@ -234,50 +234,26 @@ class ExtractionStage(BaseStage):
                 )
                 if ex_cnt > 0:
                     if self.adapter.table_exists("idr_out.identity_identifiers_current"):
-                        impacted_branches.append("""
+                        excl_h = self._exclusion_match_predicate(
+                            "h.identifier_type", "h.identifier_value_norm"
+                        )
+                        impacted_branches.append(f"""
                             SELECT DISTINCT h.entity_key
                             FROM idr_out.identity_identifiers_current h
-                            WHERE EXISTS (
-                                SELECT 1 FROM idr_meta.identifier_exclusion ex
-                                WHERE (
-                                    UPPER(h.identifier_type) = UPPER(ex.identifier_type)
-                                    OR UPPER(ex.identifier_type) IN ('ANY', '*')
-                                )
-                                AND (
-                                    (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(h.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
-                                    OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(h.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
-                                )
-                            )
+                            WHERE {excl_h}
                         """)
                     if self.adapter.table_exists("idr_out.identity_edges_current"):
-                        impacted_branches.append("""
+                        excl_e = self._exclusion_match_predicate(
+                            "e.identifier_type", "e.identifier_value_norm"
+                        )
+                        impacted_branches.append(f"""
                             SELECT DISTINCT e.left_entity_key AS entity_key
                             FROM idr_out.identity_edges_current e
-                            WHERE EXISTS (
-                                SELECT 1 FROM idr_meta.identifier_exclusion ex
-                                WHERE (
-                                    UPPER(e.identifier_type) = UPPER(ex.identifier_type)
-                                    OR UPPER(ex.identifier_type) IN ('ANY', '*')
-                                )
-                                AND (
-                                    (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(e.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
-                                    OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(e.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
-                                )
-                            )
+                            WHERE {excl_e}
                             UNION
                             SELECT DISTINCT e.right_entity_key AS entity_key
                             FROM idr_out.identity_edges_current e
-                            WHERE EXISTS (
-                                SELECT 1 FROM idr_meta.identifier_exclusion ex
-                                WHERE (
-                                    UPPER(e.identifier_type) = UPPER(ex.identifier_type)
-                                    OR UPPER(ex.identifier_type) IN ('ANY', '*')
-                                )
-                                AND (
-                                    (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(e.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
-                                    OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(e.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
-                                )
-                            )
+                            WHERE {excl_e}
                         """)
 
             if self.adapter.table_exists("idr_meta.identity_override"):
@@ -485,19 +461,13 @@ class ExtractionStage(BaseStage):
         # Apply exclusions (supports exact/wildcard identifier_type and case-insensitive patterns)
         try:
             if self.adapter.table_exists("idr_meta.identifier_exclusion"):
-                self.adapter.execute("""
+                excl_delta = self._exclusion_match_predicate(
+                    "idr_work.identifiers_delta.identifier_type",
+                    "idr_work.identifiers_delta.identifier_value_norm",
+                )
+                self.adapter.execute(f"""
                     DELETE FROM idr_work.identifiers_delta
-                    WHERE EXISTS (
-                        SELECT 1 FROM idr_meta.identifier_exclusion ex
-                        WHERE (
-                            UPPER(idr_work.identifiers_delta.identifier_type) = UPPER(ex.identifier_type)
-                            OR UPPER(ex.identifier_type) IN ('ANY', '*')
-                        )
-                        AND (
-                            (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(idr_work.identifiers_delta.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
-                            OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(idr_work.identifiers_delta.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
-                        )
-                    )
+                    WHERE {excl_delta}
                 """)
         except Exception:
             pass  # Exclusion table may not exist - skip silently
@@ -638,19 +608,10 @@ class ExtractionStage(BaseStage):
                 # and filter out any values matched by active exclusions.
                 excl_filter_sql = ""
                 if self.adapter.table_exists("idr_meta.identifier_exclusion"):
-                    excl_filter_sql = """
-                        AND NOT EXISTS (
-                            SELECT 1 FROM idr_meta.identifier_exclusion ex
-                            WHERE (
-                                UPPER(h.identifier_type) = UPPER(ex.identifier_type)
-                                OR UPPER(ex.identifier_type) IN ('ANY', '*')
-                            )
-                            AND (
-                                (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT' AND LOWER(h.identifier_value_norm) = LOWER(ex.identifier_value_pattern))
-                                OR (UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE' AND LOWER(h.identifier_value_norm) LIKE LOWER(ex.identifier_value_pattern))
-                            )
-                        )
-                    """
+                    excl_hist = self._exclusion_match_predicate(
+                        "h.identifier_type", "h.identifier_value_norm"
+                    )
+                    excl_filter_sql = f"AND NOT {excl_hist}"
                 self.adapter.execute(f"""
                     CREATE OR REPLACE TABLE idr_work.identifiers_all AS
                     SELECT entity_key, identifier_type, identifier_value_norm, is_hashed, max_group_size

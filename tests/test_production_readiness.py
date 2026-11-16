@@ -342,3 +342,525 @@ def test_mcp_get_system_status_auto_discovers_connected_adapter(tmp_path):
     assert status["is_configured"] is True
     mgr.disconnect()
 
+
+def test_snowflake_keypair_and_databricks_oauth_m2m_kwargs(monkeypatch):
+    import json
+    from io import BytesIO
+    from unittest.mock import patch
+
+    from idr_core.connection_manager import (
+        build_databricks_connect_kwargs,
+        build_snowflake_connect_kwargs,
+    )
+
+    # Snowflake RSA Key-Pair (via path + env vars)
+    monkeypatch.setenv("SNOWFLAKE_ACCOUNT", "https://xy12345.us-east-1.snowflakecomputing.com/")
+    monkeypatch.setenv("SNOWFLAKE_USER", "svc_idr")
+    monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_PATH", "/keys/rsa_key.p8")
+    monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", "secret-pass")
+    monkeypatch.setenv("SNOWFLAKE_ROLE", "IDR_ROLE")
+    monkeypatch.delenv("SNOWFLAKE_PASSWORD", raising=False)
+
+    sf_kwargs = build_snowflake_connect_kwargs({})
+    assert sf_kwargs["account"] == "xy12345.us-east-1"
+    assert sf_kwargs["user"] == "svc_idr"
+    assert sf_kwargs["private_key_file"] == "/keys/rsa_key.p8"
+    assert sf_kwargs["private_key_file_pwd"] == "secret-pass"
+    assert sf_kwargs["authenticator"] == "SNOWFLAKE_JWT"
+    assert sf_kwargs["role"] == "IDR_ROLE"
+    assert "password" not in sf_kwargs
+
+    # Inline PEM RSA private key (generated in-memory with cryptography)
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem_str = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    monkeypatch.delenv("SNOWFLAKE_PRIVATE_KEY_PATH", raising=False)
+    sf_pem_kwargs = build_snowflake_connect_kwargs({"private_key": pem_str})
+    assert isinstance(sf_pem_kwargs["private_key"], bytes)
+    assert sf_pem_kwargs["authenticator"] == "SNOWFLAKE_JWT"
+
+    # Databricks OAuth M2M token exchange fallback when databricks.sdk isn't mocked/installed
+    class _Resp(BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
+    with patch(
+        "urllib.request.urlopen",
+        return_value=_Resp(json.dumps({"access_token": "oauth-m2m-jwt"}).encode("utf-8")),
+    ):
+        # Force OIDC HTTP exchange path even if databricks.sdk happens to be installed
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_sdk(name, *args, **kwargs):
+            if name.startswith("databricks.sdk"):
+                raise ImportError("no sdk")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _no_sdk)
+        dbx_kwargs, catalog = build_databricks_connect_kwargs(
+            {
+                "server_hostname": "https://adb-123.azuredatabricks.net/",
+                "http_path": "/sql/1.0/warehouses/abc",
+                "client_id": "sp-client-id",
+                "client_secret": "sp-client-secret",
+                "catalog": "prod_cat",
+            }
+        )
+        assert dbx_kwargs["server_hostname"] == "adb-123.azuredatabricks.net"
+        assert dbx_kwargs["http_path"] == "/sql/1.0/warehouses/abc"
+        assert dbx_kwargs["access_token"] == "oauth-m2m-jwt"
+        assert catalog == "prod_cat"
+
+
+def _make_fake_redis_and_adapter_classes():
+    class FakeRedis:
+        def __init__(self):
+            self.data = {}
+
+        def set(self, key, value, ex=None):
+            self.data[key] = value
+
+        def get(self, key):
+            return self.data.get(key)
+
+        def delete(self, key):
+            self.data.pop(key, None)
+
+        def ping(self):
+            return True
+
+    class DummyAdapter:
+        def __init__(self, cfg):
+            self.cfg = cfg
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    return FakeRedis, DummyAdapter
+
+
+def test_redis_session_store_strips_plaintext_secrets_by_default(monkeypatch):
+    import json
+
+    from idr_core.connection_manager import build_snowflake_connect_kwargs
+    from idr_enterprise.session_store import RedisConnectionSessionStore
+
+    monkeypatch.delenv("IDR_SESSION_SECRET_KEY", raising=False)
+    monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_PATH", "/mounted/keys/rsa_key.p8")
+    monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", "env-key-pass")
+
+    FakeRedis, DummyAdapter = _make_fake_redis_and_adapter_classes()
+    shared_redis = FakeRedis()
+    captured = []
+
+    def factory(cfg):
+        captured.append(cfg)
+        return DummyAdapter(cfg)
+
+    w1 = RedisConnectionSessionStore(ttl_seconds=600, redis_client=shared_redis, adapter_factory=factory)
+    w2 = RedisConnectionSessionStore(ttl_seconds=600, redis_client=shared_redis, adapter_factory=factory)
+
+    secret_cfg = {
+        "platform": "snowflake",
+        "account": "xy12345.us-east-1",
+        "user": "svc_idr",
+        "password": "plaintext-password-secret",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----",
+        "private_key_passphrase": "inline-key-passphrase",
+        "access_token": "raw-access-token",
+        "client_secret": "raw-oauth-secret",
+    }
+    w1.set_adapter("alice", DummyAdapter(secret_cfg), secret_cfg)
+
+    raw_payload = shared_redis.data[w1._lease_key("alice")]
+    for leaked in (
+        "plaintext-password-secret",
+        "-----BEGIN PRIVATE KEY-----",
+        "inline-key-passphrase",
+        "raw-access-token",
+        "raw-oauth-secret",
+    ):
+        assert leaked not in raw_payload
+
+    stored_cfg = json.loads(raw_payload)["config"]
+    for secret_key in ("password", "private_key", "private_key_passphrase", "access_token", "client_secret"):
+        assert secret_key not in stored_cfg
+
+    # Worker 2 reconstructs cleanly without secrets in Redis by falling back to env credentials
+    recovered_adapter = w2.get_adapter("alice")
+    assert recovered_adapter is not None
+    assert len(captured) == 1
+    sf_kwargs = build_snowflake_connect_kwargs(captured[0])
+    assert sf_kwargs["private_key_file"] == "/mounted/keys/rsa_key.p8"
+    assert sf_kwargs["private_key_file_pwd"] == "env-key-pass"
+
+    # Defensive scrub against legacy plaintext secrets already present in Redis
+    shared_redis.data[w1._lease_key("legacy")] = json.dumps(
+        {"updated_at": 1, "config": {"platform": "snowflake", "password": "legacy-plaintext-password"}}
+    )
+    legacy_cfg = w2._read_config_from_redis("legacy")
+    assert legacy_cfg == {"platform": "snowflake"}
+
+
+def test_redis_session_store_encrypts_secrets_when_key_configured(monkeypatch):
+    import json
+
+    from idr_enterprise.session_store import RedisConnectionSessionStore
+
+    monkeypatch.setenv("IDR_SESSION_SECRET_KEY", "test-master-secret-key")
+    FakeRedis, DummyAdapter = _make_fake_redis_and_adapter_classes()
+    shared_redis = FakeRedis()
+    captured = []
+
+    def factory(cfg):
+        captured.append(cfg)
+        return DummyAdapter(cfg)
+
+    w1 = RedisConnectionSessionStore(ttl_seconds=600, redis_client=shared_redis, adapter_factory=factory)
+    w2 = RedisConnectionSessionStore(ttl_seconds=600, redis_client=shared_redis, adapter_factory=factory)
+
+    cfg = {
+        "platform": "databricks",
+        "server_hostname": "adb-123.azuredatabricks.net",
+        "http_path": "/sql/1.0/warehouses/abc",
+        "client_id": "sp-client-id",
+        "client_secret": "oauth-m2m-super-secret",
+        "password": "warehouse-password-secret",
+        "credentials_json": {"type": "service_account", "private_key": "sa-private-key"},
+    }
+    w1.set_adapter("bob", DummyAdapter(cfg), cfg)
+
+    raw_payload = shared_redis.data[w1._lease_key("bob")]
+    assert "oauth-m2m-super-secret" not in raw_payload
+    assert "warehouse-password-secret" not in raw_payload
+    assert "sa-private-key" not in raw_payload
+
+    stored_cfg = json.loads(raw_payload)["config"]
+    assert isinstance(stored_cfg["client_secret"], dict) and "__idr_enc__" in stored_cfg["client_secret"]
+    assert isinstance(stored_cfg["password"], dict) and "__idr_enc__" in stored_cfg["password"]
+    assert isinstance(stored_cfg["credentials_json"], dict) and "__idr_enc__" in stored_cfg["credentials_json"]
+
+    # Worker 2 decrypts secrets transparently when reconstructing adapter
+    w2_adapter = w2.get_adapter("bob")
+    assert w2_adapter is not None
+    assert captured[0]["client_secret"] == "oauth-m2m-super-secret"
+    assert captured[0]["password"] == "warehouse-password-secret"
+    assert captured[0]["credentials_json"] == {"type": "service_account", "private_key": "sa-private-key"}
+
+    # Mismatched encryption key on another worker drops undecryptable fields safely
+    monkeypatch.setenv("IDR_SESSION_SECRET_KEY", "wrong-key")
+    mismatched_cfg = w2._read_config_from_redis("bob")
+    assert "client_secret" not in mismatched_cfg
+    assert "password" not in mismatched_cfg
+
+
+def test_stage8_output_rollback_on_mid_stage_failure(monkeypatch):
+    adapter = DuckDBAdapter(":memory:")
+    _setup_crm_source(
+        adapter,
+        [
+            (1, "a@example.com", "2026-01-01 00:00:00"),
+            (2, "a@example.com", "2026-01-01 00:00:00"),
+        ],
+    )
+
+    r1 = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    assert r1.status == "SUCCESS"
+
+    def _snapshot_rows():
+        return {
+            "membership": adapter.query(
+                "SELECT entity_key, resolved_id, run_id FROM idr_out.identity_resolved_membership_current ORDER BY entity_key"
+            ),
+            "clusters": adapter.query(
+                "SELECT resolved_id, cluster_size, run_id FROM idr_out.identity_clusters_current ORDER BY resolved_id"
+            ),
+            "edges": adapter.query(
+                "SELECT left_entity_key, right_entity_key, identifier_type, run_id FROM idr_out.identity_edges_current ORDER BY left_entity_key, right_entity_key"
+            ),
+            "identifiers": adapter.query(
+                "SELECT entity_key, identifier_type, identifier_value_norm, run_id FROM idr_out.identity_identifiers_current ORDER BY entity_key, identifier_type"
+            ),
+            "run_state": adapter.query(
+                "SELECT table_id, last_watermark_value, last_run_id FROM idr_meta.run_state ORDER BY table_id"
+            ),
+        }
+
+    baseline = _snapshot_rows()
+    assert len(baseline["membership"]) == 2
+    assert len(baseline["clusters"]) == 1
+
+    # Add new source entities that would mutate all idr_out.*_current tables in Run 2
+    adapter.execute("INSERT INTO raw.crm VALUES (3, 'b@example.com', TIMESTAMP '2026-01-02 00:00:00')")
+    adapter.execute("INSERT INTO raw.crm VALUES (4, 'b@example.com', TIMESTAMP '2026-01-02 00:00:00')")
+
+    # Fail inside ProfileBuilder after OutputStage has already mutated membership, edges, identifiers, and clusters
+    def _boom(*args, **kwargs):
+        raise RuntimeError("Simulated warehouse OOM during golden profile build")
+
+    monkeypatch.setattr(ProfileBuilder, "build_profiles", _boom)
+
+    r2 = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    assert r2.status == "FAILED"
+
+    # All idr_out.*_current tables AND idr_meta.run_state must match Run 1's exact state
+    after_failure = _snapshot_rows()
+    assert after_failure == baseline
+
+    # Backup tables in idr_work must be cleaned up cleanly
+    for tbl in (
+        "_backup_identity_resolved_membership_current",
+        "_backup_identity_edges_current",
+        "_backup_identity_identifiers_current",
+        "_backup_identity_clusters_current",
+    ):
+        assert not adapter.table_exists(f"idr_work.{tbl}")
+
+    # Retry after transient issue must succeed (PRIMARY KEY constraints preserved on rollback)
+    monkeypatch.undo()
+    r3 = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    assert r3.status == "SUCCESS"
+    final_membership = adapter.query(
+        "SELECT entity_key FROM idr_out.identity_resolved_membership_current ORDER BY entity_key"
+    )
+    assert [r["entity_key"] for r in final_membership] == ["crm:1", "crm:2", "crm:3", "crm:4"]
+    adapter.close()
+
+
+def test_bare_like_exclusion_matches_substring_and_dry_run_reports_edge_delta(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import idr_api.dependencies as deps
+    from idr_api.main import app
+
+    monkeypatch.setattr(deps, "OIDC_ISSUER", "")
+    monkeypatch.setattr(deps, "ALLOW_INSECURE_DEV_AUTH", True)
+
+    mgr = deps.get_manager()
+    mgr.disconnect()
+
+    db_file = str(tmp_path / "dry_run_excl.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    _setup_crm_source(
+        adapter,
+        [
+            (1, "donald.walker3812@gmail.com", "2026-01-01 00:00:00"),
+            (2, "donald.walker3812@gmail.com", "2026-01-01 00:00:00"),
+            (3, "john_doe@gmail.com", "2026-01-01 00:00:00"),
+            (4, "john_doe@gmail.com", "2026-01-01 00:00:00"),
+        ],
+    )
+
+    r1 = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    assert r1.status == "SUCCESS"
+    assert r1.edges_created == 2
+
+    # Bare LIKE pattern without '%' must still match 'donald.walker3812@gmail.com',
+    # whereas EXACT with '_' must NOT act as wildcard against unrelated strings.
+    adapter.execute("""
+        INSERT INTO idr_meta.identifier_exclusion (identifier_type, identifier_value_pattern, match_type, reason)
+        VALUES ('email', 'donald', 'LIKE', 'UI exclusion')
+    """)
+    adapter.execute("""
+        INSERT INTO idr_meta.identifier_exclusion (identifier_type, identifier_value_pattern, match_type, reason)
+        VALUES ('email', 'unrelated_underscore@gmail.com', 'EXACT', 'Exact underscore check')
+    """)
+    adapter.close()
+
+    # Dry Run via /api/setup/run must surface edges_delta and clusters_delta even before writes
+    tc = TestClient(app)
+    assert tc.post("/api/connect", json={"platform": "duckdb", "database": db_file}).status_code == 200
+    dry_resp = tc.post(
+        "/api/setup/run",
+        json={"mode": "FULL", "strict": False, "max_iterations": 20, "dry_run": True},
+    )
+    assert dry_resp.status_code == 200
+    summary = dry_resp.json()["dry_run_summary"]
+    assert summary["current_edges"] == 2
+    assert summary["proposed_edges"] == 1
+    assert summary["edges_delta"] == -1
+    assert summary["current_clusters"] == 2
+    assert summary["proposed_clusters"] == 3
+    assert summary["clusters_delta"] == 1
+    assert summary["proposed_changes"] > 0
+
+    # Real INCR run applies bare LIKE exclusion cleanly while preserving john_doe cluster
+    tc.post("/api/disconnect")
+    adapter2 = DuckDBAdapter(db_file)
+    r2 = IDRRunner(adapter2).run(RunConfig(run_mode="INCR"))
+    assert r2.status == "SUCCESS"
+    sizes = sorted(
+        r["cluster_size"]
+        for r in adapter2.query("SELECT cluster_size FROM idr_out.identity_clusters_current")
+    )
+    assert sizes == [1, 1, 2]
+    adapter2.close()
+
+
+def test_ephemeral_dry_run_does_not_mutate_saved_config_and_history_rollback(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import idr_api.dependencies as deps
+    from idr_api.main import app
+
+    monkeypatch.setattr(deps, "OIDC_ISSUER", "")
+    monkeypatch.setattr(deps, "ALLOW_INSECURE_DEV_AUTH", True)
+
+    mgr = deps.get_manager()
+    mgr.disconnect()
+
+    db_file = str(tmp_path / "ephemeral_dry_run.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    base_cfg = _setup_crm_source(
+        adapter,
+        [
+            (1, "donald.walker3812@gmail.com", "2026-01-01 00:00:00"),
+            (2, "donald.walker3812@gmail.com", "2026-01-01 00:00:00"),
+            (3, "jane@example.com", "2026-01-01 00:00:00"),
+            (4, "jane@example.com", "2026-01-01 00:00:00"),
+        ],
+    )
+    assert IDRRunner(adapter).run(RunConfig(run_mode="FULL")).status == "SUCCESS"
+    adapter.close()
+
+    tc = TestClient(app)
+    assert tc.post("/api/connect", json={"platform": "duckdb", "database": db_file}).status_code == 200
+
+    # 1. Save initial clean config (0 exclusions) -> records snapshot #1
+    save_v1 = tc.post("/api/setup/config/save", json={"config": base_cfg})
+    assert save_v1.status_code == 200
+
+    # 2. Run ephemeral dry run WITH draft exclusion without saving it to idr_meta
+    draft_cfg = {
+        **base_cfg,
+        "exclusions": [
+            {
+                "type": "email",
+                "value": "%donald%",
+                "match": "LIKE",
+                "reason": "UI exclusion",
+            }
+        ],
+    }
+    dry_resp = tc.post(
+        "/api/setup/run",
+        json={
+            "mode": "FULL",
+            "strict": False,
+            "max_iterations": 20,
+            "dry_run": True,
+            "config": draft_cfg,
+        },
+    )
+    assert dry_resp.status_code == 200
+    summary = dry_resp.json()["dry_run_summary"]
+    assert summary["edges_delta"] == -1
+    assert summary["clusters_delta"] == 1
+
+    # Saved idr_meta.identifier_exclusion MUST still have 0 exclusions after ephemeral dry run
+    after_dry_cfg = tc.get("/api/setup/config").json()
+    assert after_dry_cfg.get("exclusions", []) == []
+
+    # 3. Save v2 with an exclusion, then verify /api/setup/config/history returns v2 & v1 for rollback
+    assert tc.post("/api/setup/config/save", json={"config": draft_cfg}).status_code == 200
+    hist_resp = tc.get("/api/setup/config/history")
+    assert hist_resp.status_code == 200
+    snaps = hist_resp.json()["snapshots"]
+    assert len(snaps) >= 2
+    assert snaps[0]["exclusions_count"] == 1
+    assert snaps[1]["exclusions_count"] == 0
+
+    # Roll back to v1 snapshot via /api/setup/config/save
+    rollback_resp = tc.post("/api/setup/config/save", json={"config": snaps[1]["config"]})
+    assert rollback_resp.status_code == 200
+    restored_cfg = tc.get("/api/setup/config").json()
+    assert restored_cfg.get("exclusions", []) == []
+    tc.post("/api/disconnect")
+
+
+def test_cli_ephemeral_dry_run_and_config_history_rollback(tmp_path, capsys):
+    import yaml
+
+    from idr_core.cli import main as cli_main
+    from idr_core.config import sql_to_config
+
+    db_file = str(tmp_path / "cli_parity.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    base_cfg = _setup_crm_source(
+        adapter,
+        [
+            (1, "donald.walker3812@gmail.com", "2026-01-01 00:00:00"),
+            (2, "donald.walker3812@gmail.com", "2026-01-01 00:00:00"),
+            (3, "jane@example.com", "2026-01-01 00:00:00"),
+            (4, "jane@example.com", "2026-01-01 00:00:00"),
+        ],
+    )
+    adapter.close()
+
+    v1_path = tmp_path / "config_v1.yaml"
+    v2_path = tmp_path / "config_v2.yaml"
+    v1_path.write_text(yaml.safe_dump(base_cfg, sort_keys=False))
+    v2_cfg = {
+        **base_cfg,
+        "exclusions": [
+            {
+                "type": "email",
+                "value": "%donald%",
+                "match": "LIKE",
+                "reason": "Config exclusion",
+            }
+        ],
+    }
+    v2_path.write_text(yaml.safe_dump(v2_cfg, sort_keys=False))
+
+    # 1. Apply v1 permanently & run FULL baseline
+    assert cli_main(["config", "apply", "--file", str(v1_path), "--platform", "duckdb", "--db", db_file]) == 0
+    assert cli_main(["run", "--platform", "duckdb", "--db", db_file, "--mode", "FULL"]) == 0
+    capsys.readouterr()
+
+    # 2. Ephemeral dry-run with v2 YAML (must preview -1 edge / +1 cluster WITHOUT persisting exclusion)
+    assert cli_main([
+        "run", "--platform", "duckdb", "--db", db_file,
+        "--mode", "FULL", "--config", str(v2_path), "--dry-run",
+    ]) == 0
+    dry_out = capsys.readouterr().out
+    assert "Edges Delta:     -1" in dry_out
+    assert "Clusters Delta:  +1" in dry_out
+    assert "Ephemeral (--dry-run restored prior idr_meta state)" in dry_out
+
+    check_conn = DuckDBAdapter(db_file)
+    assert sql_to_config(check_conn).get("exclusions", []) == []
+    check_conn.close()
+
+    # 3. Permanently apply v2, inspect history, then roll back to v1 cleanly
+    assert cli_main(["config", "apply", "--file", str(v2_path), "--platform", "duckdb", "--db", db_file]) == 0
+    capsys.readouterr()
+    assert cli_main(["config", "history", "--platform", "duckdb", "--db", db_file]) == 0
+    hist_out = capsys.readouterr().out
+    assert "(latest)" in hist_out
+
+    assert cli_main(["config", "rollback", "--platform", "duckdb", "--db", db_file]) == 0
+    rollback_out = capsys.readouterr().out
+    assert "Rolled back configuration" in rollback_out
+
+    check_after_rb = DuckDBAdapter(db_file)
+    assert sql_to_config(check_after_rb).get("exclusions", []) == []
+    check_after_rb.close()
+
+
+
+
+

@@ -1374,39 +1374,20 @@ def connect_from_env():
         elif platform == "snowflake":
             import snowflake.connector
 
-            conn = snowflake.connector.connect(
-                account=_get_env("SNOWFLAKE_ACCOUNT"),
-                user=_get_env("SNOWFLAKE_USER"),
-                password=_get_env("SNOWFLAKE_PASSWORD"),
-                warehouse=_get_env("SNOWFLAKE_WAREHOUSE"),
-                database=_get_env("SNOWFLAKE_DATABASE"),
-                schema=_get_env("SNOWFLAKE_SCHEMA") or "PUBLIC",
-            )
             from idr_core.adapters.snowflake import SnowflakeAdapter
+            from idr_core.connection_manager import build_snowflake_connect_kwargs
 
+            conn = snowflake.connector.connect(**build_snowflake_connect_kwargs({}))
             manager.set_adapter(SnowflakeAdapter(conn), {"platform": "snowflake"})
 
         elif platform == "databricks":
             from databricks import sql
 
-            host = _get_env("DATABRICKS_HOST")
-            if host:
-                host = host.replace("https://", "").replace("http://", "").rstrip("/")
-            http_path = _get_env("DATABRICKS_HTTP_PATH")
-            token = _get_env("DATABRICKS_TOKEN")
-
-            catalog = _get_env("DATABRICKS_CATALOG")
-            connect_kwargs = {
-                "server_hostname": host,
-                "http_path": http_path,
-                "access_token": token,
-            }
-            if catalog:
-                connect_kwargs["catalog"] = catalog
-
-            conn = sql.connect(**connect_kwargs)
             from idr_core.adapters.databricks import DatabricksAdapter
+            from idr_core.connection_manager import build_databricks_connect_kwargs
 
+            dbx_kwargs, catalog = build_databricks_connect_kwargs({})
+            conn = sql.connect(**dbx_kwargs)
             manager.set_adapter(
                 DatabricksAdapter(conn, catalog=catalog), {"platform": "databricks"}
             )

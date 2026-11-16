@@ -7,7 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from idr_core.schema_manager import SchemaManager
+from idr_core.config import (
+    apply_config_to_warehouse,
+    compute_dry_run_summary,
+    get_config_snapshots,
+    parse_config_snapshot_row,
+    restore_meta_tables,
+    snapshot_meta_tables,
+)
 
 from ..dependencies import get_current_user, get_manager, get_user_key, require_write_access
 
@@ -54,30 +61,10 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
                 import snowflake.connector
 
                 from idr_core.adapters.snowflake import SnowflakeAdapter
+                from idr_core.connection_manager import build_snowflake_connect_kwargs
 
-                raw_account = (params.get("account") or "").strip()
-                for prefix in ("https://", "http://"):
-                    if raw_account.lower().startswith(prefix):
-                        raw_account = raw_account[len(prefix):]
-                raw_account = raw_account.split("/")[0].strip()
-                if raw_account.lower().endswith(".snowflakecomputing.com"):
-                    raw_account = raw_account[: -len(".snowflakecomputing.com")]
-
-                sf_kwargs = {
-                    "user": (params.get("user") or "").strip(),
-                    "password": params.get("password"),
-                    "account": raw_account,
-                    "warehouse": (params.get("warehouse") or "").strip() or None,
-                    "database": (params.get("database") or "").strip() or None,
-                    "schema": (params.get("schema") or "").strip() or None,
-                    "login_timeout": 20,
-                }
-                if params.get("role"):
-                    sf_kwargs["role"] = str(params["role"]).strip()
-                if params.get("authenticator"):
-                    sf_kwargs["authenticator"] = str(params["authenticator"]).strip()
-
-                conn = snowflake.connector.connect(**{k: v for k, v in sf_kwargs.items() if v is not None})
+                sf_kwargs = build_snowflake_connect_kwargs(params)
+                conn = snowflake.connector.connect(**sf_kwargs)
                 adapter = SnowflakeAdapter(conn)
             except ImportError:
                 raise HTTPException(400, "Snowflake connector not installed")
@@ -113,18 +100,10 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
                 from databricks import sql
 
                 from idr_core.adapters.databricks import DatabricksAdapter
+                from idr_core.connection_manager import build_databricks_connect_kwargs
 
-                raw_host = params.get("server_hostname") or ""
-                clean_host = raw_host.strip("'\" \t").replace("https://", "").replace("http://", "").split("/")[0]
-                http_path = (params.get("http_path") or "").strip("'\" \t")
-                token = (params.get("access_token") or "").strip("'\" \t")
-                catalog = (params.get("catalog") or "main").strip("'\" \t")
-
-                conn = sql.connect(
-                    server_hostname=clean_host,
-                    http_path=http_path,
-                    access_token=token,
-                )
+                dbx_kwargs, catalog = build_databricks_connect_kwargs(params)
+                conn = sql.connect(**dbx_kwargs)
                 adapter = DatabricksAdapter(conn, catalog=catalog)
             except ImportError:
                 raise HTTPException(400, "Databricks connector not installed. Run: pip install databricks-sql-connector")
@@ -237,7 +216,6 @@ def get_current_config(current_user: Dict[str, Any] = Depends(get_current_user))
         from idr_core.config import sql_to_config
 
         # 1. Try to reconstruct from actual metadata tables (Source of Truth)
-        # Check if tables exist first to avoid errors on fresh DB
         if adapter.table_exists("idr_meta.source_table"):
             active_config = sql_to_config(adapter)
             if active_config and len(active_config.get("sources", [])) > 0:
@@ -254,55 +232,24 @@ def get_current_config(current_user: Dict[str, Any] = Depends(get_current_user))
         if not rows:
             return IDRConfig(sources=[])
 
-        import json
-
         row = rows[0]
-
-        # Reconstruct IDRConfig from the snapshot
         if row.get("sources_json"):
-            sources_list = json.loads(row["sources_json"])
-
-            # Map backend keys to frontend keys if needed (Shim for legacy/drifted data)
-            for src in sources_list:
-                if "table_id" in src and "id" not in src:
-                    src["id"] = src["table_id"]
-                if "table_fqn" in src and "table" not in src:
-                    src["table"] = src["table_fqn"]
-                if "entity_key_expr" in src and "entity_key" not in src:
-                    src["entity_key"] = src["entity_key_expr"]
-                if "attributes" not in src:
-                    src["attributes"] = []
-                for ident in src.get("identifiers", []):
-                    if "expr" in ident and "column" not in ident:
-                        ident["column"] = ident["expr"]
-                for attr in src.get("attributes", []):
-                    if "expr" in attr and "column" not in attr:
-                        attr["column"] = attr["expr"]
-
-            config_dict: Dict[str, Any] = {"sources": sources_list}
-
-            if row.get("rules_json"):
-                parsed_rules = json.loads(row["rules_json"])
-                if isinstance(parsed_rules, dict):
-                    config_dict["rules"] = parsed_rules.get("rules", [])
-                    config_dict["fuzzy_rules"] = parsed_rules.get("fuzzy_rules", [])
-                    config_dict["exclusions"] = parsed_rules.get("exclusions", [])
-                    config_dict["overrides"] = parsed_rules.get("overrides", [])
-                    config_dict["use_default_exclusions"] = parsed_rules.get("use_default_exclusions", False)
-                else:
-                    config_dict["rules"] = parsed_rules
-
-            if row.get("mappings_json"):
-                config_dict["survivorship"] = json.loads(row["mappings_json"])
-
-            return IDRConfig(**config_dict)
+            return IDRConfig(**parse_config_snapshot_row(row))
 
         return IDRConfig(sources=[])
 
     except Exception as e:
         print(f"Error fetching config: {e}")
-        # Return empty config rather than failing, so UI can just start fresh if needed
         return IDRConfig(sources=[])
+
+
+@router.get("/config/history")
+def get_config_history(
+    limit: int = 15, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Return recent saved configuration snapshots from idr_out.config_snapshot for rollback."""
+    adapter, _ = _require_user_adapter(current_user)
+    return {"snapshots": get_config_snapshots(adapter, limit=limit)}
 
 
 @router.get("/discover/tables")
@@ -342,118 +289,15 @@ def _execute_save_config(
     adapter,
     raw_config: Dict[str, Any],
     progress_cb: Optional[Any] = None,
+    record_snapshot: bool = True,
 ) -> Dict[str, Any]:
-    """Validate, clear stale metadata, and persist config using batched SQL statements."""
-    import hashlib
-    import json
-    from datetime import datetime, timezone
-
-    from idr_core.config import config_to_sql, validate_config
-
-    def _report(step: str, label: str, percent: int, detail: str = "") -> None:
-        if progress_cb:
-            progress_cb(step, label, percent, detail)
-
-    _report("validating", "Validating configuration", 10, "Checking sources, rules, and mappings...")
-    cfg = dict(raw_config or {})
-    for key in ("sources", "rules", "fuzzy_rules", "survivorship", "exclusions", "overrides"):
-        if cfg.get(key) is None:
-            cfg[key] = []
-    for src in cfg.get("sources", []):
-        if isinstance(src, dict):
-            if src.get("identifiers") is None:
-                src["identifiers"] = []
-            if src.get("attributes") is None:
-                src["attributes"] = []
-
-    validate_config(cfg)
-
-    _report("schema", "Ensuring metadata schema", 20, "Checking idr_meta & idr_out tables...")
-    schema_manager = SchemaManager(adapter)
-    schema_manager.initialize(reset=False)
-
-    _report("clearing", "Clearing stale metadata", 30, "Removing obsolete mappings & rules...")
-    for meta_table in (
-        "idr_meta.identifier_mapping",
-        "idr_meta.entity_attribute_mapping",
-        "idr_meta.source_table",
-        "idr_meta.rule",
-        "idr_meta.fuzzy_rule",
-        "idr_meta.survivorship_rule",
-    ):
-        try:
-            if adapter.table_exists(meta_table):
-                adapter.execute(f"DELETE FROM {meta_table} WHERE 1=1")
-        except Exception:
-            pass
-
-    try:
-        if adapter.table_exists("idr_meta.identifier_exclusion"):
-            adapter.execute(
-                "DELETE FROM idr_meta.identifier_exclusion "
-                "WHERE COALESCE(reason, '') IN ('UI exclusion', 'Config exclusion')"
-            )
-        if adapter.table_exists("idr_meta.identity_override"):
-            adapter.execute(
-                "DELETE FROM idr_meta.identity_override "
-                "WHERE COALESCE(created_by, 'config') IN ('config', 'ui')"
-            )
-    except Exception:
-        pass
-
-    statements = config_to_sql(cfg, dialect=adapter.dialect, batched=True)
-    total_batches = len(statements)
-
-    sources_json = json.dumps(cfg.get("sources", []))
-    rules_json = json.dumps(
-        {
-            "rules": cfg.get("rules", []),
-            "fuzzy_rules": cfg.get("fuzzy_rules", []),
-            "exclusions": cfg.get("exclusions", []),
-            "overrides": cfg.get("overrides", []),
-            "use_default_exclusions": bool(cfg.get("use_default_exclusions", False)),
-        }
+    """Validate, clear stale metadata, and persist config using shared core helper."""
+    return apply_config_to_warehouse(
+        adapter,
+        raw_config,
+        progress_cb=progress_cb,
+        record_snapshot=record_snapshot,
     )
-    mappings_json = json.dumps(cfg.get("survivorship", []))
-    config_str = sources_json + rules_json + mappings_json
-    config_hash = hashlib.md5(config_str.encode("utf-8")).hexdigest()
-    current_ts = datetime.now(timezone.utc).isoformat()
-
-    def escape_json(s: str) -> str:
-        if adapter.dialect in ("bigquery", "databricks"):
-            return s.replace("'", "\\'")
-        return s.replace("'", "''")
-
-    sj = escape_json(sources_json)
-    rj = escape_json(rules_json)
-    mj = escape_json(mappings_json)
-
-    snapshot_sql = f"""
-        INSERT INTO idr_out.config_snapshot (config_hash, sources_json, rules_json, mappings_json, created_at)
-        VALUES ('{config_hash}', '{sj}', '{rj}', '{mj}', '{current_ts}')
-    """
-
-    count = 0
-    for idx, stmt in enumerate(statements, start=1):
-        pct = 35 + int((idx / max(total_batches, 1)) * 55)
-        _report(
-            "writing",
-            "Writing metadata batches",
-            pct,
-            f"Executing batch {idx} of {total_batches}...",
-        )
-        adapter.execute(stmt)
-        count += 1
-
-    _report("snapshot", "Saving config snapshot", 95, "Recording versioned config snapshot...")
-    try:
-        adapter.execute(snapshot_sql)
-    except Exception as snapshot_err:
-        print(f"Warning: Failed to save config snapshot: {snapshot_err}")
-
-    msg = f"Configuration saved ({count} batched statements executed)"
-    _report("done", "Configuration saved", 100, msg)
-    return {"status": "ok", "message": msg, "batches_executed": count}
 
 
 @router.post("/config/save")
@@ -558,6 +402,7 @@ class RunRequest(BaseModel):
     max_iterations: int = 30
     dry_run: bool = False
     max_group_size: Optional[int] = None
+    config: Optional[Dict[str, Any]] = None
 
 
 _ACTIVE_RUN_PROGRESS: Dict[str, Dict[str, Any]] = {}
@@ -703,11 +548,16 @@ async def run_pipeline(
     import time
 
     adapter, user_key = _require_user_adapter(current_user)
+    meta_snapshots: Dict[str, bool] = {}
 
     try:
         from dataclasses import asdict
 
         from idr_core.runner import IDRRunner, RunConfig
+
+        if request.dry_run and request.config is not None:
+            meta_snapshots = snapshot_meta_tables(adapter)
+            _execute_save_config(adapter, request.config, record_snapshot=False)
 
         config = RunConfig(
             run_mode=request.mode,
@@ -802,26 +652,13 @@ async def run_pipeline(
         # If dry run, fetch summary metrics to return to UI
         if request.dry_run and result.status == "DRY_RUN_COMPLETE":
             try:
-                if adapter.table_exists("idr_out.dry_run_summary"):
-                    summary_rows = adapter.query(
-                        "SELECT new_entities, moved_entities, unchanged_entities, total_entities "
-                        f"FROM idr_out.dry_run_summary WHERE run_id = '{result.run_id}'"
-                    )
-                    if summary_rows:
-                        srow = summary_rows[0]
-                        new_cnt = int(srow.get("new_entities") or 0)
-                        moved_cnt = int(srow.get("moved_entities") or 0)
-                        unchanged_cnt = int(srow.get("unchanged_entities") or 0)
-                        total_cnt = int(srow.get("total_entities") or 0)
-                        res_dict["dry_run_summary"] = {
-                            "proposed_changes": new_cnt + moved_cnt,
-                            "new_entities": new_cnt,
-                            "moved_entities": moved_cnt,
-                            "unchanged_entities": unchanged_cnt,
-                            "total_entities": total_cnt,
-                        }
-                    else:
-                        res_dict["dry_run_summary"] = {"proposed_changes": 0}
+                res_dict["dry_run_summary"] = compute_dry_run_summary(
+                    adapter,
+                    result.run_id,
+                    config.run_mode,
+                    edges_created=getattr(result, "edges_created", 0),
+                    clusters_impacted=getattr(result, "clusters_impacted", 0),
+                )
             except Exception as e:
                 print(f"Failed to fetch dry run summary: {e}")
                 res_dict["dry_run_summary"] = {"error": str(e)}
@@ -833,6 +670,9 @@ async def run_pipeline(
 
         traceback.print_exc()
         raise HTTPException(500, f"Pipeline run failed: {str(e)}")
+    finally:
+        if meta_snapshots:
+            restore_meta_tables(adapter, meta_snapshots)
 
 
 @router.get("/fuzzy-templates")
