@@ -1756,6 +1756,92 @@ def compute_dry_run_summary(
         )
         clusters_delta = proposed_clusters - current_clusters
 
+    edges_delta_by_type: Dict[str, int] = {}
+    shadow_preserved_entities = 0
+    corroborating_identifier_types: List[str] = []
+
+    if adapter.table_exists("idr_out.identity_edges_current") and adapter.table_exists(
+        "idr_work.edges_new"
+    ):
+        edge_scope_where = "1=1"
+        if normalized_mode != "FULL" and adapter.table_exists("idr_work.lp_labels"):
+            edge_scope_where = (
+                "EXISTS (SELECT 1 FROM idr_work.lp_labels l "
+                "WHERE l.entity_key = e.left_entity_key OR l.entity_key = e.right_entity_key)"
+            )
+
+        curr_by_type_rows = adapter.query(
+            f"SELECT UPPER(e.identifier_type) AS identifier_type, COUNT(*) AS cnt "
+            f"FROM idr_out.identity_edges_current e "
+            f"WHERE {edge_scope_where} "
+            f"GROUP BY UPPER(e.identifier_type)"
+        )
+        prop_by_type_rows = adapter.query(
+            "SELECT UPPER(identifier_type) AS identifier_type, COUNT(*) AS cnt "
+            "FROM idr_work.edges_new "
+            "GROUP BY UPPER(identifier_type)"
+        )
+        curr_map = {
+            str(r["identifier_type"]): int(r["cnt"] or 0)
+            for r in curr_by_type_rows
+            if r.get("identifier_type")
+        }
+        prop_map = {
+            str(r["identifier_type"]): int(r["cnt"] or 0)
+            for r in prop_by_type_rows
+            if r.get("identifier_type")
+        }
+        for id_type in sorted(set(curr_map) | set(prop_map)):
+            type_delta = prop_map.get(id_type, 0) - curr_map.get(id_type, 0)
+            if type_delta != 0:
+                edges_delta_by_type[id_type] = type_delta
+
+        # Corroborating-edge shadow attribution: unchanged entities that lost at least
+        # one historical edge yet remain connected through surviving identifier types.
+        shadow_rows = adapter.query(f"""
+            WITH removed_edges AS (
+                SELECT
+                    e.left_entity_key,
+                    e.right_entity_key,
+                    UPPER(e.identifier_type) AS identifier_type
+                FROM idr_out.identity_edges_current e
+                WHERE {edge_scope_where}
+                  AND NOT EXISTS (
+                      SELECT 1 FROM idr_work.edges_new n
+                      WHERE UPPER(n.identifier_type) = UPPER(e.identifier_type)
+                        AND (
+                            (n.left_entity_key = e.left_entity_key AND n.right_entity_key = e.right_entity_key)
+                            OR (n.left_entity_key = e.right_entity_key AND n.right_entity_key = e.left_entity_key)
+                        )
+                  )
+            ),
+            removed_endpoints AS (
+                SELECT left_entity_key AS entity_key FROM removed_edges
+                UNION
+                SELECT right_entity_key AS entity_key FROM removed_edges
+            ),
+            unchanged_removed AS (
+                SELECT r.entity_key
+                FROM removed_endpoints r
+                JOIN idr_out.dry_run_results d
+                  ON d.entity_key = r.entity_key
+                WHERE d.run_id = '{run_id}'
+                  AND d.change_type = 'UNCHANGED'
+            )
+            SELECT DISTINCT
+                u.entity_key,
+                UPPER(n.identifier_type) AS corroborating_type
+            FROM unchanged_removed u
+            JOIN idr_work.edges_new n
+              ON u.entity_key = n.left_entity_key
+              OR u.entity_key = n.right_entity_key
+        """)
+        if shadow_rows:
+            shadow_preserved_entities = len({str(r["entity_key"]) for r in shadow_rows})
+            corroborating_identifier_types = sorted(
+                {str(r["corroborating_type"]) for r in shadow_rows if r.get("corroborating_type")}
+            )
+
     return {
         "proposed_changes": new_cnt + moved_cnt + abs(edges_delta),
         "new_entities": new_cnt,
@@ -1768,5 +1854,8 @@ def compute_dry_run_summary(
         "current_clusters": current_clusters,
         "proposed_clusters": proposed_clusters,
         "clusters_delta": clusters_delta,
+        "edges_delta_by_type": edges_delta_by_type,
+        "shadow_preserved_entities": shadow_preserved_entities,
+        "corroborating_identifier_types": corroborating_identifier_types,
     }
 

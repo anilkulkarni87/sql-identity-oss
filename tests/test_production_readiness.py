@@ -861,6 +861,201 @@ def test_cli_ephemeral_dry_run_and_config_history_rollback(tmp_path, capsys):
     check_after_rb.close()
 
 
+def test_corroborating_edge_shadow_attribution_in_dry_run(tmp_path, capsys):
+    import yaml
+
+    from idr_core.cli import main as cli_main
+    from idr_core.config import apply_config_to_warehouse, compute_dry_run_summary
+    from idr_core.runner import IDRRunner, RunConfig
+
+    db_file = str(tmp_path / "shadow_attr.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    adapter.execute(
+        "CREATE TABLE raw.crm (id INTEGER, email VARCHAR, cust_id VARCHAR, updated_at TIMESTAMP)"
+    )
+    adapter.execute("""
+        INSERT INTO raw.crm VALUES
+            (1, 'donald@example.com', 'CUST_99', TIMESTAMP '2026-01-01 00:00:00'),
+            (2, 'donald@example.com', 'CUST_99', TIMESTAMP '2026-01-01 00:00:00'),
+            (3, 'alice@example.com',  'CUST_01', TIMESTAMP '2026-01-01 00:00:00')
+    """)
+    adapter.close()
+
+    base_cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "raw.crm",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [
+                    {"type": "email", "expr": "email"},
+                    {"type": "customer_id", "expr": "cust_id"},
+                ],
+                "attributes": [],
+            }
+        ],
+        "rules": [
+            {"id": "r_email", "type": "EXACT", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"},
+            {"id": "r_cust", "type": "EXACT", "match_keys": ["customer_id"], "canonicalize": "EXACT"},
+        ],
+        "exclusions": [],
+        "overrides": [],
+        "survivorship": [],
+        "use_default_exclusions": False,
+    }
+    v1_path = tmp_path / "v1.yaml"
+    v2_path = tmp_path / "v2.yaml"
+    v1_path.write_text(yaml.safe_dump(base_cfg, sort_keys=False))
+    v2_cfg = {
+        **base_cfg,
+        "exclusions": [
+            {"type": "email", "value": "donald", "match": "LIKE", "reason": "Test shadow attribution"}
+        ],
+    }
+    v2_path.write_text(yaml.safe_dump(v2_cfg, sort_keys=False))
+
+    assert cli_main(["config", "apply", "--file", str(v1_path), "--platform", "duckdb", "--db", db_file]) == 0
+    assert cli_main(["run", "--platform", "duckdb", "--db", db_file, "--mode", "FULL"]) == 0
+    capsys.readouterr()
+
+    # Dry run removes the EMAIL edge between crm:1 and crm:2 while CUSTOMER_ID preserves their cluster
+    assert cli_main([
+        "run", "--platform", "duckdb", "--db", db_file,
+        "--mode", "FULL", "--config", str(v2_path), "--dry-run",
+    ]) == 0
+    out = capsys.readouterr().out
+    assert "Moved Entities:  0" in out
+    assert "Edges Delta:     -1" in out
+    assert "Edges by Type:   EMAIL: -1" in out
+    assert "Shadow-Kept:     2 entities (corroborated by: CUSTOMER_ID)" in out
+
+    verify_adapter = DuckDBAdapter(db_file)
+    res = IDRRunner(verify_adapter).run(RunConfig(run_mode="FULL", dry_run=True))
+    # Re-apply exclusion ephemerally wasn't persisted; test compute_dry_run_summary directly with v2 applied
+    apply_config_to_warehouse(verify_adapter, v2_cfg, record_snapshot=False)
+    res_v2 = IDRRunner(verify_adapter).run(RunConfig(run_mode="FULL", dry_run=True))
+    summary = compute_dry_run_summary(
+        verify_adapter,
+        res_v2.run_id,
+        "FULL",
+        edges_created=res_v2.edges_created,
+        clusters_impacted=res_v2.clusters_impacted,
+    )
+    assert res.status == "DRY_RUN_COMPLETE"
+    assert summary["edges_delta"] == -1
+    assert summary["edges_delta_by_type"] == {"EMAIL": -1}
+    assert summary["shadow_preserved_entities"] == 2
+    assert summary["corroborating_identifier_types"] == ["CUSTOMER_ID"]
+    verify_adapter.close()
+
+
+def test_stage8_blast_radius_circuit_breaker_rolls_back_outputs(tmp_path, capsys):
+    from idr_core.cli import main as cli_main
+    from idr_core.config import apply_config_to_warehouse
+    from idr_core.runner import IDRRunner, RunConfig
+
+    db_file = str(tmp_path / "circuit_breaker.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    adapter.execute("CREATE TABLE raw.crm (id INTEGER, email VARCHAR, updated_at TIMESTAMP)")
+    adapter.execute("""
+        INSERT INTO raw.crm VALUES
+            (1, 'a@example.com', TIMESTAMP '2026-01-01 00:00:00'),
+            (2, 'a@example.com', TIMESTAMP '2026-01-01 00:00:00'),
+            (3, 'b@example.com', TIMESTAMP '2026-01-01 00:00:00'),
+            (4, 'b@example.com', TIMESTAMP '2026-01-01 00:00:00')
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "raw.crm",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "email", "expr": "email"}],
+                "attributes": [],
+            }
+        ],
+        "rules": [{"id": "r1", "type": "EXACT", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"}],
+        "exclusions": [],
+        "overrides": [],
+        "survivorship": [],
+        "use_default_exclusions": False,
+    }
+    SchemaManager(adapter).initialize(reset=True)
+    apply_config_to_warehouse(adapter, cfg)
+    r1 = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    assert r1.status == "SUCCESS"
+
+    baseline_membership = adapter.query(
+        "SELECT entity_key, resolved_id, run_id FROM idr_out.identity_resolved_membership_current ORDER BY entity_key"
+    )
+    baseline_clusters = adapter.query(
+        "SELECT resolved_id, cluster_size, run_id FROM idr_out.identity_clusters_current ORDER BY resolved_id"
+    )
+    baseline_watermarks = adapter.query(
+        "SELECT table_id, last_watermark_value, last_run_id FROM idr_meta.run_state ORDER BY table_id"
+    )
+
+    # Introduce a FORCE_LINK override uniting the two clusters (2 of 4 entities move = 50%, clusters 2 -> 1 = -50%)
+    cfg_merged = {
+        **cfg,
+        "overrides": [
+            {
+                "override_id": "ov_merge_all",
+                "override_type": "FORCE_LINK",
+                "entity_key_a": "crm:1",
+                "entity_key_b": "crm:3",
+                "reason": "Blast radius test",
+            }
+        ],
+    }
+    apply_config_to_warehouse(adapter, cfg_merged)
+
+    r_blocked = IDRRunner(adapter).run(
+        RunConfig(run_mode="FULL", max_moved_entities_pct=10.0)
+    )
+    assert r_blocked.status == "FAILED"
+    assert "Blast-radius circuit breaker triggered" in (r_blocked.error or "")
+
+    assert (
+        adapter.query(
+            "SELECT entity_key, resolved_id, run_id FROM idr_out.identity_resolved_membership_current ORDER BY entity_key"
+        )
+        == baseline_membership
+    )
+    assert (
+        adapter.query(
+            "SELECT resolved_id, cluster_size, run_id FROM idr_out.identity_clusters_current ORDER BY resolved_id"
+        )
+        == baseline_clusters
+    )
+    assert (
+        adapter.query(
+            "SELECT table_id, last_watermark_value, last_run_id FROM idr_meta.run_state ORDER BY table_id"
+        )
+        == baseline_watermarks
+    )
+    adapter.close()
+
+    # Also test --max-cluster-delta-pct via CLI
+    assert cli_main([
+        "run", "--platform", "duckdb", "--db", db_file,
+        "--mode", "FULL", "--max-cluster-delta-pct", "10.0",
+    ]) == 1
+    cli_out = capsys.readouterr().out
+    assert "Blast-radius circuit breaker triggered" in cli_out
+
+    # Raising the threshold allows the run to commit cleanly
+    assert cli_main([
+        "run", "--platform", "duckdb", "--db", db_file,
+        "--mode", "FULL", "--max-cluster-delta-pct", "60.0", "--max-moved-pct", "60.0",
+    ]) == 0
+    capsys.readouterr()
+
+
 
 
 

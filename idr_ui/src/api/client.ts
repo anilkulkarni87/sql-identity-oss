@@ -361,6 +361,8 @@ export const api = {
         max_iterations: number
         dry_run: boolean
         max_group_size?: number
+        max_moved_entities_pct?: number
+        max_cluster_delta_pct?: number
         config?: unknown
     }) => fetchJson<Record<string, unknown>>('/setup/run', {
         method: 'POST',

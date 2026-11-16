@@ -331,12 +331,87 @@ class OutputStage(BaseStage):
                     extra={"run_id": self.run_id},
                 )
 
+    def _enforce_blast_radius_gate(self, snapshots: Dict[str, bool]) -> None:
+        """Abort Stage 8 commit if topological deltas exceed configured safety thresholds."""
+        if not self.config:
+            return
+        max_moved_pct = getattr(self.config, "max_moved_entities_pct", None)
+        max_cluster_delta_pct = getattr(self.config, "max_cluster_delta_pct", None)
+        if max_moved_pct is None and max_cluster_delta_pct is None:
+            return
+
+        if max_moved_pct is not None and snapshots.get("identity_resolved_membership_current"):
+            prev_total = int(
+                self.adapter.query_one(
+                    "SELECT COUNT(*) FROM idr_work._backup_identity_resolved_membership_current"
+                )
+                or 0
+            )
+            if prev_total > 0:
+                moved_cnt = int(
+                    self.adapter.query_one("""
+                        SELECT COUNT(*)
+                        FROM idr_work.lp_labels lp
+                        JOIN idr_work._backup_identity_resolved_membership_current m
+                          ON lp.entity_key = m.entity_key
+                        WHERE lp.label != m.resolved_id
+                    """)
+                    or 0
+                )
+                moved_pct = (moved_cnt / prev_total) * 100.0
+                if moved_pct > float(max_moved_pct):
+                    raise RuntimeError(
+                        f"Blast-radius circuit breaker triggered: moved_entities={moved_cnt:,}/{prev_total:,} "
+                        f"({moved_pct:.2f}%) exceeds max_moved_entities_pct={float(max_moved_pct):.2f}%"
+                    )
+
+        if max_cluster_delta_pct is not None and snapshots.get("identity_resolved_membership_current"):
+            run_mode = str(getattr(self.config, "run_mode", "FULL")).upper()
+            if run_mode == "INCR":
+                prev_clusters = int(
+                    self.adapter.query_one("""
+                        SELECT COUNT(DISTINCT m.resolved_id)
+                        FROM idr_work._backup_identity_resolved_membership_current m
+                        JOIN idr_work.lp_labels lp ON lp.entity_key = m.entity_key
+                    """)
+                    or 0
+                )
+            elif snapshots.get("identity_clusters_current"):
+                prev_clusters = int(
+                    self.adapter.query_one(
+                        "SELECT COUNT(*) FROM idr_work._backup_identity_clusters_current"
+                    )
+                    or 0
+                )
+            else:
+                prev_clusters = int(
+                    self.adapter.query_one(
+                        "SELECT COUNT(DISTINCT resolved_id) FROM idr_work._backup_identity_resolved_membership_current"
+                    )
+                    or 0
+                )
+
+            if prev_clusters > 0:
+                proposed_clusters = int(
+                    self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
+                    or 0
+                )
+                delta = proposed_clusters - prev_clusters
+                cluster_delta_pct = (abs(delta) / prev_clusters) * 100.0
+                if cluster_delta_pct > float(max_cluster_delta_pct):
+                    raise RuntimeError(
+                        f"Blast-radius circuit breaker triggered: cluster_delta={delta:+d} "
+                        f"({cluster_delta_pct:.2f}%) exceeds max_cluster_delta_pct={float(max_cluster_delta_pct):.2f}%"
+                    )
+
     def generate_output(self) -> int:
         """Update output tables with resolved identities with rollback on mid-stage failure."""
         current_ts = self._dialect["current_timestamp"]
         snapshots = self._snapshot_current_outputs()
 
         try:
+            self._enforce_blast_radius_gate(snapshots)
+
             # 1. Identify impacted clusters for confidence scoring
             self.adapter.execute("""
                 CREATE OR REPLACE TABLE idr_work.impacted_resolved_ids AS
