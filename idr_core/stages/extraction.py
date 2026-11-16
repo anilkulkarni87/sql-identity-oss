@@ -526,15 +526,18 @@ class ExtractionStage(BaseStage):
                       )
                     {new_entity_branch}
                 """)
+                gov_filter = (
+                    "AND entity_key NOT IN (SELECT entity_key FROM idr_work.gov_affected_entities)"
+                    if self.adapter.table_exists("idr_work.gov_affected_entities")
+                    else ""
+                )
                 self.adapter.execute(f"""
                     DELETE FROM idr_work.entities_delta
                     WHERE table_id IN ({no_wm_in})
                       AND entity_key NOT IN (
                           SELECT entity_key FROM idr_work.changed_no_wm_entities
                       )
-                      AND entity_key NOT IN (
-                          SELECT entity_key FROM idr_work.gov_affected_entities
-                      )
+                      {gov_filter}
                 """)
                 self.adapter.execute("""
                     DELETE FROM idr_work.identifiers_delta
