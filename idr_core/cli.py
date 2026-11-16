@@ -90,6 +90,18 @@ Examples:
         default=None,
         help="Global maximum identifier group size safeguard (default: 10000)",
     )
+    run_parser.add_argument(
+        "--max-moved-pct",
+        type=float,
+        default=None,
+        help="Blast-radius circuit breaker: abort live Stage 8 commit if moved entity percentage exceeds threshold (0-100]",
+    )
+    run_parser.add_argument(
+        "--max-cluster-delta-pct",
+        type=float,
+        default=None,
+        help="Blast-radius circuit breaker: abort live Stage 8 commit if absolute cluster count delta percentage exceeds threshold (0-100]",
+    )
 
     # === idr config ===
     config_parser = subparsers.add_parser("config", help="Configuration management")
@@ -889,6 +901,8 @@ def handle_run(args) -> int:
             dry_run=args.dry_run,
             strict=getattr(args, "strict", False),
             max_group_size=getattr(args, "max_group_size", None),
+            max_moved_entities_pct=getattr(args, "max_moved_pct", None),
+            max_cluster_delta_pct=getattr(args, "max_cluster_delta_pct", None),
         )
         result = runner.run(config)
 
@@ -920,6 +934,15 @@ def handle_run(args) -> int:
             clusters_d = dry_summary.get("clusters_delta", 0)
             print(f"  Edges Delta:     {edges_d:+d}")
             print(f"  Clusters Delta:  {clusters_d:+d}")
+            by_type = dry_summary.get("edges_delta_by_type") or {}
+            if by_type:
+                type_summary = ", ".join(f"{k}: {v:+d}" for k, v in by_type.items())
+                print(f"  Edges by Type:   {type_summary}")
+            shadow_kept = dry_summary.get("shadow_preserved_entities", 0) or 0
+            if shadow_kept > 0:
+                corr_types = ", ".join(dry_summary.get("corroborating_identifier_types") or [])
+                corr_suffix = f" (corroborated by: {corr_types})" if corr_types else ""
+                print(f"  Shadow-Kept:     {shadow_kept:,} entities{corr_suffix}")
             if ephemeral_dry_run:
                 print("  Config Mode:     Ephemeral (--dry-run restored prior idr_meta state)")
         if result.error:

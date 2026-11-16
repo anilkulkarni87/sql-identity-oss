@@ -64,6 +64,8 @@ class RunConfig:
     dry_run: bool = False
     strict: bool = False
     max_group_size: Optional[int] = None
+    max_moved_entities_pct: Optional[float] = None
+    max_cluster_delta_pct: Optional[float] = None
 
     def __post_init__(self):
         mode = str(self.run_mode or "").upper()
@@ -77,6 +79,25 @@ class RunConfig:
             raise ValueError(f"max_iters must be >= 1, got {self.max_iters}")
         if self.max_group_size is not None and self.max_group_size < 2:
             raise ValueError(f"max_group_size must be >= 2, got {self.max_group_size}")
+
+        if self.max_moved_entities_pct is None:
+            env_moved = os.environ.get("IDR_MAX_MOVED_ENTITIES_PCT", "").strip()
+            if env_moved:
+                self.max_moved_entities_pct = float(env_moved)
+        if self.max_cluster_delta_pct is None:
+            env_clusters = os.environ.get("IDR_MAX_CLUSTER_DELTA_PCT", "").strip()
+            if env_clusters:
+                self.max_cluster_delta_pct = float(env_clusters)
+
+        for field_name, val in (
+            ("max_moved_entities_pct", self.max_moved_entities_pct),
+            ("max_cluster_delta_pct", self.max_cluster_delta_pct),
+        ):
+            if val is not None:
+                fval = float(val)
+                if fval <= 0.0 or fval > 100.0:
+                    raise ValueError(f"{field_name} must be in (0, 100], got {val}")
+                setattr(self, field_name, fval)
 
 
 @dataclass

@@ -402,6 +402,8 @@ class RunRequest(BaseModel):
     max_iterations: int = 30
     dry_run: bool = False
     max_group_size: Optional[int] = None
+    max_moved_entities_pct: Optional[float] = None
+    max_cluster_delta_pct: Optional[float] = None
     config: Optional[Dict[str, Any]] = None
 
 
@@ -565,6 +567,8 @@ async def run_pipeline(
             max_iters=request.max_iterations,
             dry_run=request.dry_run,
             max_group_size=request.max_group_size,
+            max_moved_entities_pct=request.max_moved_entities_pct,
+            max_cluster_delta_pct=request.max_cluster_delta_pct,
         )
 
         progress_state = _build_initial_progress(config.run_mode, config.dry_run, config.strict)

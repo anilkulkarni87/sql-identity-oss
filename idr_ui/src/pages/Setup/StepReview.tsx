@@ -71,6 +71,8 @@ export default function StepReview({
     const [strictMode, setStrictMode] = useState(false);
     const [maxIterations, setMaxIterations] = useState(30);
     const [maxGroupSize, setMaxGroupSize] = useState(10000);
+    const [maxMovedEntitiesPct, setMaxMovedEntitiesPct] = useState('');
+    const [maxClusterDeltaPct, setMaxClusterDeltaPct] = useState('');
     const [dryRun, setDryRun] = useState(false);
     const [runResult, setRunResult] = useState<any>(null);
 
@@ -279,11 +281,15 @@ export default function StepReview({
                 onSaved?.();
             }
 
+            const parsedMovedPct = maxMovedEntitiesPct.trim() ? parseFloat(maxMovedEntitiesPct) : undefined;
+            const parsedClusterPct = maxClusterDeltaPct.trim() ? parseFloat(maxClusterDeltaPct) : undefined;
             const result = await api.runSetup({
                 mode: runMode === 'INCREMENTAL' ? 'INCR' : 'FULL',
                 strict: strictMode,
                 max_iterations: maxIterations,
                 max_group_size: maxGroupSize,
+                ...(parsedMovedPct && parsedMovedPct > 0 ? { max_moved_entities_pct: parsedMovedPct } : {}),
+                ...(parsedClusterPct && parsedClusterPct > 0 ? { max_cluster_delta_pct: parsedClusterPct } : {}),
                 dry_run: effectiveDryRun,
                 ...(effectiveDryRun ? { config: cleanConfig } : {}),
             });
@@ -295,6 +301,11 @@ export default function StepReview({
                 }
             } catch {
                 // Ignore transient errors on final snapshot
+            }
+            if (result.status === 'FAILED') {
+                setError(String(result.error || 'Pipeline execution aborted or failed.'));
+                setPhase('idle');
+                return;
             }
             setRunResult(result);
             setPhase('success');
@@ -611,11 +622,33 @@ export default function StepReview({
                                             </span>
                                         </div>
                                     </div>
-                                    {(runResult.dry_run_summary.edges_delta ?? 0) !== 0 &&
-                                     (runResult.dry_run_summary.moved_entities ?? 0) === 0 &&
-                                     (runResult.dry_run_summary.new_entities ?? 0) === 0 && (
-                                        <div className="p-2.5 rounded-lg bg-blue-950/40 border border-blue-800/50 text-xs text-blue-200">
-                                            Graph edges changed by <strong>{(runResult.dry_run_summary.edges_delta ?? 0).toLocaleString()}</strong>, while cluster memberships remained intact because those entities remain linked via other corroborating identifiers (for example, <code>customer_id</code> or <code>phone</code>).
+                                    {(((runResult.dry_run_summary.shadow_preserved_entities ?? 0) > 0) ||
+                                      ((runResult.dry_run_summary.edges_delta ?? 0) !== 0 &&
+                                       (runResult.dry_run_summary.moved_entities ?? 0) === 0 &&
+                                       (runResult.dry_run_summary.new_entities ?? 0) === 0)) && (
+                                        <div className="p-2.5 rounded-lg bg-blue-950/40 border border-blue-800/50 text-xs text-blue-200 space-y-1">
+                                            <div>
+                                                {(runResult.dry_run_summary.shadow_preserved_entities ?? 0) > 0 ? (
+                                                    <>
+                                                        <strong>{(runResult.dry_run_summary.shadow_preserved_entities ?? 0).toLocaleString()}</strong> unchanged{' '}
+                                                        {(runResult.dry_run_summary.shadow_preserved_entities ?? 0) === 1 ? 'entity' : 'entities'} lost edges under this configuration but stayed in the same cluster via corroborating identifier(s):{' '}
+                                                        <code>{(runResult.dry_run_summary.corroborating_identifier_types || []).join(', ') || 'SECONDARY_IDENTIFIER'}</code>.
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        Graph edges changed by <strong>{(runResult.dry_run_summary.edges_delta ?? 0).toLocaleString()}</strong>, while cluster memberships remained intact because those entities remain linked via corroborating identifiers.
+                                                    </>
+                                                )}
+                                            </div>
+                                            {runResult.dry_run_summary.edges_delta_by_type &&
+                                             Object.keys(runResult.dry_run_summary.edges_delta_by_type).length > 0 && (
+                                                <div className="text-[11px] font-mono text-blue-300/90">
+                                                    Edge deltas by type:{' '}
+                                                    {Object.entries(runResult.dry_run_summary.edges_delta_by_type as Record<string, number>)
+                                                        .map(([k, v]) => `${k}: ${v >= 0 ? '+' : ''}${v.toLocaleString()}`)
+                                                        .join(' | ')}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                     <div className="flex flex-wrap gap-3 pt-1">
@@ -768,6 +801,42 @@ export default function StepReview({
                             onChange={(e) => setMaxGroupSize(parseInt(e.target.value) || 10000)}
                             className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             placeholder="10000"
+                        />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                            <span>Max Moved Entities % (Optional)</span>
+                            <span className="text-[10px] text-rose-400 font-mono">Circuit Breaker</span>
+                        </label>
+                        <input
+                            type="number"
+                            min="0.1"
+                            max="100"
+                            step="0.5"
+                            value={maxMovedEntitiesPct}
+                            disabled={loading}
+                            onChange={(e) => setMaxMovedEntitiesPct(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Unbounded (e.g. 25)"
+                        />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                            <span>Max Cluster Delta % (Optional)</span>
+                            <span className="text-[10px] text-rose-400 font-mono">Circuit Breaker</span>
+                        </label>
+                        <input
+                            type="number"
+                            min="0.1"
+                            max="100"
+                            step="0.5"
+                            value={maxClusterDeltaPct}
+                            disabled={loading}
+                            onChange={(e) => setMaxClusterDeltaPct(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Unbounded (e.g. 25)"
                         />
                     </div>
 
