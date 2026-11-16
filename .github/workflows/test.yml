@@ -2,7 +2,7 @@ name: Test
 
 on:
   push:
-    branches: [main, feature/idr-enhancements]
+    branches: [main, feature/**]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -39,6 +39,7 @@ jobs:
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout

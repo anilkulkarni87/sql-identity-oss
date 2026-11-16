@@ -4,7 +4,7 @@ title: Configuration, Canonicalizers & Governance
 
 # Configuration, Canonicalizers & Enterprise Governance
 
-`sql-identity-resolution` is configured declaratively via YAML (`idr apply-config`) or interactively through the Web UI Setup Wizard. All configuration state lives in `idr_meta.*` tables inside your warehouse.
+`sql-identity-resolution` is configured declaratively via YAML (`idr config apply` / `idr apply-config`) or interactively through the Web UI **Identity Studio**. All active configuration state lives in `idr_meta.*` tables inside your warehouse, with versioned snapshots archived in `idr_out.config_snapshot`.
 
 ---
 
@@ -15,7 +15,7 @@ title: Configuration, Canonicalizers & Governance
 
     - **No single primary key column?** Pass a deterministic SQL expression, e.g. `entity_key: "CONCAT(tenant_id, '_', row_id)"` or `SHA2(CONCAT_WS('|', col_a, col_b), 256)`.
     - **Event / transaction logs** (e.g. `orders`, `web_events` where `customer_id` repeats): Use the row's own unique key (`order_id`, `event_id`) as `entity_key` and map `customer_id` under `identifiers:`.
-    - **Tables with duplicate keys** (e.g. raw CDC staging tables): Point `table:` at a deduplicated view (`QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`).
+    - **Tables with duplicate keys** (e.g. raw CDC staging tables): Enable `deduplicate: true` with optional `dedup_order_by` on the source entry, or point `table:` at a deduplicated view (`QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`).
 
 ```yaml
 # Enable built-in poison-pill identifier exclusions (noreply@, test@, 0000000000, etc.)
@@ -163,6 +163,7 @@ Bad placeholder identifiers (`null`, `unknown`, `0000000000`, `noreply@...`) can
    - Seeds 30+ battle-tested exclusions across `ANY` (`null`, `none`, `n/a`, `na`, `unknown`, `tbd`, `test`, `dummy`, `anonymous`, `redacted`, `0`, `-1`), `EMAIL` (`%@example.%`, `%@test.%`, `%@mailinator.com`, `noreply@%`, `no-reply@%`, `donotreply@%`, `info@%`, `support@%`, `admin@%`, `sales@%`, `billing@%`), and `PHONE` (`0000000000`–`9999999999`, `1234567890`, `11234567890`, `0000000`).
 2. **Custom YAML Exclusions**:
    - Add domain-specific patterns under `exclusions:` with `type` (`EMAIL`, `PHONE`, or `ANY` / `*` for all types) and `match` (`EXACT` or `LIKE`).
+   - For `match: LIKE`, SQL wildcards (`%`, `_`) are respected when provided, while bare strings without wildcards (e.g. `value: "donald"`) automatically match substrings (`%donald%`) case-insensitively across DuckDB, Snowflake, BigQuery, and Databricks.
 3. **Direct Warehouse Table Management**:
    - Data stewards or upstream ETL jobs can insert rows directly into `idr_meta.identifier_exclusion` without touching YAML:
      ```sql
@@ -172,7 +173,25 @@ Bad placeholder identifiers (`null`, `unknown`, `0000000000`, `noreply@...`) can
        ('PHONE', '8005551212', 'EXACT', 'Corporate call center main line'),
        ('ANY', 'POS_GUEST_%', 'LIKE', 'Anonymous store register tokens');
      ```
-   - `idr apply-config` preserves manually inserted warehouse rows unless `--reset` is explicitly passed.
+   - `idr config apply` / `idr apply-config` preserves manually inserted warehouse rows unless `--reset` is explicitly passed.
+
+### Configuration Version History, Ephemeral Dry Run & Rollback
+
+Every applied configuration (via CLI or Identity Studio **Save Config**) writes a versioned snapshot to `idr_out.config_snapshot` keyed by its short SHA-256 hash (`config_hash`):
+
+```bash
+# Test a draft YAML ephemerally without overwriting saved idr_meta.* config
+idr run --platform duckdb --db demo.duckdb --mode FULL --config candidate.yaml --dry-run
+
+# List applied configuration snapshots
+idr config history --platform duckdb --db demo.duckdb
+
+# Roll back to the previous saved configuration (or specify --hash <prefix>)
+idr config rollback --platform duckdb --db demo.duckdb
+idr config rollback --platform duckdb --db demo.duckdb --hash a1b2c3d4
+```
+
+During an ephemeral `--config <yaml> --dry-run`, the runner snapshots existing `idr_meta.*` tables into `idr_work._meta_backup_*`, evaluates the candidate configuration against the dry-run delta metrics (`Edges Delta`, `Clusters Delta`, `Moved Entities`, `New Entities`), and automatically restores `idr_meta.*` in a `finally:` cleanup block.
 
 ---
 

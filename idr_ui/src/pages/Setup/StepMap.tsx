@@ -1,30 +1,79 @@
-import { useState, useEffect } from 'react';
-import { Loader2, Key, Tag, ChevronDown, ChevronRight, Fingerprint, Clock, Info, CheckSquare, Square } from "lucide-react";
+import { useState, useEffect, useRef } from 'react';
+import {
+    Loader2, Key, Tag, Fingerprint, Clock, CheckSquare, Square,
+    Plus, Search, Sparkles, Table as TableIcon, Trash2, ChevronDown,
+    ChevronUp, Wand2, AlertCircle, Check
+} from "lucide-react";
 import { IDRConfig, SourceConfig, TableColumn, Identifier, Attribute } from '../../types';
 import { api } from '../../api/client';
-
-function HelpCard({ title, children }: { title: string, children: React.ReactNode }) {
-    return (
-        <div className="bg-blue-900/20 border border-blue-800 rounded p-3 mb-4 text-sm text-blue-200">
-            <div className="flex items-center gap-2 font-semibold mb-1">
-                <Info className="w-4 h-4" />
-                {title}
-            </div>
-            <div className="text-blue-100/80 leading-relaxed text-xs">
-                {children}
-            </div>
-        </div>
-    );
-}
+import { CustomSelect } from '../../components/CustomSelect';
 
 interface StepMapProps {
     tables: string[];
     initialConfig?: IDRConfig;
+    connectionData?: any;
+    onTablesChange?: (tables: string[]) => void;
+    onChange?: (config: IDRConfig) => void;
     onNext: (config: IDRConfig) => void;
-    onBack: () => void;
+    onBack?: () => void;
 }
 
-export default function StepMap({ tables, initialConfig, onNext, onBack }: StepMapProps) {
+const IDENTIFIER_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
+    { pattern: /email|e_mail/i, type: 'email' },
+    { pattern: /phone|mobile|cell|tel/i, type: 'phone' },
+    { pattern: /ssn|social_security|tax_id/i, type: 'ssn' },
+    { pattern: /device_id|device/i, type: 'device_id' },
+    { pattern: /cookie|maid|idfa|gaid|anonymous_id/i, type: 'cookie_id' },
+    { pattern: /loyalty|member_id/i, type: 'loyalty_id' },
+    { pattern: /crm_id|salesforce_id|hubspot_id|external_id/i, type: 'external_id' },
+];
+
+const ATTRIBUTE_PATTERNS = [
+    /first_name|fname|given_name/i,
+    /last_name|lname|surname|family_name/i,
+    /full_name|^name$/i,
+    /city|town|locality/i,
+    /state|province|region/i,
+    /country|nation/i,
+    /zip|postal/i,
+    /address|street/i,
+    /company|org|employer/i,
+    /status|tier|segment|plan/i,
+    /ltv|lifetime_value|spend|revenue|balance/i,
+    /opt_in|consent|marketing|subscribed|do_not/i,
+    /dob|birth|gender/i,
+];
+
+function guessDefaultWatermark(cols: TableColumn[], entityKey?: string): string {
+    const wmKeywords = [
+        'updated_at', 'modified_at', 'last_modified', 'timestamp',
+        'created_at', 'transaction_date', 'order_date', 'event_date',
+        'event_ts', 'last_visit_date', 'enrolled_date', 'assigned_at',
+        'flagged_at', 'review_date', '_at', '_date', '_ts'
+    ];
+    const match = (
+        cols.find(c => c.name !== entityKey && wmKeywords.some(k => c.name.toLowerCase().includes(k))) ||
+        cols.find(c => c.name !== entityKey && ['timestamp', 'date', 'datetime'].some(t => (c.type || '').toLowerCase().includes(t)))
+    );
+    return match?.name || '';
+}
+
+function defaultCanonicalizerFor(type: string): string {
+    const lower = type.toLowerCase();
+    if (lower.includes('email')) return 'EMAIL_STANDARD';
+    if (lower.includes('phone')) return 'PHONE_US_10';
+    return 'LOWERCASE';
+}
+
+export default function StepMap({
+    tables,
+    initialConfig,
+    connectionData,
+    onTablesChange,
+    onChange,
+    onNext,
+    onBack,
+}: StepMapProps) {
     const [columns, setColumns] = useState<Record<string, TableColumn[]>>({});
     const [config, setConfig] = useState<Record<string, SourceConfig>>(() => {
         const init: Record<string, SourceConfig> = {};
@@ -47,431 +96,846 @@ export default function StepMap({ tables, initialConfig, onNext, onBack }: StepM
         }
         return init;
     });
-    const [loading, setLoading] = useState(false);
-    const [openTable, setOpenTable] = useState<string | null>(tables[0] || null);
+
+    const [activeTable, setActiveTable] = useState<string | null>(tables[0] || null);
+    const [loadingCols, setLoadingCols] = useState(false);
+    const [colSearch, setColSearch] = useState('');
+
+    // Inline Discovery Drawer State
+    const [discoveryOpen, setDiscoveryOpen] = useState(tables.length === 0);
+    const [schemaInput, setSchemaInput] = useState<string>(
+        connectionData?.params?.schema || connectionData?.params?.dataset || ''
+    );
+    const [discoveredTables, setDiscoveredTables] = useState<string[]>([]);
+    const [tableFilter, setTableFilter] = useState('');
+    const [customTableFqn, setCustomTableFqn] = useState('');
+    const [scanLoading, setScanLoading] = useState(false);
+    const [scanError, setScanError] = useState<string | null>(null);
+    const [validationError, setValidationError] = useState<string | null>(null);
+
+    const latestInitialConfigRef = useRef<IDRConfig | undefined>(initialConfig);
+    latestInitialConfigRef.current = initialConfig;
+
+    const latestColumnsRef = useRef<Record<string, TableColumn[]>>(columns);
+    latestColumnsRef.current = columns;
+
+    const initialAutoScannedRef = useRef(false);
+
+    // Keep config synced when an external source (like JSON import) replaces initialConfig
+    useEffect(() => {
+        if (!initialConfig?.sources) return;
+        setConfig(prev => {
+            const next: Record<string, SourceConfig> = { ...prev };
+            for (const src of initialConfig.sources) {
+                if (src.table && !next[src.table]) {
+                    next[src.table] = {
+                        ...src,
+                        identifiers: (src.identifiers || []).map(i => ({
+                            ...i,
+                            column: i.column || i.expr || '',
+                            expr: i.expr || i.column || '',
+                        })),
+                        attributes: (src.attributes || []).map(a => ({
+                            ...a,
+                            column: a.column || a.expr || a.name,
+                            expr: a.expr || a.column || a.name,
+                        })),
+                    };
+                }
+            }
+            return next;
+        });
+    }, [initialConfig?.sources]);
+
+    // Ensure activeTable stays valid when tables change
+    useEffect(() => {
+        if (tables.length === 0) {
+            setActiveTable(null);
+            setDiscoveryOpen(true);
+        } else if (!activeTable || !tables.includes(activeTable)) {
+            setActiveTable(tables[0]);
+        }
+    }, [tables, activeTable]);
+
+    // Auto-scan initial schema once when no tables are selected yet
+    useEffect(() => {
+        if (!initialAutoScannedRef.current && tables.length === 0) {
+            initialAutoScannedRef.current = true;
+            const defaultSchema = connectionData?.params?.schema || connectionData?.params?.dataset || '';
+            if (defaultSchema || connectionData?.platform === 'duckdb' || !connectionData) {
+                runSchemaScan(defaultSchema || undefined);
+            }
+        }
+    }, [connectionData, tables.length]);
+
+    const buildFinalConfig = (
+        srcMap: Record<string, SourceConfig>,
+        tableList: string[],
+        colsMap: Record<string, TableColumn[]>
+    ): IDRConfig => {
+        const base = latestInitialConfigRef.current || { sources: [] };
+        const builtSources: SourceConfig[] = tableList
+            .filter(t => Boolean(srcMap[t]))
+            .map(t => {
+                const s = srcMap[t];
+                return {
+                    id: s.id || t.replace(/\./g, '_'),
+                    table: t,
+                    entity_key: s.entity_key,
+                    ...(s.key_columns && s.key_columns.length > 0 ? { key_columns: s.key_columns } : {}),
+                    ...(s.deduplicate !== undefined ? { deduplicate: s.deduplicate } : {}),
+                    ...(s.dedup_order_by ? { dedup_order_by: s.dedup_order_by } : {}),
+                    watermark_column: s.watermark_column,
+                    watermark_lookback_minutes: s.watermark_lookback_minutes || 0,
+                    identifiers: (s.identifiers || []).map(i => ({
+                        type: i.type,
+                        column: i.column || i.expr || '',
+                        expr: i.column || i.expr || '',
+                        ...(i.is_match_key === false ? { is_match_key: false } : {}),
+                    })),
+                    attributes: (s.attributes || []).map(a => {
+                        const colMeta = (colsMap[t] || []).find(c => c.name === (a.column || a.name));
+                        return a.data_type || !colMeta?.type ? a : { ...a, data_type: colMeta.type };
+                    }),
+                };
+            });
+
+        const allIdentifiers = builtSources.flatMap(s => s.identifiers || []);
+        const enabledTypes = Array.from(
+            new Set(
+                allIdentifiers
+                    .filter(i => i.is_match_key !== false && i.type && i.type.trim() !== '')
+                    .map(i => i.type.trim())
+            )
+        );
+
+        let rules = base.rules && base.rules.length > 0 ? base.rules : [];
+        if (rules.length === 0 && enabledTypes.length > 0) {
+            rules = enabledTypes.map((type, idx) => ({
+                id: 100 + idx,
+                type: 'EXACT',
+                match_keys: [type],
+                priority: idx + 1,
+                canonicalize: defaultCanonicalizerFor(type),
+                max_group_size: 10000,
+            }));
+        }
+
+        return {
+            ...base,
+            sources: builtSources,
+            rules,
+            fuzzy_rules: base.fuzzy_rules || [],
+            survivorship: base.survivorship || [],
+        };
+    };
+
+    const commitUpdate = (
+        nextMap: Record<string, SourceConfig>,
+        nextTables: string[] = tables,
+        nextCols: Record<string, TableColumn[]> = latestColumnsRef.current
+    ) => {
+        setConfig(nextMap);
+        setValidationError(null);
+        onChange?.(buildFinalConfig(nextMap, nextTables, nextCols));
+    };
 
     useEffect(() => {
         loadColumns();
     }, [tables]);
 
     const loadColumns = async () => {
-        setLoading(true);
-        const newCols: Record<string, TableColumn[]> = {};
-        const newConfig = { ...config };
+        const missing = tables.filter(t => !columns[t] || !config[t]);
+        if (missing.length === 0) return;
+
+        setLoadingCols(true);
+        const newCols: Record<string, TableColumn[]> = { ...columns };
+        const newConfig: Record<string, SourceConfig> = { ...config };
+        let initializedAny = false;
 
         try {
             for (const table of tables) {
-                if (columns[table]) {
-                    newCols[table] = columns[table];
-                    continue; // Already loaded
+                let cols = newCols[table];
+                if (!cols) {
+                    const data = await api.discoverColumns(table);
+                    cols = (data.columns || []) as TableColumn[];
+                    newCols[table] = cols;
                 }
 
-                const data = await api.discoverColumns(table);
-                const cols = data.columns as TableColumn[];
-                newCols[table] = cols;
-
-                // Initialize config for this table if missing
                 if (!newConfig[table]) {
-                    // Smart defaults
-                    const likelyKey = cols.find(c => c.name.toLowerCase().includes('id') && !c.name.toLowerCase().includes('email'))?.name || cols[0]?.name;
-                    const wmKeywords = [
-                        'updated_at', 'modified_at', 'last_modified', 'timestamp',
-                        'created_at', 'transaction_date', 'order_date', 'event_date',
-                        'event_ts', 'last_visit_date', 'enrolled_date', 'assigned_at',
-                        'flagged_at', 'review_date', '_at', '_date', '_ts'
-                    ];
-                    const likelyWatermark = (
-                        cols.find(c => c.name !== likelyKey && wmKeywords.some(k => c.name.toLowerCase().includes(k))) ||
-                        cols.find(c => c.name !== likelyKey && ['timestamp', 'date', 'datetime'].some(t => (c.type || '').toLowerCase().includes(t)))
-                    )?.name;
+                    const likelyKey =
+                        cols.find(c => c.name.toLowerCase().includes('id') && !c.name.toLowerCase().includes('email'))?.name ||
+                        cols[0]?.name ||
+                        'AUTO';
+                    const likelyWatermark = guessDefaultWatermark(cols, likelyKey);
 
                     newConfig[table] = {
                         id: table.replace(/\./g, '_'),
-                        table: table,
+                        table,
                         entity_key: likelyKey,
-                        watermark_column: likelyWatermark || '',
-                        // Initialize new fields
+                        watermark_column: likelyWatermark,
+                        watermark_lookback_minutes: 0,
                         identifiers: [],
-                        attributes: []
+                        attributes: [],
                     };
-                    // Add lookback if it exists in SourceConfig type (we need to cast or add to type)
-                    (newConfig[table] as any).watermark_lookback_minutes = 0;
+                    initializedAny = true;
                 }
             }
             setColumns(newCols);
-            setConfig(newConfig);
+            if (initializedAny) {
+                setConfig(newConfig);
+                onChange?.(buildFinalConfig(newConfig, tables, newCols));
+            }
+        } catch (err: any) {
+            setScanError(err.message || String(err));
         } finally {
-            setLoading(false);
+            setLoadingCols(false);
         }
     };
 
-    const updateConfig = (table: string, field: keyof SourceConfig, value: any) => {
-        setConfig(prev => ({
-            ...prev,
+    const runSchemaScan = async (targetSchema?: string) => {
+        setScanLoading(true);
+        setScanError(null);
+        try {
+            const data = await api.discoverTables(targetSchema?.trim() || undefined);
+            setDiscoveredTables(data.tables || []);
+        } catch (err: any) {
+            setScanError(err.message || String(err));
+            setDiscoveredTables([]);
+        } finally {
+            setScanLoading(false);
+        }
+    };
+
+    const handleToggleDiscoveredTable = (fqn: string) => {
+        const exists = tables.includes(fqn);
+        const nextTables = exists ? tables.filter(t => t !== fqn) : [...tables, fqn];
+        onTablesChange?.(nextTables);
+
+        if (!exists) {
+            setActiveTable(fqn);
+        } else {
+            const nextConfig = { ...config };
+            delete nextConfig[fqn];
+            commitUpdate(nextConfig, nextTables);
+        }
+    };
+
+    const handleAddCustomTable = () => {
+        const fqn = customTableFqn.trim();
+        if (!fqn) return;
+        if (!tables.includes(fqn)) {
+            const nextTables = [...tables, fqn];
+            onTablesChange?.(nextTables);
+            setActiveTable(fqn);
+        }
+        setCustomTableFqn('');
+    };
+
+    const updateSourceField = (table: string, field: keyof SourceConfig, value: any) => {
+        const next = {
+            ...config,
             [table]: {
-                ...prev[table],
-                [field]: value
-            }
-        }));
+                ...config[table],
+                [field]: value,
+            },
+        };
+        commitUpdate(next);
     };
 
     const toggleAttribute = (table: string, colName: string) => {
-        setConfig(prev => {
-            const currentAttrs = prev[table].attributes || [];
-            const exists = currentAttrs.find(a => a.name === colName);
+        const curr = config[table];
+        if (!curr) return;
+        const currentAttrs = curr.attributes || [];
+        const exists = currentAttrs.find(a => a.name === colName);
+        const colMeta = (columns[table] || []).find(c => c.name === colName);
 
-            let newAttrs: Attribute[];
-            if (exists) {
-                newAttrs = currentAttrs.filter(a => a.name !== colName);
-            } else {
-                const colMeta = (columns[table] || []).find(c => c.name === colName);
-                newAttrs = [...currentAttrs, { name: colName, column: colName, expr: colName, data_type: colMeta?.type }];
-                // Remove from identifiers if it was there
-                prev[table].identifiers = (prev[table].identifiers || []).filter(i => i.column !== colName);
-            }
+        const newAttrs: Attribute[] = exists
+            ? currentAttrs.filter(a => a.name !== colName)
+            : [...currentAttrs, { name: colName, column: colName, expr: colName, data_type: colMeta?.type }];
+        const newIds = exists ? (curr.identifiers || []) : (curr.identifiers || []).filter(i => i.column !== colName);
 
-            return {
-                ...prev,
-                [table]: {
-                    ...prev[table],
-                    attributes: newAttrs,
-                    identifiers: prev[table].identifiers
-                }
-            };
+        commitUpdate({
+            ...config,
+            [table]: { ...curr, attributes: newAttrs, identifiers: newIds },
         });
     };
 
     const toggleIdentifier = (table: string, colName: string) => {
-        setConfig(prev => {
-            const currentIds = prev[table].identifiers || [];
-            const exists = currentIds.find(i => i.column === colName);
+        const curr = config[table];
+        if (!curr) return;
+        const currentIds = curr.identifiers || [];
+        const exists = currentIds.find(i => i.column === colName);
 
-            let newIds: Identifier[];
-            if (exists) {
-                newIds = currentIds.filter(i => i.column !== colName);
-            } else {
-                // Default type guess
-                let defaultType = colName.toLowerCase();
-                if (defaultType.includes('email')) defaultType = 'email';
-                else if (defaultType.includes('phone')) defaultType = 'phone';
-                else if (defaultType.includes('ssn')) defaultType = 'ssn';
-                else if (defaultType.includes('device')) defaultType = 'device_id';
+        let newIds: Identifier[];
+        if (exists) {
+            newIds = currentIds.filter(i => i.column !== colName);
+        } else {
+            const matchedPattern = IDENTIFIER_PATTERNS.find(p => p.pattern.test(colName));
+            const defaultType = matchedPattern ? matchedPattern.type : colName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+            newIds = [...currentIds, { column: colName, type: defaultType, expr: colName, is_match_key: true }];
+        }
+        const newAttrs = exists ? (curr.attributes || []) : (curr.attributes || []).filter(a => a.name !== colName);
 
-                newIds = [...currentIds, { column: colName, type: defaultType, expr: colName, is_match_key: true }];
-                // Remove from attributes if it was there
-                prev[table].attributes = (prev[table].attributes || []).filter(a => a.name !== colName);
-            }
-
-            return {
-                ...prev,
-                [table]: {
-                    ...prev[table],
-                    identifiers: newIds,
-                    attributes: prev[table].attributes
-                }
-            };
+        commitUpdate({
+            ...config,
+            [table]: { ...curr, identifiers: newIds, attributes: newAttrs },
         });
     };
 
     const updateIdentifierType = (table: string, colName: string, newType: string) => {
-        // Validation: Only allow alphanumeric and underscores
-        let safeType = newType.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
-
-        // Prevent empty string - if usage clears it, maybe don't update? Or defaults?
-        // Better: allow typing but validate on blur/save?
-        // For now, let's just not allow empty rules generation if type is empty.
-        // But here we just update state.
-
-        setConfig(prev => {
-            const currentIds = prev[table].identifiers || [];
-            const newIds = currentIds.map(i =>
-                i.column === colName ? { ...i, type: safeType } : i
-            );
-            return {
-                ...prev,
-                [table]: { ...prev[table], identifiers: newIds }
-            };
-        });
+        const curr = config[table];
+        if (!curr) return;
+        const safeType = newType.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+        const newIds = (curr.identifiers || []).map(i =>
+            i.column === colName ? { ...i, type: safeType } : i
+        );
+        commitUpdate({ ...config, [table]: { ...curr, identifiers: newIds } });
     };
 
     const toggleMatchKey = (table: string, colName: string) => {
-        setConfig(prev => {
-            const currentIds = prev[table].identifiers || [];
-            const newIds = currentIds.map(i =>
-                i.column === colName ? { ...i, is_match_key: !i.is_match_key } : i
-            );
-            return {
-                ...prev,
-                [table]: { ...prev[table], identifiers: newIds }
+        const curr = config[table];
+        if (!curr) return;
+        const newIds = (curr.identifiers || []).map(i =>
+            i.column === colName ? { ...i, is_match_key: i.is_match_key === false } : i
+        );
+        commitUpdate({ ...config, [table]: { ...curr, identifiers: newIds } });
+    };
+
+    const applyAutoMapForTables = (targetTables: string[]) => {
+        const nextMap = { ...config };
+        for (const table of targetTables) {
+            const curr = nextMap[table];
+            const cols = columns[table] || [];
+            if (!curr || cols.length === 0) continue;
+
+            const existingIds = [...(curr.identifiers || [])];
+            const existingAttrs = [...(curr.attributes || [])];
+            const mappedCols = new Set<string>([
+                ...existingIds.map(i => i.column || i.expr || ''),
+                ...existingAttrs.map(a => a.column || a.name),
+            ]);
+
+            for (const c of cols) {
+                if (c.name === curr.entity_key || c.name === curr.watermark_column || mappedCols.has(c.name)) {
+                    continue;
+                }
+                const idMatch = IDENTIFIER_PATTERNS.find(p => p.pattern.test(c.name));
+                if (idMatch) {
+                    existingIds.push({ column: c.name, type: idMatch.type, expr: c.name, is_match_key: true });
+                    mappedCols.add(c.name);
+                    continue;
+                }
+                if (ATTRIBUTE_PATTERNS.some(p => p.test(c.name))) {
+                    existingAttrs.push({ name: c.name, column: c.name, expr: c.name, data_type: c.type });
+                    mappedCols.add(c.name);
+                }
+            }
+
+            nextMap[table] = {
+                ...curr,
+                identifiers: existingIds,
+                attributes: existingAttrs,
             };
-        });
+        }
+        commitUpdate(nextMap);
     };
 
     const getColumnState = (table: string, colName: string) => {
         const attrs = config[table]?.attributes || [];
-        if (attrs.find(a => a.name === colName)) return { isAttr: true };
+        if (attrs.find(a => (a.column || a.name) === colName)) return { isAttr: true };
 
         const ids = config[table]?.identifiers || [];
-        const idMatch = ids.find(i => i.column === colName);
+        const idMatch = ids.find(i => (i.column || i.expr) === colName);
         if (idMatch) return { isId: true, type: idMatch.type, isMatch: idMatch.is_match_key !== false };
 
         return {};
     };
 
     const handleNext = () => {
-        // Validation Gate: Ensure at least one identifier is mapped across all tables
         const allIdentifiers = tables.flatMap(t => config[t]?.identifiers || []);
         if (allIdentifiers.length === 0) {
-            alert("Please map at least one Identifier (e.g. Email, Phone) to enable matching.");
+            setValidationError("Map at least one Identifier column (e.g. email, phone) across your source tables to continue.");
             return;
         }
-
-        // Dynamically generate rules based on used identifier types
-        // Create matching rules for each unique identifier type used THAT IS ENABLED for matching
-        // AND has a valid type (not empty)
-        const enabledIdentifiers = allIdentifiers.filter(i => i.is_match_key !== false && i.type && i.type.trim() !== '');
-
-        const usedTypes = new Set(enabledIdentifiers.map(i => i.type));
-        const dynamicRules = Array.from(usedTypes).map((type, idx) => ({
-            id: 100 + idx,
-            type: 'EXACT',
-            match_keys: [type],
-            priority: idx + 1,
-            canonicalize: 'LOWERCASE' as const
-        }));
-
-        // Transform UI state to standard config format
-        const finalConfig: IDRConfig = {
-            ...initialConfig,
-            sources: tables.map(t => ({
-                id: config[t].id,
-                table: t,
-                entity_key: config[t].entity_key,
-                watermark_column: config[t].watermark_column,
-                // Ensure identifiers have 'expr' set
-                identifiers: (config[t].identifiers || []).map(i => ({
-                    type: i.type,
-                    column: i.column,
-                    expr: i.column // Use column name as expression by default
-                })),
-                attributes: (config[t].attributes || []).map(a => {
-                    const colMeta = (columns[t] || []).find(c => c.name === (a.column || a.name));
-                    return a.data_type || !colMeta?.type ? a : { ...a, data_type: colMeta.type };
-                })
-            })),
-            rules: initialConfig?.rules && initialConfig.rules.length > 0 ? initialConfig.rules : dynamicRules,
-            fuzzy_rules: initialConfig?.fuzzy_rules || [],
-            survivorship: initialConfig?.survivorship || [],
-        };
-
+        const finalConfig = buildFinalConfig(config, tables, columns);
         onNext(finalConfig);
     };
 
-    const btnClass = "px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed";
-    const btnOutlineClass = "px-4 py-2 border border-gray-600 text-gray-300 rounded-md text-sm font-medium hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500";
+    const filteredDiscovered = tableFilter.trim()
+        ? discoveredTables.filter(t => t.toLowerCase().includes(tableFilter.toLowerCase()))
+        : discoveredTables;
 
-    if (loading && Object.keys(columns).length === 0) {
-        return <div className="flex justify-center p-20"><Loader2 className="animate-spin w-8 h-8 text-blue-500" /></div>;
-    }
+    const activeConfig = activeTable ? config[activeTable] : undefined;
+    const activeCols = activeTable ? (columns[activeTable] || []) : [];
+    const filteredActiveCols = colSearch.trim()
+        ? activeCols.filter(c => c.name.toLowerCase().includes(colSearch.toLowerCase()) || (c.type || '').toLowerCase().includes(colSearch.toLowerCase()))
+        : activeCols;
 
     return (
-        <div className="space-y-6 h-full flex flex-col">
-            <div>
-                <h2 className="text-xl font-semibold text-white">Map Columns</h2>
-                <p className="text-sm text-gray-400">Define how IDR interprets your data schema.</p>
+        <div className="space-y-5 flex flex-col">
+            {/* Section Title & Inline Actions */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h2 className="text-xl font-bold tracking-tight text-white">Sources &amp; Column Mappings</h2>
+                    <p className="text-sm text-slate-400">
+                        Add tables across one or more warehouse schemas, assign Entity Keys, and map Identifiers &amp; Profile Attributes.
+                    </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {tables.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => applyAutoMapForTables(tables)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold transition-colors"
+                            title="Automatically classify common identifier and profile columns across all sources"
+                        >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            Auto-Map All
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        onClick={() => setDiscoveryOpen(prev => !prev)}
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                            discoveryOpen
+                                ? 'bg-blue-600 text-white border-blue-500'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                        }`}
+                    >
+                        <Plus className="w-3.5 h-3.5" />
+                        {discoveryOpen ? 'Hide Table Browser' : 'Add / Manage Source Tables'}
+                        {discoveryOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+                </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <HelpCard title="Entity Key">
-                    Unique primary key for each row. Stable ID used to track records over time.
-                </HelpCard>
-                <HelpCard title="Identifiers">
-                    Keys used for matching (Email, Phone). Use "Match Toggle" to include/exclude from matching rules.
-                </HelpCard>
-                <HelpCard title="Attributes">
-                    Profile data (Name, City) attached to the unified ID. Used for Golden Record generation.
-                </HelpCard>
-            </div>
+            {validationError && (
+                <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 text-xs text-amber-200 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>{validationError}</span>
+                </div>
+            )}
 
-            <div className="flex-1 overflow-y-auto pr-2 space-y-2">
-                {tables.map(table => {
-                    const tableConfig = config[table] || {};
-                    const tableCols = columns[table] || [];
-                    const attrCount = (tableConfig.attributes || []).length;
-                    const idCount = (tableConfig.identifiers || []).length;
-                    const isOpen = openTable === table;
+            {/* Integrated Multi-Schema Discovery Drawer */}
+            {discoveryOpen && (
+                <div className="bg-slate-900/90 border border-blue-500/30 rounded-xl p-4 space-y-3.5 shadow-lg">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                                <Search className="w-4 h-4 text-blue-400" />
+                                Discover Warehouse Tables
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                Scan any schema/dataset sequentially — selected tables from previous schemas stay selected below.
+                            </p>
+                        </div>
 
-                    return (
-                        <div key={table} className="border border-gray-700 rounded-lg bg-gray-800/50 overflow-hidden">
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                runSchemaScan(schemaInput);
+                            }}
+                            className="flex flex-wrap items-center gap-2"
+                        >
+                            <input
+                                type="text"
+                                value={schemaInput}
+                                onChange={(e) => setSchemaInput(e.target.value)}
+                                placeholder="Schema / Dataset (e.g. raw)"
+                                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 w-48 focus:outline-none focus:border-blue-500"
+                            />
                             <button
-                                className="w-full flex items-center justify-between p-4 bg-gray-800 hover:bg-gray-700 transition-colors"
-                                onClick={() => setOpenTable(isOpen ? null : table)}
+                                type="submit"
+                                disabled={scanLoading}
+                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
                             >
-                                <div className="flex gap-4 items-center">
-                                    {isOpen ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-                                    <span className="font-semibold text-sm text-gray-200">{table}</span>
-                                    {tableConfig.entity_key && (
-                                        <span className="text-xs font-normal flex gap-1 items-center px-2 py-0.5 rounded border border-gray-600 text-gray-300 truncate max-w-[150px]">
-                                            <Key className="w-3 h-3" /> {tableConfig.entity_key}
-                                        </span>
-                                    )}
-                                    <span className="text-xs font-normal flex gap-1 items-center px-2 py-0.5 rounded bg-gray-700 text-gray-300">
-                                        <Fingerprint className="w-3 h-3" /> {idCount} IDs
-                                    </span>
-                                    <span className="text-xs font-normal flex gap-1 items-center px-2 py-0.5 rounded bg-gray-700 text-gray-300">
-                                        <Tag className="w-3 h-3" /> {attrCount} Attrs
-                                    </span>
-                                </div>
+                                {scanLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                                Scan Schema
                             </button>
+                        </form>
+                    </div>
 
-                            {isOpen && (
-                                <div className="p-4 space-y-6 border-t border-gray-700 bg-gray-900/30">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                        {/* Configuration Section */}
-                                        <div className="space-y-4">
-                                            {/* Entity Key */}
-                                            <div className="space-y-2">
-                                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                                                    <Key className="w-4 h-4 text-orange-500" /> Entity Key (Primary ID)
-                                                </label>
-                                                <select
-                                                    value={tableConfig.entity_key || ''}
-                                                    onChange={e => updateConfig(table, 'entity_key', e.target.value)}
-                                                    className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                >
-                                                    {tableCols.map(c => (
-                                                        <option key={c.name} value={c.name}>
-                                                            {c.name} ({c.type})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <p className="text-xs text-gray-500">The stable unique identifier for rows in this table.</p>
-                                            </div>
+                    {scanError && (
+                        <div className="p-2.5 rounded-lg bg-rose-950/50 border border-rose-500/40 text-xs text-rose-300">
+                            {scanError}
+                        </div>
+                    )}
 
-                                            {/* Watermark Column */}
-                                            <div className="space-y-2">
-                                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                                                    <Clock className="w-4 h-4 text-blue-400" /> Watermark Column
-                                                </label>
-                                                <select
-                                                    value={tableConfig.watermark_column || ''}
-                                                    onChange={e => updateConfig(table, 'watermark_column', e.target.value)}
-                                                    className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                >
-                                                    <option value="">(None - Full Refresh)</option>
-                                                    {tableCols.map(c => (
-                                                        <option key={c.name} value={c.name}>
-                                                            {c.name} ({c.type})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <p className="text-xs text-gray-500">Used for incremental runs (e.g. updated_at).</p>
-                                            </div>
+                    {/* Filter + Table Picker Grid */}
+                    <div className="border border-slate-800 rounded-xl bg-slate-950/70 overflow-hidden">
+                        <div className="px-3 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-slate-900/60">
+                            <div className="flex items-center gap-2 flex-1 min-w-[180px]">
+                                <Search className="w-3.5 h-3.5 text-slate-500" />
+                                <input
+                                    type="text"
+                                    value={tableFilter}
+                                    onChange={(e) => setTableFilter(e.target.value)}
+                                    placeholder="Filter scanned tables..."
+                                    className="bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none flex-1"
+                                />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    value={customTableFqn}
+                                    onChange={(e) => setCustomTableFqn(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            handleAddCustomTable();
+                                        }
+                                    }}
+                                    placeholder="Or add FQN: schema.table"
+                                    className="bg-slate-900 border border-slate-700 rounded-md px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 w-44 focus:outline-none focus:border-blue-500"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleAddCustomTable}
+                                    disabled={!customTableFqn.trim()}
+                                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-md text-xs border border-slate-700"
+                                >
+                                    Add FQN
+                                </button>
+                            </div>
+                        </div>
 
-                                            {/* Watermark Lookback - NEW */}
-                                            <div className="space-y-2">
-                                                <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                                                    <Clock className="w-4 h-4 text-gray-400" /> Lookback (Minutes)
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    value={(tableConfig as any).watermark_lookback_minutes || 0}
-                                                    onChange={e => updateConfig(table, 'watermark_lookback_minutes' as any, parseInt(e.target.value) || 0)}
-                                                    className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                />
-                                                <p className="text-xs text-gray-500">Buffer to handle late-arriving data (0 = strict).</p>
-                                            </div>
-
-                                        </div>
-
-                                        {/* Attribute & Identifier Mapping Grid */}
-                                        <div className="space-y-2 col-span-1 md:col-span-2">
-                                            <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                                                <Fingerprint className="w-4 h-4 text-purple-500" /> Map Columns
-                                            </label>
-                                            <p className="text-xs text-gray-500 mb-2">Tag columns as Identifiers (matched against) or Attributes (profile data).</p>
-
-                                            <div className="border border-gray-700 rounded bg-gray-900 h-[300px] overflow-y-auto">
-                                                <div className="grid grid-cols-12 gap-2 p-2 px-4 border-b border-gray-800 text-xs font-semibold text-gray-500 uppercase sticky top-0 bg-gray-900 z-10">
-                                                    <div className="col-span-3">Column</div>
-                                                    <div className="col-span-2">Type</div>
-                                                    <div className="col-span-1 text-center" title="Use for Matching">Match</div>
-                                                    <div className="col-span-6 text-right">Mapping</div>
-                                                </div>
-
-                                                {tableCols.map(c => {
-                                                    const state = getColumnState(table, c.name);
-
-                                                    return (
-                                                        <div key={c.name} className="grid grid-cols-12 gap-2 p-2 px-4 items-center hover:bg-gray-800 border-b border-gray-800/50 last:border-0">
-                                                            <div className="col-span-3 text-sm font-medium text-gray-200 truncate" title={c.name}>{c.name}</div>
-                                                            <div className="col-span-2 text-xs text-gray-500">{c.type}</div>
-
-                                                            <div className="col-span-1 flex justify-center">
-                                                                {state.isId && (
-                                                                    <button
-                                                                        onClick={() => toggleMatchKey(table, c.name)}
-                                                                        className={`p-1 rounded hover:bg-gray-700 ${state.isMatch ? 'text-blue-400' : 'text-gray-600'}`}
-                                                                        title={state.isMatch ? "Used for Matching" : "Excluded from Matching"}
-                                                                    >
-                                                                        {state.isMatch ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                                                                    </button>
-                                                                )}
-                                                            </div>
-
-                                                            <div className="col-span-6 flex gap-2 justify-end items-center">
-                                                                {state.isId ? (
-                                                                    <div className="flex items-center gap-2">
-                                                                        <input
-                                                                            type="text"
-                                                                            value={state.type}
-                                                                            onChange={(e) => updateIdentifierType(table, c.name, e.target.value)}
-                                                                            className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white w-24 focus:outline-none focus:border-blue-500"
-                                                                            placeholder="Type..."
-                                                                        />
-                                                                        <button
-                                                                            onClick={() => toggleIdentifier(table, c.name)}
-                                                                            className="px-2 py-1 text-xs rounded border bg-blue-600 border-blue-500 text-white transition-colors"
-                                                                        >
-                                                                            Identifier
-                                                                        </button>
-                                                                    </div>
-                                                                ) : (
-                                                                    <button
-                                                                        onClick={() => toggleIdentifier(table, c.name)}
-                                                                        className="px-2 py-1 text-xs rounded border bg-transparent border-gray-700 text-gray-400 hover:border-gray-500 transition-colors"
-                                                                    >
-                                                                        Identifier
-                                                                    </button>
-                                                                )}
-
-                                                                <button
-                                                                    onClick={() => toggleAttribute(table, c.name)}
-                                                                    className={`px-2 py-1 text-xs rounded border transition-colors ${state.isAttr
-                                                                        ? 'bg-green-600/20 border-green-500 text-green-400'
-                                                                        : 'bg-transparent border-gray-700 text-gray-400 hover:border-gray-500'
-                                                                        }`}
-                                                                >
-                                                                    Attribute
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    </div>
+                        <div className="max-h-52 overflow-y-auto p-2.5">
+                            {filteredDiscovered.length === 0 && !scanLoading ? (
+                                <div className="text-center text-xs text-slate-500 py-6">
+                                    {discoveredTables.length > 0
+                                        ? 'No scanned tables match your filter.'
+                                        : 'Enter a schema/dataset name above and click Scan Schema (leave blank on DuckDB).'}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                    {filteredDiscovered.map(fqn => {
+                                        const isSelected = tables.includes(fqn);
+                                        return (
+                                            <button
+                                                key={fqn}
+                                                type="button"
+                                                onClick={() => handleToggleDiscoveredTable(fqn)}
+                                                className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left text-xs transition-all ${
+                                                    isSelected
+                                                        ? 'bg-blue-600/15 border-blue-500/60 text-blue-200 font-medium'
+                                                        : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-800/80'
+                                                }`}
+                                            >
+                                                <span className="flex items-center gap-2 truncate font-mono">
+                                                    <TableIcon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-blue-400' : 'text-slate-500'}`} />
+                                                    <span className="truncate">{fqn}</span>
+                                                </span>
+                                                <span className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${
+                                                    isSelected ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-700 bg-slate-950'
+                                                }`}>
+                                                    {isSelected && <Check className="w-3 h-3" />}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
-                    );
-                })}
-            </div>
+                    </div>
+                </div>
+            )}
 
-            <div className="flex justify-between pt-4">
-                <button className={btnOutlineClass} onClick={onBack}>Back</button>
-                <button className={btnClass} onClick={handleNext}>Next: Rules</button>
+            {/* Master-Detail Sources & Column Mapper */}
+            {tables.length === 0 ? (
+                <div className="border border-dashed border-slate-700 rounded-xl p-10 text-center space-y-2 bg-slate-900/30">
+                    <TableIcon className="w-8 h-8 text-slate-600 mx-auto" />
+                    <p className="text-sm font-medium text-slate-300">No source tables selected yet</p>
+                    <p className="text-xs text-slate-500">
+                        Use the table discovery browser above to scan a schema and select one or more source tables.
+                    </p>
+                </div>
+            ) : loadingCols && Object.keys(columns).length === 0 ? (
+                <div className="flex justify-center p-16">
+                    <Loader2 className="animate-spin w-7 h-7 text-blue-500" />
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                    {/* Left Rail: Selected Source Tables */}
+                    <div className="lg:col-span-4 space-y-2.5 bg-slate-900/60 border border-slate-800 rounded-xl p-3">
+                        <div className="flex items-center justify-between px-1 pb-1 border-b border-slate-800/80">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                                Source Tables ({tables.length})
+                            </span>
+                            {loadingCols && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />}
+                        </div>
+
+                        <div className="space-y-1.5 max-h-[540px] overflow-y-auto pr-0.5">
+                            {tables.map(table => {
+                                const cfg = config[table] || {};
+                                const idCount = (cfg.identifiers || []).length;
+                                const attrCount = (cfg.attributes || []).length;
+                                const isActive = activeTable === table;
+
+                                return (
+                                    <div
+                                        key={table}
+                                        onClick={() => setActiveTable(table)}
+                                        className={`group p-3 rounded-xl border cursor-pointer transition-all space-y-2 ${
+                                            isActive
+                                                ? 'bg-blue-600/15 border-blue-500/60 shadow-sm'
+                                                : 'bg-slate-950/60 border-slate-800/90 hover:border-slate-700'
+                                        }`}
+                                    >
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <div className={`text-xs font-mono font-semibold truncate ${isActive ? 'text-white' : 'text-slate-200'}`}>
+                                                    {table}
+                                                </div>
+                                                <div className="text-[11px] text-slate-500 font-mono truncate mt-0.5">
+                                                    id: {cfg.id || table.replace(/\./g, '_')}
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleToggleDiscoveredTable(table);
+                                                }}
+                                                title="Remove source table"
+                                                className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 opacity-70 group-hover:opacity-100 transition-colors"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                            {cfg.entity_key && (
+                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono max-w-[120px] truncate">
+                                                    <Key className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                                                    {cfg.entity_key}
+                                                </span>
+                                            )}
+                                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${
+                                                idCount > 0
+                                                    ? 'bg-blue-950/60 text-blue-300 border-blue-800/60'
+                                                    : 'bg-amber-950/50 text-amber-300 border-amber-700/60'
+                                            }`}>
+                                                <Fingerprint className="w-2.5 h-2.5" />
+                                                {idCount} IDs
+                                            </span>
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/50 text-emerald-300 border border-emerald-800/50">
+                                                <Tag className="w-2.5 h-2.5" />
+                                                {attrCount} Attrs
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Right Detail Pane: Active Source Config & Columns */}
+                    {activeTable && activeConfig && (
+                        <div className="lg:col-span-8 bg-slate-900/60 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-5">
+                            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                                <div>
+                                    <span className="text-[11px] uppercase tracking-wider font-semibold text-blue-400">Active Source Table</span>
+                                    <h3 className="text-base font-bold font-mono text-white">{activeTable}</h3>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => applyAutoMapForTables([activeTable])}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 text-xs font-medium transition-colors"
+                                >
+                                    <Wand2 className="w-3.5 h-3.5" />
+                                    Auto-Map This Table
+                                </button>
+                            </div>
+
+                            {/* Source Extraction Settings */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
+                                        <Key className="w-3.5 h-3.5 text-amber-400" /> Entity Key (Primary ID)
+                                    </label>
+                                    <CustomSelect
+                                        value={activeConfig.entity_key || ''}
+                                        onChange={(val) => updateSourceField(activeTable, 'entity_key', val)}
+                                        options={[
+                                            { value: 'AUTO', label: 'AUTO (Synthetic Hash Key)' },
+                                            ...activeCols.map(c => ({ value: c.name, label: `${c.name} (${c.type})` })),
+                                        ]}
+                                        className="w-full"
+                                        buttonClassName="text-xs py-2 bg-slate-950"
+                                        menuClassName="left-0 right-0"
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
+                                        <Clock className="w-3.5 h-3.5 text-blue-400" /> Watermark Column
+                                    </label>
+                                    <CustomSelect
+                                        value={activeConfig.watermark_column || ''}
+                                        onChange={(val) => updateSourceField(activeTable, 'watermark_column', val)}
+                                        options={[
+                                            { value: '', label: '(None — Full Refresh / PK Diff)' },
+                                            ...activeCols.map(c => ({ value: c.name, label: `${c.name} (${c.type})` })),
+                                        ]}
+                                        className="w-full"
+                                        buttonClassName="text-xs py-2 bg-slate-950"
+                                        menuClassName="left-0 right-0"
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
+                                        <Clock className="w-3.5 h-3.5 text-slate-400" /> Lookback Window (Minutes)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={activeConfig.watermark_lookback_minutes || 0}
+                                        onChange={e => updateSourceField(activeTable, 'watermark_lookback_minutes', parseInt(e.target.value, 10) || 0)}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="flex items-center gap-2 text-xs font-medium text-slate-300 cursor-pointer pt-1">
+                                        <input
+                                            type="checkbox"
+                                            checked={Boolean(activeConfig.deduplicate)}
+                                            onChange={e => updateSourceField(activeTable, 'deduplicate', e.target.checked)}
+                                            className="rounded border-slate-700 bg-slate-950 text-blue-500 focus:ring-blue-500"
+                                        />
+                                        Deduplicate duplicate entity_key rows in batch
+                                    </label>
+                                    {activeConfig.deduplicate && (
+                                        <CustomSelect
+                                            value={activeConfig.dedup_order_by || ''}
+                                            onChange={(val) => updateSourceField(activeTable, 'dedup_order_by', val)}
+                                            options={[
+                                                { value: '', label: 'Default order (watermark DESC)' },
+                                                ...activeCols.map(c => ({ value: `${c.name} DESC`, label: `${c.name} DESC` })),
+                                            ]}
+                                            className="w-full"
+                                            buttonClassName="text-xs py-1.5 bg-slate-950"
+                                            menuClassName="left-0 right-0"
+                                        />
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Column Role Classification Table */}
+                            <div className="space-y-2.5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                                        <Fingerprint className="w-3.5 h-3.5 text-purple-400" /> Column Classification ({activeCols.length})
+                                    </label>
+                                    <div className="relative w-56">
+                                        <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                        <input
+                                            type="text"
+                                            value={colSearch}
+                                            onChange={e => setColSearch(e.target.value)}
+                                            placeholder="Filter columns..."
+                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="border border-slate-800 rounded-xl bg-slate-950/80 max-h-[340px] overflow-y-auto">
+                                    <div className="grid grid-cols-12 gap-2 px-3.5 py-2 border-b border-slate-800 text-[11px] font-semibold text-slate-500 uppercase sticky top-0 bg-slate-900/95 backdrop-blur z-10">
+                                        <div className="col-span-4">Column</div>
+                                        <div className="col-span-2">SQL Type</div>
+                                        <div className="col-span-1 text-center" title="Include in matching rules">Match</div>
+                                        <div className="col-span-5 text-right">Role &amp; Type</div>
+                                    </div>
+
+                                    {filteredActiveCols.map(c => {
+                                        const state = getColumnState(activeTable, c.name);
+                                        return (
+                                            <div key={c.name} className="grid grid-cols-12 gap-2 px-3.5 py-2 items-center hover:bg-slate-900/80 border-b border-slate-800/50 last:border-0">
+                                                <div className="col-span-4 text-xs font-mono font-medium text-slate-200 truncate" title={c.name}>
+                                                    {c.name}
+                                                </div>
+                                                <div className="col-span-2 text-[11px] font-mono text-slate-500 truncate" title={c.type}>
+                                                    {c.type}
+                                                </div>
+                                                <div className="col-span-1 flex justify-center">
+                                                    {state.isId && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleMatchKey(activeTable, c.name)}
+                                                            className={`p-1 rounded hover:bg-slate-800 ${state.isMatch ? 'text-blue-400' : 'text-slate-600'}`}
+                                                            title={state.isMatch ? 'Included in matching rules' : 'Stored only (excluded from matching)'}
+                                                        >
+                                                            {state.isMatch ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div className="col-span-5 flex items-center justify-end gap-1.5">
+                                                    {state.isId && (
+                                                        <input
+                                                            type="text"
+                                                            value={state.type || ''}
+                                                            onChange={(e) => updateIdentifierType(activeTable, c.name, e.target.value)}
+                                                            className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs font-mono text-blue-300 w-24 focus:outline-none focus:border-blue-500"
+                                                            placeholder="id type"
+                                                        />
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleIdentifier(activeTable, c.name)}
+                                                        className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                                                            state.isId
+                                                                ? 'bg-blue-600 border-blue-500 text-white font-medium'
+                                                                : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                                                        }`}
+                                                    >
+                                                        Identifier
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleAttribute(activeTable, c.name)}
+                                                        className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                                                            state.isAttr
+                                                                ? 'bg-emerald-600/20 border-emerald-500/70 text-emerald-300 font-medium'
+                                                                : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                                                        }`}
+                                                    >
+                                                        Attribute
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Bottom Navigation Helper */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+                {onBack ? (
+                    <button
+                        type="button"
+                        onClick={onBack}
+                        className="px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-xs font-medium hover:bg-slate-800"
+                    >
+                        Switch Warehouse
+                    </button>
+                ) : <div />}
+
+                <button
+                    type="button"
+                    onClick={handleNext}
+                    disabled={tables.length === 0}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition-colors"
+                >
+                    Continue to Matching Rules →
+                </button>
             </div>
-        </div >
+        </div>
     );
 }

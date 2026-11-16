@@ -17,8 +17,10 @@ title: Interfaces, Web UI, MCP & dbt
 | `idr doctor` | Run production readiness diagnostics (connectivity, permissions, schemas, watermarks, guardrails). | `idr doctor --platform bigquery --project my-project` |
 | `idr evaluate` | Compute Pairwise Precision/Recall/F1 against ground truth or build stratified audit samples (`idr_out.evaluation_sample`). | `idr evaluate --platform bigquery --project my-project` |
 | `idr init` | Initialize `idr_meta`, `idr_work`, and `idr_out` schemas and tables (`--reset` recreates them). | `idr init --platform duckdb --db demo.duckdb` |
-| `idr apply-config` | Compile and load a declarative YAML manifest into `idr_meta.*` tables. | `idr apply-config --db demo.duckdb --config config.yaml` |
-| `idr run` | Execute the 8-stage resolution pipeline (`--mode FULL` or `--mode INCR`, `--dry-run`, `--strict`). | `idr run --db demo.duckdb --mode INCR --max-iters 30` |
+| `idr apply-config` / `idr config apply` | Compile and load a declarative YAML manifest into `idr_meta.*` and archive a snapshot in `idr_out.config_snapshot`. | `idr config apply --db demo.duckdb --file config.yaml` |
+| `idr config history` | List saved configuration snapshots (`config_hash`, timestamp, source/rule/survivorship counts). | `idr config history --db demo.duckdb` |
+| `idr config rollback` | Restore `idr_meta.*` to the previous saved snapshot (or a specific `--hash` prefix). | `idr config rollback --db demo.duckdb [--hash a1b2c3d4]` |
+| `idr run` | Execute the 8-stage resolution pipeline (`--mode FULL\|INCR`, `--dry-run`, `--config <yaml>`, `--strict`). Pass `--config` with `--dry-run` for ephemeral candidate evaluation. | `idr run --db demo.duckdb --mode FULL --config candidate.yaml --dry-run` |
 | `idr privacy forget` | Execute GDPR/CCPA right-to-be-forgotten erasure by `--entity-key` or `--identifier-value`. | `idr privacy forget --db demo.duckdb --entity-key crm:101` |
 | `idr ui` / `idr serve` | Launch the FastAPI backend and bundled React Web UI (`http://127.0.0.1:8000`). | `idr ui --db demo.duckdb --port 8000` |
 | `idr mcp` | Launch the FastMCP server for Claude Desktop, Cursor, and AI coding agents. | `idr mcp --db demo.duckdb` |
@@ -42,18 +44,19 @@ idr ui --db demo.duckdb
 - **Enterprise OIDC / JWT Mode (Production)**:
   - Set `IDR_AUTH_ISSUER`, `IDR_AUTH_AUDIENCE`, `VITE_AUTH_AUTHORITY`, and `VITE_AUTH_CLIENT_ID` (e.g., Keycloak, Okta, Auth0, Azure AD) to enforce Bearer JWT validation across all API routes.
 
-### 6-Step Setup Wizard (`/setup`)
-1. **Connect (`StepConnect`)**: Auto-discovers local DuckDB files, `gcloud` ADC projects, `~/.snowflake/connections.toml`, and `~/.databrickscfg` profiles, or accepts custom warehouse credentials.
-2. **Discover (`StepDiscover`)**: Scans schemas and tables in your warehouse with fuzzy search and row count previews.
-3. **Map (`StepMap`)**: Auto-detects `entity_key`, `watermark_column` (`updated_at`, `modified_at`, `order_date`, `event_ts`, etc.), identifiers, and attributes per source table.
-4. **Rules & Exclusions (`StepRules`)**:
-   - Configure deterministic rules with all 9 **Domain Canonicalizers** (`EMAIL_STANDARD`, `EMAIL_STRIP_PLUS`, `PHONE_DIGITS`, `PHONE_US_10`, `ALPHANUMERIC_UPPER`, `LOWERCASE`, `UPPERCASE`, `EXACT`/`NONE`) or a **Custom SQL (`{val}`)** expression input.
-   - Toggle **Default Poison-Pill Exclusions (`use_default_exclusions`)** and add custom `EXACT`/`LIKE` or `ANY` wildcard exclusions.
-5. **Survivorship (`StepSurvivorship`)**: Configure `PRIORITY`, `RECENCY`, or `FREQUENCY` winners per profile attribute.
-6. **Review & Run (`StepReview`)**:
-   - **Above-the-Fold Action Bar & Run Configuration**: Choose `Incremental (Faster)` or `Full Refresh`, `Max Iterations`, `Strict Mode`, or `Dry Run` and click **Save Config** or **Run Pipeline** without scrolling.
-   - **Collapsible Summary Cards**: Click `Source Tables`, `Rules & Guardrails`, `Survivorship`, or `Raw JSON` to inspect configuration details in bounded drawers.
-   - **Live 8-Stage Execution Progress**: Real-time progress bar (`GET /api/setup/run/progress`), elapsed timer, active stage indicator, and live Label Propagation iteration & label-change counter.
+### Identity Studio (`/setup`)
+- **Connect Data Warehouse**: Clean 2-column connection workspace with auto-discovered local credentials (1-click connect) and dark-mode segmented auth selectors:
+  - **Snowflake**: Switch cleanly between `Password` and `RSA Key-Pair (JWT)` (`private_key_path` / inline PEM + optional passphrase).
+  - **Databricks**: Switch cleanly between `Personal Access Token (PAT)` and `OAuth M2M (Client Secret)`.
+- **Persistent Sticky Studio Header**: Quick actions for `Switch Warehouse`, `History` (view & restore `idr_out.config_snapshot` versions), `Discard` unsaved draft changes, `Save Config`, `Run Pipeline`, and `JSON` import/export.
+- **4 Persistent Studio Tabs**:
+  1. **Sources & Mappings (`1. Sources & Mappings`)**: Merged table discovery and mapping workspace with a multi-schema slide-over **Discover Tables** drawer and 1-click **Auto-Map All**, plus inline `entity_key`, `watermark_column`, identifier, and attribute editors.
+  2. **Matching Rules (`2. Matching Rules`)**: Configure deterministic rules with all 9 **Domain Canonicalizers** (`EMAIL_STANDARD`, `EMAIL_STRIP_PLUS`, `PHONE_DIGITS`, `PHONE_US_10`, `ALPHANUMERIC_UPPER`, `LOWERCASE`, `UPPERCASE`, `EXACT`/`NONE`, custom SQL `{val}`), fuzzy blocking rules, **Default Poison-Pill Exclusions (`use_default_exclusions`)**, and custom `EXACT`/`LIKE` or `ANY` wildcard exclusions (with automatic bare-substring matching for `LIKE` patterns without `%`/`_`).
+  3. **Survivorship (`3. Survivorship`)**: Configure `PRIORITY`, `RECENCY`, `FREQUENCY`, and domain-specific winners per Golden Profile attribute.
+  4. **Run & Verify (`4. Run & Verify`)**:
+     - **Non-Saving Draft Dry Run**: Click **Start Dry Run** to test unsaved edits ephemerally (`idr_meta.*` is backed up and automatically restored—showing `Draft Previewed — Saved Config Untouched`) without mutating saved metadata or production `idr_out` tables.
+     - **5-Card Delta Summary**: Inspect `New Entities`, `Moved Entities`, `Edges Delta` (`proposed_edges` vs `current_edges`), `Clusters Delta` (`proposed_clusters` vs `current_clusters`), and `Unchanged Entities`, then choose **Save & Execute Real Pipeline**, **Save Config Only**, **Discard Draft Changes**, or **Edit Configuration**.
+     - **Live 8-Stage Execution Progress**: Real-time progress bar (`GET /api/setup/run/progress`), elapsed timer, active stage indicator, and live Label Propagation iteration & label-change counter.
 
 ### Cluster Explorer & Stewardship (`/explorer`)
 - Search by identifier value, `entity_key`, or `resolved_id` to inspect cluster graphs, confidence breakdowns, and Golden Profiles.
@@ -67,9 +70,10 @@ idr ui --db demo.duckdb
 | Method & Path | Description |
 | :--- | :--- |
 | `POST /api/connect` | Connect to DuckDB, Snowflake, BigQuery, or Databricks and initialize session lease. |
-| `GET /api/setup/AutoConfig` | Reconstruct the full declarative configuration from `idr_meta.*` tables (`sql_to_config`). |
-| `POST /api/setup/save` | Validate and apply configuration (`config_to_sql`) to `idr_meta.*`. |
-| `POST /api/setup/run` | Execute the 8-stage `IDRRunner` in a background worker thread and return `RunSummary`. |
+| `GET /api/setup/config` | Reconstruct the active declarative configuration from `idr_meta.*` (`sql_to_config`) or latest snapshot. |
+| `GET /api/setup/config/history` | List versioned configuration snapshots from `idr_out.config_snapshot` for draft loading or rollback. |
+| `POST /api/setup/config/save` | Validate and apply configuration (`config_to_sql`) to `idr_meta.*` and archive a snapshot. |
+| `POST /api/setup/run` | Execute the 8-stage `IDRRunner` in a background worker thread and return `RunSummary` (accepts optional `config` payload with `dry_run: true` for ephemeral non-saving evaluation). |
 | `GET /api/setup/run/progress` | Poll non-blocking in-memory stage progress (`stage_index`, `stage`, `iteration`, `changes`, `elapsed_seconds`). |
 | `GET /api/clusters/{id}` | Retrieve cluster members, connecting edges, confidence breakdown, and Golden Profile. |
 | `GET /api/explorer/overrides` | List active manual stewardship overrides from `idr_meta.identity_override`. |

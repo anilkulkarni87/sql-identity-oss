@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2, ShieldAlert, Link2 } from "lucide-react";
+import {
+    GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2,
+    ShieldAlert, Link2, AlertCircle
+} from "lucide-react";
 import { ExclusionRule, IDRConfig, MatchingRule, OverrideRule } from '../../types';
 import { api } from '../../api/client';
 import { CustomSelect } from '../../components/CustomSelect';
@@ -18,8 +21,9 @@ const BUILTIN_CANONICALIZERS = [
 
 interface StepRulesProps {
     config: IDRConfig;
+    onChange?: (config: IDRConfig) => void;
     onNext: (config: IDRConfig) => void;
-    onBack: () => void;
+    onBack?: () => void;
 }
 
 interface FuzzyTemplate {
@@ -30,11 +34,17 @@ interface FuzzyTemplate {
     description: string;
 }
 
-export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
-    const [rules, setRules] = useState<MatchingRule[]>([]);
+export default function StepRules({ config, onChange, onNext, onBack }: StepRulesProps) {
+    const combineFromConfig = (cfg: IDRConfig): MatchingRule[] =>
+        [
+            ...(cfg.rules || []),
+            ...(cfg.fuzzy_rules || []).map(f => ({ ...f, type: 'FUZZY' })),
+        ].sort((a, b) => (a.priority || 0) - (b.priority || 0));
+
+    const [rules, setRules] = useState<MatchingRule[]>(() => combineFromConfig(config));
     const [exclusions, setExclusions] = useState<ExclusionRule[]>(config.exclusions || []);
     const [useDefaultExclusions, setUseDefaultExclusions] = useState<boolean>(!!config.use_default_exclusions);
-    const [newExclType, setNewExclType] = useState<string>('');
+    const [newExclType, setNewExclType] = useState<string>('ANY');
     const [newExclValue, setNewExclValue] = useState<string>('');
     const [newExclMatch, setNewExclMatch] = useState<'EXACT' | 'LIKE'>('EXACT');
     const [overrides, setOverrides] = useState<OverrideRule[]>(config.overrides || []);
@@ -45,29 +55,42 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     const [availableTypes, setAvailableTypes] = useState<string[]>([]);
     const [availableAttributes, setAvailableAttributes] = useState<string[]>([]);
     const [fuzzyTemplates, setFuzzyTemplates] = useState<FuzzyTemplate[]>([]);
-    const initializedRef = useRef(false);
+    const [validationError, setValidationError] = useState<string | null>(null);
+
+    const latestConfigRef = useRef(config);
+    latestConfigRef.current = config;
+
+    const lastEmittedSigRef = useRef<string>('');
+
+    const serializeRuleSlice = (
+        r: MatchingRule[],
+        f: MatchingRule[],
+        e: ExclusionRule[],
+        o: OverrideRule[],
+        d: boolean
+    ) => JSON.stringify({ r, f, e, o, d });
 
     useEffect(() => {
-        // Only initialize from parent config on first mount or when rules are empty
-        if (!initializedRef.current) {
-            const combined: MatchingRule[] = [
-                ...(config.rules || []),
-                ...(config.fuzzy_rules || []).map(f => ({ ...f, type: 'FUZZY' }))
-            ].sort((a, b) => a.priority - b.priority);
-
-            setRules(combined);
+        const incomingSig = serializeRuleSlice(
+            config.rules || [],
+            config.fuzzy_rules || [],
+            config.exclusions || [],
+            config.overrides || [],
+            !!config.use_default_exclusions
+        );
+        if (incomingSig !== lastEmittedSigRef.current) {
+            setRules(combineFromConfig(config));
             setExclusions(config.exclusions || []);
             setUseDefaultExclusions(!!config.use_default_exclusions);
             setOverrides(config.overrides || []);
-            initializedRef.current = true;
+            lastEmittedSigRef.current = incomingSig;
         }
 
-        // Available match keys & attributes
         const typeSet = new Set<string>();
         const attrSet = new Set<string>();
         (config.sources || []).forEach(src => {
             (src.identifiers || []).forEach(id => {
-                if (id.is_match_key !== false) typeSet.add(id.type);
+                if (id.is_match_key !== false && id.type) typeSet.add(id.type);
             });
             (src.attributes || []).forEach(attr => {
                 if (attr.name) attrSet.add(attr.name);
@@ -77,29 +100,53 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
         const attrsArr = Array.from(attrSet).sort();
         setAvailableTypes(typesArr);
         setAvailableAttributes(attrsArr.length > 0 ? attrsArr : typesArr);
-        if (typesArr.length > 0 && !newExclType) {
+        if (typesArr.length > 0 && newExclType === 'ANY') {
             setNewExclType(typesArr[0]);
         }
+    }, [config]);
 
-        // Fetch fuzzy templates
+    useEffect(() => {
         api.getFuzzyTemplates()
             .then(data => setFuzzyTemplates(data.templates || []))
             .catch(err => console.error("Failed to fetch templates", err));
-
-    }, [config]);
-
-    const clearAllFuzzyRules = () => {
-        const remaining = rules.filter(r => r.type !== 'FUZZY');
-        updatePriorities(remaining);
-    };
+    }, []);
 
     const resolveTemplateSql = (templateSql: string, colName: string) => {
         const safeCol = colName || availableAttributes[0] || availableTypes[0] || 'first_name';
         return templateSql.replace(/\{col\}/g, safeCol);
     };
 
+    const emitChange = (
+        nextRules: MatchingRule[],
+        nextExcl: ExclusionRule[] = exclusions,
+        nextOv: OverrideRule[] = overrides,
+        nextDefExcl: boolean = useDefaultExclusions
+    ) => {
+        const exact = nextRules.filter(r => r.type === 'EXACT');
+        const fuzzy = nextRules.filter(r => r.type === 'FUZZY').map(r => ({
+            ...r,
+            score_expr: resolveTemplateSql(r.score_expr || '', r.fuzzy_attribute || availableAttributes[0] || 'first_name'),
+        }));
+        lastEmittedSigRef.current = serializeRuleSlice(exact, fuzzy, nextExcl, nextOv, nextDefExcl);
+        setValidationError(null);
+        onChange?.({
+            ...latestConfigRef.current,
+            rules: exact,
+            fuzzy_rules: fuzzy,
+            exclusions: nextExcl,
+            overrides: nextOv,
+            use_default_exclusions: nextDefExcl,
+        });
+    };
+
     const updatePriorities = (newRules: MatchingRule[]) => {
-        setRules(newRules.map((r, i) => ({ ...r, priority: i + 1 })));
+        const numbered = newRules.map((r, i) => ({ ...r, priority: i + 1 }));
+        setRules(numbered);
+        emitChange(numbered);
+    };
+
+    const clearAllFuzzyRules = () => {
+        updatePriorities(rules.filter(r => r.type !== 'FUZZY'));
     };
 
     const moveRule = (idx: number, direction: 'up' | 'down') => {
@@ -115,6 +162,8 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
     const deleteRule = (idx: number) => {
         updatePriorities(rules.filter((_, i) => i !== idx));
     };
+
+    const generateId = () => Math.floor(Math.random() * 1000000);
 
     const addExactRule = (type: string) => {
         const lowerType = type.toLowerCase();
@@ -136,7 +185,10 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
 
     const addFuzzyRule = () => {
         const defaultAttr = availableAttributes[0] || availableTypes[0] || 'first_name';
-        const tmpl = fuzzyTemplates[0] || { sql_template: 'jaro_winkler_similarity(<a>.{col}, <b>.{col})', default_threshold: 0.85 };
+        const tmpl = fuzzyTemplates[0] || {
+            sql_template: 'jaro_winkler_similarity(<a>.{col}, <b>.{col})',
+            default_threshold: 0.85,
+        };
         const newRule: MatchingRule = {
             id: generateId(),
             type: 'FUZZY',
@@ -145,7 +197,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
             blocking_key: availableTypes[0] || '',
             fuzzy_attribute: defaultAttr,
             score_expr: resolveTemplateSql(tmpl.sql_template, defaultAttr),
-            threshold: tmpl.default_threshold
+            threshold: tmpl.default_threshold,
         };
         updatePriorities([...rules, newRule]);
     };
@@ -154,7 +206,6 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
         const newRules = [...rules];
         const current = { ...newRules[idx], [field]: value };
         if (field === 'fuzzy_attribute' && current.score_expr) {
-            // Re-substitute attribute name inside <a>.<col> and <b>.<col>
             current.score_expr = current.score_expr
                 .replace(/\{col\}/g, value)
                 .replace(/<a>\.[a-zA-Z0-9_]+/g, `<a>.${value}`)
@@ -162,6 +213,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
         }
         newRules[idx] = current;
         setRules(newRules);
+        emitChange(newRules);
     };
 
     const applyTemplate = (idx: number, tmplId: string) => {
@@ -173,25 +225,44 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                 ...newRules[idx],
                 fuzzy_attribute: col,
                 score_expr: resolveTemplateSql(tmpl.sql_template, col),
-                threshold: tmpl.default_threshold
+                threshold: tmpl.default_threshold,
             };
             setRules(newRules);
+            emitChange(newRules);
         }
     };
 
     const addExclusion = () => {
         const trimmed = newExclValue.trim();
         if (!trimmed) return;
-        const type = newExclType || availableTypes[0] || 'email';
-        setExclusions(prev => [
-            ...prev,
-            { type, value: trimmed, match: newExclMatch, reason: 'UI exclusion' }
-        ]);
+        const type = newExclType || availableTypes[0] || 'ANY';
+        let normalizedVal = trimmed.replace(/\*/g, '%');
+        let resolvedMatch: 'EXACT' | 'LIKE' = newExclMatch;
+        if (resolvedMatch === 'LIKE') {
+            if (!normalizedVal.includes('%') && !normalizedVal.includes('_')) {
+                normalizedVal = `%${normalizedVal}%`;
+            }
+        } else if (normalizedVal.includes('%')) {
+            resolvedMatch = 'LIKE';
+        }
+        const nextExcl = [
+            ...exclusions,
+            { type, value: normalizedVal, match: resolvedMatch, reason: 'UI exclusion' },
+        ];
+        setExclusions(nextExcl);
         setNewExclValue('');
+        emitChange(rules, nextExcl, overrides, useDefaultExclusions);
     };
 
     const removeExclusion = (idx: number) => {
-        setExclusions(prev => prev.filter((_, i) => i !== idx));
+        const nextExcl = exclusions.filter((_, i) => i !== idx);
+        setExclusions(nextExcl);
+        emitChange(rules, nextExcl, overrides, useDefaultExclusions);
+    };
+
+    const toggleDefaultExclusions = (checked: boolean) => {
+        setUseDefaultExclusions(checked);
+        emitChange(rules, exclusions, overrides, checked);
     };
 
     const addOverride = () => {
@@ -199,35 +270,37 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
         const kb = newOvKeyB.trim();
         if (!ka) return;
         if (newOvType !== 'ISOLATE' && !kb) return;
-        setOverrides(prev => [
-            ...prev,
+        const nextOv = [
+            ...overrides,
             {
                 override_type: newOvType,
                 entity_key_a: ka,
                 entity_key_b: newOvType === 'ISOLATE' ? '__ISOLATE__' : kb,
-                reason: newOvReason.trim() || 'UI stewardship override'
-            }
-        ]);
+                reason: newOvReason.trim() || 'UI stewardship override',
+            },
+        ];
+        setOverrides(nextOv);
         setNewOvKeyA('');
         setNewOvKeyB('');
         setNewOvReason('');
+        emitChange(rules, exclusions, nextOv, useDefaultExclusions);
     };
 
     const removeOverride = (idx: number) => {
-        setOverrides(prev => prev.filter((_, i) => i !== idx));
+        const nextOv = overrides.filter((_, i) => i !== idx);
+        setOverrides(nextOv);
+        emitChange(rules, exclusions, nextOv, useDefaultExclusions);
     };
-
-    const generateId = () => Math.floor(Math.random() * 1000000);
 
     const handleNext = () => {
         if (rules.length === 0) {
-            alert("Define at least one rule.");
+            setValidationError("Define at least one deterministic or fuzzy matching rule to continue.");
             return;
         }
         const exact = rules.filter(r => r.type === 'EXACT');
         const fuzzy = rules.filter(r => r.type === 'FUZZY').map(r => ({
             ...r,
-            score_expr: resolveTemplateSql(r.score_expr || '', r.fuzzy_attribute || availableAttributes[0] || 'first_name')
+            score_expr: resolveTemplateSql(r.score_expr || '', r.fuzzy_attribute || availableAttributes[0] || 'first_name'),
         }));
 
         onNext({
@@ -240,48 +313,82 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
         });
     };
 
-    const btnClass = "px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50";
-    const btnOutlineClass = "px-4 py-2 border border-gray-600 text-gray-300 rounded-md text-sm font-medium hover:bg-gray-800";
+    const blockingKeyOptions = Array.from(new Set([...availableTypes, ...availableAttributes])).map(t => ({
+        value: t,
+        label: t,
+    }));
 
     return (
-        <div className="space-y-6 h-full flex flex-col">
+        <div className="space-y-6 flex flex-col">
             <div>
-                <h2 className="text-xl font-semibold text-white">Matching Rules</h2>
-                <p className="text-sm text-gray-400">Define Exact and Fuzzy rules for linking records.</p>
+                <h2 className="text-xl font-bold tracking-tight text-white">Matching Rules &amp; Guardrails</h2>
+                <p className="text-sm text-slate-400">
+                    Define deterministic Exact rules, probabilistic Fuzzy matching rules, toxic value blocklists, and steward overrides.
+                </p>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-2 space-y-4">
-                <div className="space-y-3">
-                    {rules.map((rule, idx) => (
-                        <div key={rule.id} className="flex gap-4 p-4 bg-gray-800 border border-gray-700 rounded-lg shadow-sm">
-                            <div className="flex flex-col gap-1 pt-2">
-                                <button onClick={() => moveRule(idx, 'up')} disabled={idx === 0} className="p-1 hover:bg-gray-700 rounded text-gray-400 disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
-                                <span className="text-xs font-bold text-center text-gray-500">{rule.priority}</span>
-                                <button onClick={() => moveRule(idx, 'down')} disabled={idx === rules.length - 1} className="p-1 hover:bg-gray-700 rounded text-gray-400 disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
+            {validationError && (
+                <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 text-xs text-amber-200 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>{validationError}</span>
+                </div>
+            )}
+
+            <div className="space-y-3">
+                {rules.map((rule, idx) => {
+                    const matchedTemplate = fuzzyTemplates.find(
+                        t => resolveTemplateSql(t.sql_template, rule.fuzzy_attribute || availableAttributes[0] || 'first_name') === rule.score_expr
+                    );
+                    return (
+                        <div key={rule.id} className="flex gap-4 p-4 bg-slate-900/75 border border-slate-800 rounded-xl shadow-sm">
+                            <div className="flex flex-col items-center gap-1 pt-1">
+                                <button
+                                    type="button"
+                                    onClick={() => moveRule(idx, 'up')}
+                                    disabled={idx === 0}
+                                    className="p-1 hover:bg-slate-800 rounded text-slate-400 disabled:opacity-30"
+                                >
+                                    <ArrowUp className="w-4 h-4" />
+                                </button>
+                                <span className="text-xs font-mono font-bold text-slate-500">{rule.priority}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => moveRule(idx, 'down')}
+                                    disabled={idx === rules.length - 1}
+                                    className="p-1 hover:bg-slate-800 rounded text-slate-400 disabled:opacity-30"
+                                >
+                                    <ArrowDown className="w-4 h-4" />
+                                </button>
                             </div>
 
-                            <div className="flex-1 space-y-3">
-                                <div className="flex items-center gap-2">
-                                    <span className={`text-xs px-2 py-0.5 rounded-full border ${rule.type === 'EXACT' ? 'bg-blue-900/30 text-blue-300 border-blue-800' : 'bg-purple-900/30 text-purple-300 border-purple-800'}`}>
+                            <div className="flex-1 space-y-3 min-w-0">
+                                <div className="flex items-center gap-2.5">
+                                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+                                        rule.type === 'EXACT'
+                                            ? 'bg-blue-950/60 text-blue-300 border-blue-800/70'
+                                            : 'bg-purple-950/60 text-purple-300 border-purple-800/70'
+                                    }`}>
                                         {rule.type}
                                     </span>
                                     {rule.type === 'EXACT' ? (
                                         <div className="flex items-center gap-2">
                                             <GitGraph className="w-4 h-4 text-blue-400" />
-                                            <span className="font-semibold text-gray-200">Match by {rule.match_keys.join(' + ')}</span>
+                                            <span className="font-semibold text-sm text-slate-100">
+                                                Match by {rule.match_keys.join(' + ')}
+                                            </span>
                                         </div>
                                     ) : (
                                         <div className="flex items-center gap-2">
                                             <Wand2 className="w-4 h-4 text-purple-400" />
-                                            <span className="font-semibold text-gray-200">Fuzzy Match</span>
+                                            <span className="font-semibold text-sm text-slate-100">Fuzzy Similarity Rule</span>
                                         </div>
                                     )}
                                 </div>
 
                                 {rule.type === 'EXACT' ? (
-                                    <div className="space-y-2">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <label className="text-xs text-gray-500">Normalization:</label>
+                                    <div className="space-y-2.5">
+                                        <div className="flex flex-wrap items-center gap-2.5">
+                                            <label className="text-xs text-slate-400">Normalization:</label>
                                             <CustomSelect
                                                 value={
                                                     BUILTIN_CANONICALIZERS.includes((rule.canonicalize || 'LOWERCASE').toUpperCase())
@@ -297,7 +404,7 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                                 }}
                                                 options={[
                                                     { value: 'EMAIL_STANDARD', label: 'Email Standard (Trim + Lowercase, keeps +tag)' },
-                                                    { value: 'EMAIL_STRIP_PLUS', label: 'Email Strip +Tag (user+tag@domain → user@domain)' },
+                                                    { value: 'EMAIL_STRIP_PLUS', label: 'Email Strip +Tag (user+tag@domain -> user@domain)' },
                                                     { value: 'PHONE_US_10', label: 'Phone US 10-Digit (Strips +1 & punctuation)' },
                                                     { value: 'PHONE_DIGITS', label: 'Phone Digits Only (Strips non-digits)' },
                                                     { value: 'ALPHANUMERIC_UPPER', label: 'Alphanumeric Upper (Strips spaces/hyphens)' },
@@ -306,8 +413,8 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                                     { value: 'EXACT', label: 'Exact / None' },
                                                     { value: 'CUSTOM_SQL', label: 'Custom Warehouse SQL ({val})...' },
                                                 ]}
-                                                buttonClassName="text-xs py-1 px-2.5"
-                                                menuClassName="left-0 right-auto min-w-[320px]"
+                                                buttonClassName="text-xs py-1.5 px-2.5"
+                                                menuClassName="left-0 right-auto min-w-[330px]"
                                             />
                                         </div>
                                         {!BUILTIN_CANONICALIZERS.includes((rule.canonicalize || 'LOWERCASE').toUpperCase()) && (
@@ -318,74 +425,78 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                                     value={rule.canonicalize || ''}
                                                     onChange={(e) => updateRuleField(idx, 'canonicalize', e.target.value)}
                                                     placeholder="e.g. LPAD(LTRIM(TRIM({val}), '0'), 8, '0')"
-                                                    className="flex-1 bg-gray-900 border border-blue-700/60 text-xs font-mono text-gray-200 rounded px-2.5 py-1 focus:outline-none focus:border-blue-400"
+                                                    className="flex-1 bg-slate-950 border border-blue-700/60 text-xs font-mono text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
                                                 />
                                             </div>
                                         )}
-                                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-700/50">
-                                            <label className="text-xs text-gray-400">Max Group Size:</label>
+                                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/80">
+                                            <label className="text-xs text-slate-400">Max Group Size:</label>
                                             <input
                                                 type="number"
                                                 min="2"
                                                 value={rule.max_group_size ?? 10000}
-                                                onChange={(e) => updateRuleField(idx, 'max_group_size', parseInt(e.target.value) || 10000)}
-                                                className="w-24 bg-gray-900 border border-gray-700 text-xs font-mono text-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-500"
+                                                onChange={(e) => updateRuleField(idx, 'max_group_size', parseInt(e.target.value, 10) || 10000)}
+                                                className="w-24 bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 rounded-md px-2 py-1 focus:outline-none focus:border-blue-500"
                                             />
-                                            <span className="text-[11px] text-gray-500">
-                                                (Skips identifier values with more than this many records to prevent mega-clusters)
+                                            <span className="text-[11px] text-slate-500">
+                                                Skips identifier values linked to more records than this threshold to avoid mega-clusters.
                                             </span>
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-3 gap-3 bg-gray-900/50 p-3 rounded border border-gray-700">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
                                         <div>
-                                            <label className="text-xs text-gray-500 block mb-1">Blocking Key</label>
-                                            <select
+                                            <label className="text-[11px] text-slate-400 block mb-1">Blocking Key</label>
+                                            <CustomSelect
                                                 value={rule.blocking_key || ''}
-                                                onChange={(e) => updateRuleField(idx, 'blocking_key', e.target.value)}
-                                                className="w-full bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-purple-500"
-                                            >
-                                                {Array.from(new Set([...availableTypes, ...availableAttributes])).map(t => (
-                                                    <option key={t} value={t}>{t}</option>
-                                                ))}
-                                            </select>
+                                                onChange={(val) => updateRuleField(idx, 'blocking_key', val)}
+                                                options={blockingKeyOptions}
+                                                className="w-full"
+                                                buttonClassName="text-xs py-1.5 bg-slate-900"
+                                                menuClassName="left-0 right-auto min-w-[200px]"
+                                            />
                                         </div>
                                         <div>
-                                            <label className="text-xs text-gray-500 block mb-1">Compare Attribute</label>
-                                            <select
+                                            <label className="text-[11px] text-slate-400 block mb-1">Compare Attribute</label>
+                                            <CustomSelect
                                                 value={rule.fuzzy_attribute || availableAttributes[0] || ''}
-                                                onChange={(e) => updateRuleField(idx, 'fuzzy_attribute', e.target.value)}
-                                                className="w-full bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-purple-500"
-                                            >
-                                                {availableAttributes.map(a => <option key={a} value={a}>{a}</option>)}
-                                            </select>
+                                                onChange={(val) => updateRuleField(idx, 'fuzzy_attribute', val)}
+                                                options={availableAttributes.map(a => ({ value: a, label: a }))}
+                                                className="w-full"
+                                                buttonClassName="text-xs py-1.5 bg-slate-900"
+                                                menuClassName="left-0 right-auto min-w-[200px]"
+                                            />
                                         </div>
                                         <div>
-                                            <label className="text-xs text-gray-500 block mb-1">Method</label>
-                                            <select
-                                                onChange={(e) => applyTemplate(idx, e.target.value)}
-                                                className="w-full bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded px-2 py-1 focus:outline-none focus:border-purple-500"
-                                                defaultValue=""
-                                            >
-                                                <option value="" disabled>Select template...</option>
-                                                {fuzzyTemplates.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-                                            </select>
+                                            <label className="text-[11px] text-slate-400 block mb-1">Similarity Method</label>
+                                            <CustomSelect
+                                                value={matchedTemplate?.id || ''}
+                                                onChange={(val) => applyTemplate(idx, val)}
+                                                placeholder="Select template..."
+                                                options={fuzzyTemplates.map(t => ({ value: t.id, label: t.label }))}
+                                                className="w-full"
+                                                buttonClassName="text-xs py-1.5 bg-slate-900"
+                                                menuClassName="right-0 left-auto min-w-[260px]"
+                                            />
                                         </div>
-                                        <div className="col-span-3">
-                                            <div className="flex justify-between text-xs text-gray-500 mb-1">
-                                                <span>Threshold</span>
-                                                <span className="text-purple-300 font-mono">{rule.threshold}</span>
+                                        <div className="sm:col-span-3 pt-1">
+                                            <div className="flex justify-between text-xs text-slate-400 mb-1">
+                                                <span>Similarity Threshold</span>
+                                                <span className="text-purple-300 font-mono font-semibold">{rule.threshold}</span>
                                             </div>
                                             <input
-                                                type="range" min="0.5" max="1.0" step="0.01"
+                                                type="range"
+                                                min="0.5"
+                                                max="1.0"
+                                                step="0.01"
                                                 value={rule.threshold || 0.85}
                                                 onChange={(e) => updateRuleField(idx, 'threshold', parseFloat(e.target.value))}
                                                 className="w-full accent-purple-500"
                                             />
                                         </div>
                                         {rule.score_expr && (
-                                            <div className="col-span-3">
-                                                <span className="text-[11px] font-mono text-gray-500 block truncate" title={rule.score_expr}>
+                                            <div className="sm:col-span-3">
+                                                <span className="text-[11px] font-mono text-slate-500 block truncate" title={rule.score_expr}>
                                                     SQL: {rule.score_expr}
                                                 </span>
                                             </div>
@@ -393,108 +504,130 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                                     </div>
                                 )}
                             </div>
-                            <button onClick={() => deleteRule(idx)} className="p-2 hover:bg-red-900/20 text-gray-500 hover:text-red-400 rounded transition-colors"><Trash2 className="w-4 h-4" /></button>
+                            <button
+                                type="button"
+                                onClick={() => deleteRule(idx)}
+                                className="p-2 h-fit hover:bg-rose-950/40 text-slate-500 hover:text-rose-400 rounded-lg transition-colors"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </button>
                         </div>
-                    ))}
+                    );
+                })}
 
-                    {rules.length === 0 && (
-                        <div className="text-center p-8 border border-dashed border-gray-700 rounded-lg text-gray-500">
-                            No rules defined. Add a rule to start.
-                        </div>
+                {rules.length === 0 && (
+                    <div className="text-center p-8 border border-dashed border-slate-700 rounded-xl text-xs text-slate-500">
+                        No matching rules defined yet. Add an Exact or Fuzzy rule below to get started.
+                    </div>
+                )}
+            </div>
+
+            {/* Add Rule Toolbar */}
+            <div className="pt-4 border-t border-slate-800 space-y-2.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 block">Add Matching Rule</label>
+                <div className="flex flex-wrap items-center gap-2">
+                    {availableTypes.map(type => (
+                        <button
+                            key={type}
+                            type="button"
+                            onClick={() => addExactRule(type)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-700 hover:border-blue-500 hover:text-blue-300 rounded-lg text-xs font-medium text-slate-300 transition-all"
+                        >
+                            <Plus className="w-3.5 h-3.5" /> Exact: {type}
+                        </button>
+                    ))}
+                    <div className="w-px bg-slate-800 mx-1 h-6" />
+                    <button
+                        type="button"
+                        onClick={addFuzzyRule}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-950/40 border border-purple-800/70 hover:border-purple-500 hover:text-purple-200 rounded-lg text-xs font-medium text-purple-300 transition-all"
+                    >
+                        <Wand2 className="w-3.5 h-3.5" /> Add Fuzzy Rule
+                    </button>
+                    {rules.some(r => r.type === 'FUZZY') && (
+                        <button
+                            type="button"
+                            onClick={clearAllFuzzyRules}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/30 border border-rose-800/60 hover:border-rose-500 hover:text-rose-200 rounded-lg text-xs text-rose-400 transition-all"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" /> Remove All Fuzzy
+                        </button>
                     )}
                 </div>
+            </div>
 
-                <div className="pt-4 border-t border-gray-800">
-                    <label className="text-sm font-medium text-gray-300 mb-2 block">Add New Rule</label>
-                    <div className="flex flex-wrap gap-2">
-                        {availableTypes.map(type => (
-                            <button key={type} onClick={() => addExactRule(type)} className="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 hover:border-blue-500 hover:text-blue-400 rounded-md text-sm text-gray-300 transition-all">
-                                <Plus className="w-3 h-3" /> Exact: {type}
-                            </button>
-                        ))}
-                        <div className="w-px bg-gray-700 mx-2 h-8"></div>
-                        <button onClick={addFuzzyRule} className="flex items-center gap-2 px-3 py-2 bg-purple-900/30 border border-purple-800 hover:border-purple-500 hover:text-purple-300 rounded-md text-sm text-purple-300 transition-all">
-                            <Wand2 className="w-3 h-3" /> Add Fuzzy Rule
-                        </button>
-                        {rules.some(r => r.type === 'FUZZY') && (
-                            <button
-                                onClick={clearAllFuzzyRules}
-                                className="flex items-center gap-1.5 px-3 py-2 bg-red-950/40 border border-red-800 hover:border-red-600 hover:text-red-300 rounded-md text-sm text-red-400 transition-all"
-                                title="Remove all fuzzy rules"
-                            >
-                                <Trash2 className="w-3.5 h-3.5" /> Remove All Fuzzy Rules
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-
-                {/* Interactive Identifier Exclusions Editor */}
-                <div className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 mt-4 space-y-3">
+            {/* Governance Section: Exclusions & Manual Overrides */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+                {/* Exclusions */}
+                <div className="bg-slate-900/75 border border-slate-800 rounded-xl p-4 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                             <ShieldAlert className="w-4 h-4 text-amber-400" />
-                            <h4 className="font-medium text-sm text-gray-200">Identifier Exclusions (Blocklist)</h4>
+                            <h4 className="font-semibold text-sm text-slate-200">Identifier Exclusions</h4>
                         </div>
-                        <label className="inline-flex items-center gap-2 text-xs text-amber-300 cursor-pointer bg-amber-950/40 border border-amber-800/60 px-2.5 py-1 rounded-md">
+                        <label className="inline-flex items-center gap-2 text-[11px] text-amber-300 cursor-pointer bg-amber-950/40 border border-amber-800/60 px-2.5 py-1 rounded-md">
                             <input
                                 type="checkbox"
                                 checked={useDefaultExclusions}
-                                onChange={(e) => setUseDefaultExclusions(e.target.checked)}
+                                onChange={(e) => toggleDefaultExclusions(e.target.checked)}
                                 className="accent-amber-500 rounded"
                             />
-                            <span>Include Curated Default Toxic Pack (33 rules: noreply@%, 0000000000, N/A, etc.)</span>
+                            <span>Default Toxic Pack (33 rules)</span>
                         </label>
                     </div>
-                    <p className="text-xs text-gray-400">
-                        Prevent placeholder values (e.g. <code className="bg-gray-900 px-1 py-0.5 rounded">test@test.com</code>, <code className="bg-gray-900 px-1 py-0.5 rounded">0000000000</code>) from linking unrelated entities. Rows manually inserted into <code className="bg-gray-900 px-1 py-0.5 rounded">idr_meta.identifier_exclusion</code> via SQL are always preserved.
+                    <p className="text-xs text-slate-400">
+                        Prevent placeholder values (<code>test@test.com</code>, <code>0000000000</code>) from chaining unrelated entities.
                     </p>
                     <div className="flex flex-wrap gap-2">
-                        <select
+                        <CustomSelect
                             value={newExclType || availableTypes[0] || 'ANY'}
-                            onChange={(e) => setNewExclType(e.target.value)}
-                            className="bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-2 py-1.5"
-                        >
-                            <option value="ANY">ANY (All Types)</option>
-                            {availableTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                        <select
+                            onChange={setNewExclType}
+                            options={[
+                                { value: 'ANY', label: 'ANY (All Types)' },
+                                ...availableTypes.map(t => ({ value: t, label: t })),
+                            ]}
+                            buttonClassName="text-xs py-1.5 bg-slate-950"
+                            menuClassName="left-0 right-auto min-w-[160px]"
+                        />
+                        <CustomSelect
                             value={newExclMatch}
-                            onChange={(e) => setNewExclMatch(e.target.value as 'EXACT' | 'LIKE')}
-                            className="bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-2 py-1.5"
-                        >
-                            <option value="EXACT">EXACT</option>
-                            <option value="LIKE">LIKE (%)</option>
-                        </select>
+                            onChange={(val) => setNewExclMatch(val as 'EXACT' | 'LIKE')}
+                            options={[
+                                { value: 'EXACT', label: 'EXACT' },
+                                { value: 'LIKE', label: 'LIKE (%)' },
+                            ]}
+                            buttonClassName="text-xs py-1.5 bg-slate-950"
+                            menuClassName="left-0 right-auto min-w-[140px]"
+                        />
                         <input
                             type="text"
                             value={newExclValue}
                             onChange={(e) => setNewExclValue(e.target.value)}
-                            placeholder="Value or pattern (e.g. test@test.com)"
-                            className="flex-1 min-w-[180px] bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-3 py-1.5"
+                            placeholder="Value or pattern"
+                            className="flex-1 min-w-[140px] bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-amber-500"
                         />
                         <button
                             type="button"
                             onClick={addExclusion}
-                            className="px-3 py-1.5 bg-amber-600/30 border border-amber-600/60 hover:bg-amber-600/50 text-amber-200 rounded text-xs font-medium"
+                            className="px-3 py-1.5 bg-amber-600/25 border border-amber-600/60 hover:bg-amber-600/40 text-amber-200 rounded-lg text-xs font-medium"
                         >
-                            + Add Exclusion
+                            + Add
                         </button>
                     </div>
                     {exclusions.length > 0 && (
-                        <div className="flex flex-wrap gap-2 pt-2">
+                        <div className="flex flex-wrap gap-1.5 pt-1">
                             {exclusions.map((ex, i) => (
                                 <span
                                     key={`${ex.type}-${ex.value}-${i}`}
-                                    className="inline-flex items-center gap-2 px-2.5 py-1 bg-gray-900 border border-gray-700 rounded-full text-xs text-gray-300"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-950 border border-slate-700 rounded-full text-xs text-slate-300"
                                 >
                                     <span className="text-amber-400 font-semibold">{ex.type}</span>
-                                    <span className="text-gray-500">({ex.match || ex.match_type || 'EXACT'})</span>
+                                    <span className="text-slate-500">({ex.match || ex.match_type || 'EXACT'})</span>
                                     <span className="font-mono">{ex.value}</span>
                                     <button
                                         type="button"
                                         onClick={() => removeExclusion(i)}
-                                        className="text-gray-500 hover:text-red-400"
+                                        className="text-slate-500 hover:text-rose-400 ml-0.5"
                                     >
                                         ×
                                     </button>
@@ -504,39 +637,41 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                     )}
                 </div>
 
-                {/* Manual Stewardship Overrides Editor */}
-                <div className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 mt-4 space-y-3">
+                {/* Manual Stewardship Overrides */}
+                <div className="bg-slate-900/75 border border-slate-800 rounded-xl p-4 space-y-3">
                     <div className="flex items-center gap-2">
                         <Link2 className="w-4 h-4 text-emerald-400" />
-                        <h4 className="font-medium text-sm text-gray-200">Manual Stewardship Overrides (FORCE_LINK / DO_NOT_LINK / ISOLATE)</h4>
+                        <h4 className="font-semibold text-sm text-slate-200">Stewardship Overrides</h4>
                     </div>
-                    <p className="text-xs text-gray-400">
-                        Force-merge specific entity keys (<code className="bg-gray-900 px-1 py-0.5 rounded">FORCE_LINK</code>), block false merges (<code className="bg-gray-900 px-1 py-0.5 rounded">DO_NOT_LINK</code>), or quarantine a single contaminated record (<code className="bg-gray-900 px-1 py-0.5 rounded">ISOLATE</code>).
+                    <p className="text-xs text-slate-400">
+                        Force-merge (<code>FORCE_LINK</code>), block false merges (<code>DO_NOT_LINK</code>), or quarantine (<code>ISOLATE</code>).
                     </p>
                     <div className="flex flex-wrap gap-2">
-                        <select
+                        <CustomSelect
                             value={newOvType}
-                            onChange={(e) => setNewOvType(e.target.value as 'FORCE_LINK' | 'DO_NOT_LINK' | 'ISOLATE')}
-                            className="bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-2 py-1.5"
-                        >
-                            <option value="DO_NOT_LINK">DO_NOT_LINK (Block Pair)</option>
-                            <option value="FORCE_LINK">FORCE_LINK (Merge Pair)</option>
-                            <option value="ISOLATE">ISOLATE (Quarantine Entity)</option>
-                        </select>
+                            onChange={(val) => setNewOvType(val as 'FORCE_LINK' | 'DO_NOT_LINK' | 'ISOLATE')}
+                            options={[
+                                { value: 'DO_NOT_LINK', label: 'DO_NOT_LINK (Block Pair)' },
+                                { value: 'FORCE_LINK', label: 'FORCE_LINK (Merge Pair)' },
+                                { value: 'ISOLATE', label: 'ISOLATE (Quarantine Entity)' },
+                            ]}
+                            buttonClassName="text-xs py-1.5 bg-slate-950"
+                            menuClassName="left-0 right-auto min-w-[210px]"
+                        />
                         <input
                             type="text"
                             value={newOvKeyA}
                             onChange={(e) => setNewOvKeyA(e.target.value)}
-                            placeholder="Entity Key A (e.g. crm:101)"
-                            className="min-w-[150px] bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-3 py-1.5 font-mono"
+                            placeholder="Entity Key A (crm:101)"
+                            className="min-w-[130px] flex-1 bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-lg px-2.5 py-1.5 font-mono"
                         />
                         {newOvType !== 'ISOLATE' && (
                             <input
                                 type="text"
                                 value={newOvKeyB}
                                 onChange={(e) => setNewOvKeyB(e.target.value)}
-                                placeholder="Entity Key B (e.g. orders:502)"
-                                className="min-w-[150px] bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-3 py-1.5 font-mono"
+                                placeholder="Entity Key B (web:502)"
+                                className="min-w-[130px] flex-1 bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-lg px-2.5 py-1.5 font-mono"
                             />
                         )}
                         <input
@@ -544,35 +679,35 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                             value={newOvReason}
                             onChange={(e) => setNewOvReason(e.target.value)}
                             placeholder="Reason (optional)"
-                            className="flex-1 min-w-[140px] bg-gray-900 border border-gray-700 text-xs text-gray-200 rounded px-3 py-1.5"
+                            className="min-w-[120px] flex-1 bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-lg px-2.5 py-1.5"
                         />
                         <button
                             type="button"
                             onClick={addOverride}
-                            className="px-3 py-1.5 bg-emerald-600/30 border border-emerald-600/60 hover:bg-emerald-600/50 text-emerald-200 rounded text-xs font-medium"
+                            className="px-3 py-1.5 bg-emerald-600/25 border border-emerald-600/60 hover:bg-emerald-600/40 text-emerald-200 rounded-lg text-xs font-medium"
                         >
-                            + Add Override
+                            + Add
                         </button>
                     </div>
                     {overrides.length > 0 && (
-                        <div className="flex flex-wrap gap-2 pt-2">
+                        <div className="flex flex-wrap gap-1.5 pt-1">
                             {overrides.map((ov, i) => (
                                 <span
                                     key={`${ov.override_type}-${ov.entity_key_a}-${ov.entity_key_b}-${i}`}
-                                    className="inline-flex items-center gap-2 px-2.5 py-1 bg-gray-900 border border-gray-700 rounded-full text-xs text-gray-300"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-950 border border-slate-700 rounded-full text-xs text-slate-300"
                                 >
                                     <span className="text-emerald-400 font-semibold">{ov.override_type}</span>
                                     <span className="font-mono">{ov.entity_key_a}</span>
                                     {ov.override_type !== 'ISOLATE' && ov.entity_key_b && (
                                         <>
-                                            <span className="text-gray-500">↔</span>
+                                            <span className="text-slate-500">↔</span>
                                             <span className="font-mono">{ov.entity_key_b}</span>
                                         </>
                                     )}
                                     <button
                                         type="button"
                                         onClick={() => removeOverride(i)}
-                                        className="text-gray-500 hover:text-red-400"
+                                        className="text-slate-500 hover:text-rose-400 ml-0.5"
                                     >
                                         ×
                                     </button>
@@ -583,9 +718,23 @@ export default function StepRules({ config, onNext, onBack }: StepRulesProps) {
                 </div>
             </div>
 
-            <div className="flex justify-between pt-4">
-                <button className={btnOutlineClass} onClick={onBack}>Back</button>
-                <button className={btnClass} onClick={handleNext}>Next: Survivorship</button>
+            <div className="flex justify-between pt-3 border-t border-slate-800/80">
+                {onBack ? (
+                    <button
+                        type="button"
+                        onClick={onBack}
+                        className="px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-xs font-medium hover:bg-slate-800"
+                    >
+                        ← Back to Sources
+                    </button>
+                ) : <div />}
+                <button
+                    type="button"
+                    onClick={handleNext}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition-colors"
+                >
+                    Continue to Survivorship →
+                </button>
             </div>
         </div>
     );

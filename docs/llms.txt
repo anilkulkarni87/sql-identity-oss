@@ -14,7 +14,7 @@
 - Agent Skill (`SKILL.md`): https://github.com/anilkulkarni87/sql-identity-oss/blob/main/skills/sql-identity-resolution/SKILL.md
 
 ## Headless Interfaces
-- **CLI**: `idr init`, `idr doctor`, `idr bootstrap`, `idr apply-config`, `idr run --mode FULL|INCR`, `idr evaluate`, `idr privacy forget`, `idr plugins list`, `idr ai test|models|ask`, `idr explain`, `idr triage`
+- **CLI**: `idr init`, `idr doctor`, `idr bootstrap`, `idr config apply|history|rollback` (`idr apply-config`), `idr run --mode FULL|INCR [--config <file> --dry-run]`, `idr evaluate`, `idr privacy forget`, `idr plugins list`, `idr ai test|models|ask`, `idr explain`, `idr triage`
 - **AI Assistant (Ollama-first + BYOK)**: `IDR_LLM_PROVIDER` (`ollama` | `openai` | `anthropic` | `gemini` | `openai_compatible`), `IDR_LLM_MODEL`, `IDR_LLM_BASE_URL`, `IDR_LLM_API_KEY`, `IDR_LLM_MASK_PII` (auto-enabled for non-local endpoints)
 - **Python SDK**: `from idr_core.runner import IDRRunner, RunConfig`
 - **Plugin Entry Points**: `idr.canonicalizers`, `idr.survivorship_strategies`, `idr.adapters`
@@ -26,8 +26,8 @@
 1. `get_system_status()` (MCP) or `idr doctor` (CLI)
 2. `discover_and_suggest_rules(schema=...)` (MCP) or `idr bootstrap --schema ... --output idr_config.yaml` (CLI)
 3. `simulate_rule_impact(...)` (MCP) to check supernode risk
-4. `dry_run_pipeline()` (MCP) or `idr run --dry-run` (CLI)
-5. `idr apply-config` + `idr run --mode FULL`
+4. `dry_run_pipeline()` (MCP) or `idr run --config idr_config.yaml --dry-run` (CLI ephemeral draft preview without saving config)
+5. `idr config apply --file idr_config.yaml` + `idr run --mode FULL` (or `idr config rollback` to revert)
 
 ## Minimal Config Structure (YAML/JSON)
 ```yaml

@@ -206,23 +206,44 @@ Examples:
     forget_parser.add_argument("--meta-dataset", default="idr_meta", help="BigQuery metadata dataset")
     forget_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
 
+    def _add_connection_args(sub_p, include_dataset: bool = True) -> None:
+        sub_p.add_argument(
+            "--platform",
+            "-p",
+            choices=["duckdb", "bigquery", "snowflake", "databricks"],
+            required=False,
+            help="Target platform (auto-detected if omitted)",
+        )
+        sub_p.add_argument("--db", help="DuckDB database path")
+        sub_p.add_argument("--project", help="GCP project ID (BigQuery)")
+        sub_p.add_argument("--location", default="US", help="BigQuery location")
+        if include_dataset:
+            sub_p.add_argument("--dataset", default="idr_out", help="BigQuery output dataset")
+        sub_p.add_argument(
+            "--meta-dataset", default="idr_meta", help="BigQuery metadata dataset"
+        )
+        sub_p.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
+
     apply_parser = config_subparsers.add_parser("apply", help="Apply config to metadata tables")
     apply_parser.add_argument("--file", "-f", required=True, help="Config file path")
-    # We need connection args here too since we write to DB
-    apply_parser.add_argument(
-        "--platform",
-        "-p",
-        choices=["duckdb", "bigquery", "snowflake", "databricks"],
-        required=False,
-        help="Target platform (auto-detected if omitted)",
+    _add_connection_args(apply_parser, include_dataset=True)
+
+    history_parser = config_subparsers.add_parser(
+        "history", help="List saved configuration snapshots from idr_out.config_snapshot"
     )
-    apply_parser.add_argument("--db", help="DuckDB database path")
-    apply_parser.add_argument("--project", help="GCP project ID (BigQuery)")
-    apply_parser.add_argument("--location", default="US", help="BigQuery location")
-    apply_parser.add_argument(
-        "--meta-dataset", default="idr_meta", help="BigQuery metadata dataset"
+    history_parser.add_argument("--limit", type=int, default=15, help="Max snapshots to show")
+    _add_connection_args(history_parser, include_dataset=True)
+
+    rollback_parser = config_subparsers.add_parser(
+        "rollback", help="Roll back idr_meta to a previously saved configuration snapshot"
     )
-    apply_parser.add_argument("--work-dataset", default="idr_work", help="BigQuery work dataset")
+    rollback_parser.add_argument(
+        "--hash",
+        dest="config_hash",
+        default=None,
+        help="Snapshot config_hash (or unique prefix) to restore; defaults to the previous saved version",
+    )
+    _add_connection_args(rollback_parser, include_dataset=True)
 
     # === idr serve ===
     serve_parser = subparsers.add_parser("serve", help="Start API & UI server")
@@ -538,60 +559,67 @@ def get_adapter(args):
         return BigQueryAdapter(client, args.project, args.location, dataset_mapping=dataset_mapping)
 
     elif args.platform == "snowflake":
+        print("Connecting to Snowflake...")
         try:
             from snowflake.snowpark import Session
 
             from idr_core.adapters.snowflake import SnowflakeAdapter
 
-            print("Connecting to Snowflake...")
-            # Snowflake Session builder automatically picks up config from:
-            # 1. SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, etc. env vars
-            # 2. ~/.snowflake/connections.toml (if using 'connection_name')
-            # For now, we rely on implicit env vars or default connection.
-            # Passing {} is risky if no default is configured.
-            # Better to allow it to fail naturally if no config found.
             session = Session.builder.getOrCreate()
             return SnowflakeAdapter(session)
-        except ImportError:
-            raise ImportError("'snowflake-snowpark-python' not installed")
+        except Exception:
+            import snowflake.connector
+
+            from idr_core.adapters.snowflake import SnowflakeAdapter
+            from idr_core.connection_manager import build_snowflake_connect_kwargs
+
+            conn = snowflake.connector.connect(**build_snowflake_connect_kwargs({}))
+            return SnowflakeAdapter(conn)
 
     elif args.platform == "databricks":
         try:
             from databricks import sql
 
             from idr_core.adapters.databricks import DatabricksAdapter
+            from idr_core.connection_manager import build_databricks_connect_kwargs
 
-            # Resolve credentials: env vars first, then ~/.databrickscfg / dbt profiles
+            # Resolve credentials: env vars first (PAT or OAuth M2M), then ~/.databrickscfg / dbt profiles
             host = os.environ.get("DATABRICKS_HOST")
             http_path = os.environ.get("DATABRICKS_HTTP_PATH")
             token = os.environ.get("DATABRICKS_TOKEN")
+            client_id = os.environ.get("DATABRICKS_CLIENT_ID")
+            client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET")
             catalog = os.environ.get("DATABRICKS_CATALOG")
 
-            if not (host and http_path and token):
+            discovered_params: Dict[str, Any] = {}
+            if not (host and http_path and (token or (client_id and client_secret))):
                 from idr_core.credential_discovery import discover_all
 
                 for conn_info in discover_all():
                     if conn_info.get("platform") != "databricks":
                         continue
                     p = conn_info.get("params", {})
-                    if p.get("server_hostname") and p.get("http_path") and p.get("access_token"):
+                    if p.get("server_hostname") and p.get("http_path") and (
+                        p.get("access_token") or (p.get("client_id") and p.get("client_secret"))
+                    ):
+                        discovered_params = dict(p)
                         host = host or p["server_hostname"]
                         http_path = http_path or p["http_path"]
-                        token = token or p["access_token"]
+                        token = token or p.get("access_token")
                         catalog = catalog or p.get("catalog")
                         print(f"Using discovered credentials: {conn_info.get('name')}")
                         break
 
-            if not (host and http_path and token):
+            if not (host and http_path and (token or (client_id and client_secret) or (discovered_params.get("client_id") and discovered_params.get("client_secret")))):
                 raise ValueError(
                     "Databricks connection requires DATABRICKS_HOST, DATABRICKS_HTTP_PATH, "
-                    "DATABRICKS_TOKEN (env vars) or a ~/.databrickscfg profile with host, http_path, token"
+                    "and DATABRICKS_TOKEN or DATABRICKS_CLIENT_ID/DATABRICKS_CLIENT_SECRET"
                 )
 
-            host = host.replace("https://", "").replace("http://", "").split("/")[0]
-            print(f"Connecting to Databricks ({host})...")
-            conn = sql.connect(server_hostname=host, http_path=http_path, access_token=token)
-            return DatabricksAdapter(conn, catalog=catalog)
+            dbx_kwargs, resolved_catalog = build_databricks_connect_kwargs(discovered_params)
+            print(f"Connecting to Databricks ({dbx_kwargs['server_hostname']})...")
+            conn = sql.connect(**dbx_kwargs)
+            return DatabricksAdapter(conn, catalog=resolved_catalog)
 
         except ImportError:
             raise ImportError(
@@ -676,10 +704,12 @@ def handle_privacy(args) -> int:
 
 def handle_config(args) -> int:
     """Handle config subcommands."""
-    from idr_core.config import config_to_sql, load_config
-
-    # Debug print removed
-    # print(f"DEBUG: config_cmd={args.config_cmd}")
+    from idr_core.config import (
+        apply_config_to_warehouse,
+        config_to_sql,
+        get_config_snapshots,
+        load_config,
+    )
 
     if args.config_cmd == "validate":
         try:
@@ -705,27 +735,87 @@ def handle_config(args) -> int:
             return 1
 
     if args.config_cmd == "apply":
+        adapter = None
         try:
-            # Need adapter to execute SQL
             adapter = get_adapter(args)
-
             print(f"Applying configuration from {args.file}...")
             config = load_config(args.file)
-            statements = config_to_sql(config, dialect=adapter.dialect)
-
-            # Execute statements in transaction if possible (DuckDB/Snowflake)
-            # For now just execute sequentially
-            count = 0
-            for stmt in statements:
-                adapter.execute(stmt)
-                count += 1
-
-            print(f"✅ Configuration applied ({count} statements executed).")
-            adapter.close()
+            res = apply_config_to_warehouse(adapter, config, record_snapshot=True)
+            print(
+                f"✅ Configuration applied ({res['batches_executed']} batches executed, "
+                f"snapshot={res['config_hash'][:10]})."
+            )
             return 0
         except Exception as e:
             print(f"❌ Failed to apply configuration: {e}")
             return 1
+        finally:
+            if adapter is not None:
+                adapter.close()
+
+    if args.config_cmd == "history":
+        adapter = None
+        try:
+            adapter = get_adapter(args)
+            snapshots = get_config_snapshots(adapter, limit=getattr(args, "limit", 15))
+            if not snapshots:
+                print("No saved configuration snapshots found in idr_out.config_snapshot.")
+                return 0
+            print(f"\nSaved Configuration Snapshots ({len(snapshots)}):")
+            print("-" * 76)
+            for idx, snap in enumerate(snapshots):
+                marker = " (latest)" if idx == 0 else ""
+                print(
+                    f"  {snap['config_hash'][:12]}  |  {snap['created_at']}  |  "
+                    f"{snap['sources_count']} src, {snap['rules_count']} rules, "
+                    f"{snap['exclusions_count']} excl{marker}"
+                )
+            print("-" * 76)
+            return 0
+        except Exception as e:
+            print(f"❌ Failed to read config history: {e}")
+            return 1
+        finally:
+            if adapter is not None:
+                adapter.close()
+
+    if args.config_cmd == "rollback":
+        adapter = None
+        try:
+            adapter = get_adapter(args)
+            snapshots = get_config_snapshots(adapter, limit=50)
+            if not snapshots:
+                print("❌ No saved configuration snapshots available to roll back to.")
+                return 1
+
+            requested_hash = (getattr(args, "config_hash", None) or "").strip()
+            target = None
+            if requested_hash:
+                matches = [
+                    s for s in snapshots if s["config_hash"].startswith(requested_hash)
+                ]
+                if not matches:
+                    print(f"❌ No saved snapshot found matching hash prefix '{requested_hash}'.")
+                    return 1
+                target = matches[0]
+            else:
+                if len(snapshots) < 2:
+                    print("❌ At least 2 saved configuration snapshots are needed for automatic rollback (or pass --hash).")
+                    return 1
+                target = snapshots[1]
+
+            res = apply_config_to_warehouse(adapter, target["config"], record_snapshot=True)
+            print(
+                f"✅ Rolled back configuration to snapshot {target['config_hash'][:12]} "
+                f"(saved_at={target['created_at']}, new_snapshot={res['config_hash'][:10]})."
+            )
+            return 0
+        except Exception as e:
+            print(f"❌ Failed to roll back configuration: {e}")
+            return 1
+        finally:
+            if adapter is not None:
+                adapter.close()
 
     if args.config_cmd == "export-dbt":
         return handle_dbt_export(args)
@@ -763,7 +853,12 @@ def handle_dbt_export(args) -> int:
 def handle_run(args) -> int:
     """Handle run command."""
     from idr_core import IDRRunner, load_config
-    from idr_core.config import config_to_sql
+    from idr_core.config import (
+        apply_config_to_warehouse,
+        compute_dry_run_summary,
+        restore_meta_tables,
+        snapshot_meta_tables,
+    )
     from idr_core.runner import RunConfig
 
     try:
@@ -772,26 +867,40 @@ def handle_run(args) -> int:
         print(f"Error: {e}")
         return 1
 
+    meta_snapshots = {}
+    ephemeral_dry_run = False
     try:
-        # Create runner and execute
         runner = IDRRunner(adapter)
+        run_mode = "INCR" if str(args.mode).upper() == "INCREMENTAL" else str(args.mode).upper()
 
-        # Apply YAML config if provided
+        # Apply YAML config if provided: ephemeral & rolled back on --dry-run, persisted otherwise
         if args.config:
-            # Note: We enforce that `idr init` should have been called first.
-            # We insert the config data into the metadata tables.
             config_data = load_config(args.config)
-            for stmt in config_to_sql(config_data, dialect=adapter.dialect):
-                adapter.execute(stmt)
+            if args.dry_run:
+                ephemeral_dry_run = True
+                meta_snapshots = snapshot_meta_tables(adapter)
+                apply_config_to_warehouse(adapter, config_data, record_snapshot=False)
+            else:
+                apply_config_to_warehouse(adapter, config_data, record_snapshot=True)
 
         config = RunConfig(
-            run_mode=args.mode,
+            run_mode=run_mode,
             max_iters=args.max_iters,
             dry_run=args.dry_run,
             strict=getattr(args, "strict", False),
             max_group_size=getattr(args, "max_group_size", None),
         )
         result = runner.run(config)
+
+        dry_summary = None
+        if args.dry_run and result.status == "DRY_RUN_COMPLETE":
+            dry_summary = compute_dry_run_summary(
+                adapter,
+                result.run_id,
+                run_mode,
+                edges_created=result.edges_created,
+                clusters_impacted=result.clusters_impacted,
+            )
 
         # Print summary
         print(f"\n{'=' * 60}")
@@ -802,6 +911,17 @@ def handle_run(args) -> int:
         print(f"  Edges:           {result.edges_created:,}")
         print(f"  Clusters:        {result.clusters_impacted:,}")
         print(f"  Duration:        {result.duration_seconds:.1f}s")
+        if dry_summary is not None:
+            print(f"  {'-' * 56}")
+            print(f"  New Entities:    {dry_summary.get('new_entities', 0):,}")
+            print(f"  Moved Entities:  {dry_summary.get('moved_entities', 0):,}")
+            print(f"  Unchanged:       {dry_summary.get('unchanged_entities', 0):,}")
+            edges_d = dry_summary.get("edges_delta", 0)
+            clusters_d = dry_summary.get("clusters_delta", 0)
+            print(f"  Edges Delta:     {edges_d:+d}")
+            print(f"  Clusters Delta:  {clusters_d:+d}")
+            if ephemeral_dry_run:
+                print("  Config Mode:     Ephemeral (--dry-run restored prior idr_meta state)")
         if result.error:
             print(f"  Error:           {result.error}")
         print(f"{'=' * 60}\n")
@@ -809,6 +929,8 @@ def handle_run(args) -> int:
         return 0 if ("SUCCESS" in result.status or result.status == "DRY_RUN_COMPLETE") else 1
 
     finally:
+        if meta_snapshots:
+            restore_meta_tables(adapter, meta_snapshots)
         adapter.close()
 
 

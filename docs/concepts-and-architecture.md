@@ -97,12 +97,13 @@ flowchart TD
 #### Stage 7: `fuzzy_matching` (`GraphStage.fuzzy_matching`)
 - Evaluates active rules in `idr_meta.fuzzy_rule` over deterministic clusters using blocking keys (`blocking_key_expr`) and similarity expressions (`score_expr >= threshold`), merging matching clusters via a second label propagation pass.
 
-#### Stage 8: `output_generation` (`OutputStage.generate_outputs`)
-- Updates `idr_out.identity_resolved_membership_current` and `idr_out.identity_identifiers_current`.
+#### Stage 8: `output_generation` (`OutputStage.generate_output`)
+- **Pre-Write Atomic Snapshot & Automatic Rollback**: Before mutating `idr_out` in live mode, snapshots the 4 core state tables (`identity_resolved_membership_current`, `identity_edges_current`, `identity_identifiers_current`, `identity_clusters_current`) into `idr_work._backup_*`. If Stage 8 fails mid-flight (e.g., transient warehouse error), `OutputStage` automatically restores those 4 tables from `idr_work._backup_*` while keeping `idr_meta.run_state` watermarks un-advanced (Stages 1–7 only write to `idr_work.*`).
+- Updates `idr_out.identity_resolved_membership_current`, `idr_out.identity_edges_current`, and `idr_out.identity_identifiers_current`.
 - Records any `old_resolved_id -> new_resolved_id` transitions into `idr_out.resolved_id_crosswalk`.
 - Computes cluster-level confidence scores (`confidence_score`, `edge_diversity`, `match_density`, `primary_reason`) in `idr_out.identity_clusters_current`.
-- Builds `idr_out.golden_profile_current` via `ProfileBuilder` using configured survivorship strategies (`PRIORITY`, `RECENCY`, `FREQUENCY`).
-- Updates `idr_meta.run_state` watermarks using `WHERE watermark_value IS NOT NULL` so candidate-expanded historical rows (`watermark_value = NULL`) never overwrite `last_watermark_value`.
+- Builds `idr_out.golden_profile_current` via `ProfileBuilder` using configured survivorship strategies (`PRIORITY`, `RECENCY`, `FREQUENCY`, etc.).
+- Updates `idr_meta.run_state` watermarks using `WHERE watermark_value IS NOT NULL` only after `ProfileBuilder` succeeds, so candidate-expanded historical rows (`watermark_value = NULL`) or failed runs never advance watermarks.
 
 ---
 

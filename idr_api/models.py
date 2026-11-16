@@ -25,10 +25,17 @@ class ConnectionRequest(BaseModel):
     warehouse: Optional[str] = None
     sf_database: Optional[str] = None
     schema_name: Optional[str] = "PUBLIC"
+    role: Optional[str] = None
+    authenticator: Optional[str] = None
+    private_key_path: Optional[str] = None
+    private_key: Optional[str] = None
+    private_key_passphrase: Optional[str] = None
     # Databricks fields
     server_hostname: Optional[str] = None
     http_path: Optional[str] = None
     access_token: Optional[str] = None
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
     catalog: Optional[str] = None
 
 
@@ -106,6 +113,7 @@ class ClusterDetail(BaseModel):
     edges: List[EdgeInfo]
     golden_profile: Optional[Dict[str, Any]] = None
     crosswalk_history: Optional[List[Dict[str, Any]]] = None
+    truncated: bool = False
 
 
 class OverrideRequest(BaseModel):
@@ -114,6 +122,14 @@ class OverrideRequest(BaseModel):
     entity_key_a: Optional[str] = None
     entity_key_b: Optional[str] = None
     reason: Optional[str] = "UI stewardship override"
+
+
+class ExclusionRequest(BaseModel):
+    action: str = "add"  # add, remove, list
+    identifier_type: Optional[str] = None
+    identifier_value_pattern: Optional[str] = None
+    match_type: str = "EXACT"
+    reason: Optional[str] = "UI stewardship exclusion"
 
 
 class PrivacyForgetRequest(BaseModel):

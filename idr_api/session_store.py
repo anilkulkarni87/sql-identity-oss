@@ -59,6 +59,7 @@ class ConnectionSessionStore(ABC):
 class InMemoryConnectionSessionStore(ConnectionSessionStore):
     def __init__(self, ttl_seconds: int = 3600):
         self._states: Dict[str, ConnectionState] = {}
+        self._saved_configs: Dict[str, Dict[str, Any]] = {}
         self._ttl_seconds = max(0, int(ttl_seconds))
         self._lock = RLock()
 
@@ -88,9 +89,16 @@ class InMemoryConnectionSessionStore(ConnectionSessionStore):
             previous = self._states.get(user_key)
             if previous and previous.adapter is not adapter:
                 self._close_state(previous)
+            from idr_core.connection_manager import is_reconnectable_config
+
+            cfg_copy = dict(config or {})
+            if is_reconnectable_config(cfg_copy):
+                self._saved_configs[user_key] = cfg_copy
+            else:
+                self._saved_configs.pop(user_key, None)
             self._states[user_key] = ConnectionState(
                 adapter=adapter,
-                config=dict(config),
+                config=cfg_copy,
                 last_used_at=time.time(),
             )
 
@@ -98,23 +106,42 @@ class InMemoryConnectionSessionStore(ConnectionSessionStore):
         with self._lock:
             self._cleanup_idle_locked()
             state = self._states.get(user_key)
-            if not state:
-                return None
-            state.last_used_at = time.time()
-            return state.adapter
+            if state:
+                state.last_used_at = time.time()
+                return state.adapter
+            saved_cfg = self._saved_configs.get(user_key)
+            if saved_cfg and saved_cfg.get("platform"):
+                try:
+                    from idr_core.connection_manager import create_adapter
+
+                    new_adapter = create_adapter(saved_cfg)
+                    self._states[user_key] = ConnectionState(
+                        adapter=new_adapter,
+                        config=dict(saved_cfg),
+                        last_used_at=time.time(),
+                    )
+                    return new_adapter
+                except Exception:
+                    return None
+            return None
 
     def get_config(self, user_key: str) -> Dict[str, Any]:
         with self._lock:
             self._cleanup_idle_locked()
             state = self._states.get(user_key)
-            return dict(state.config) if state else {}
+            if state:
+                return dict(state.config)
+            saved_cfg = self._saved_configs.get(user_key)
+            return dict(saved_cfg) if saved_cfg else {}
 
     def disconnect_user(self, user_key: str) -> None:
         with self._lock:
+            self._saved_configs.pop(user_key, None)
             self._close_state(self._states.pop(user_key, None))
 
     def disconnect_all(self) -> None:
         with self._lock:
+            self._saved_configs.clear()
             for key in list(self._states.keys()):
                 self._close_state(self._states.pop(key, None))
 

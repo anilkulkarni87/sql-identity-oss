@@ -82,26 +82,35 @@ idr init --platform duckdb --db demo.duckdb
 
 ### Step 2: Apply a Declarative Configuration YAML
 
-Create a `config.yaml` file (or use `examples/config_retail.yaml`) and load it into `idr_meta.*`:
+Create a `config.yaml` file (or use `examples/config_retail.yaml`) and load it into `idr_meta.*` (and save a versioned snapshot in `idr_out.config_snapshot`):
 
 ```bash
-idr apply-config --platform duckdb --db demo.duckdb --config examples/config_retail.yaml
+idr config apply --platform duckdb --db demo.duckdb --file examples/config_retail.yaml
+# Legacy alias also supported:
+# idr apply-config --platform duckdb --db demo.duckdb --config examples/config_retail.yaml
 ```
 
-### Step 3: Execute the Resolution Pipeline
+### Step 3: Execute the Resolution Pipeline (or Ephemeral Dry Run)
 
-Run a full graph build (`--mode FULL`) or an incremental delta run (`--mode INCR`):
+Run a full graph build (`--mode FULL`), an incremental delta run (`--mode INCR`), or preview a candidate YAML without saving it to `idr_meta.*`:
 
 ```bash
+# Preview a draft YAML ephemerally without saving config or mutating output tables
+idr run --platform duckdb --db demo.duckdb --mode FULL --config candidate.yaml --dry-run
+
 # First run: full graph resolution
 idr run --platform duckdb --db demo.duckdb --mode FULL
 
 # Subsequent runs: incremental watermark & state-diff resolution
 idr run --platform duckdb --db demo.duckdb --mode INCR
+
+# Inspect config version history or roll back to a previous snapshot
+idr config history --platform duckdb --db demo.duckdb
+idr config rollback --platform duckdb --db demo.duckdb
 ```
 
-!!! tip "Dry Run Preview"
-    Add `--dry-run` to preview cluster merges, new entities, and largest cluster changes in `idr_out.dry_run_results` and `idr_out.dry_run_summary` without mutating production tables.
+!!! tip "Dry Run Preview & Ephemeral Config Testing"
+    Add `--dry-run` to preview moved/new entities, `Edges Delta`, `Clusters Delta`, and largest cluster changes in `idr_out.dry_run_results` and `idr_out.dry_run_summary` without mutating production tables. Passing `--config candidate.yaml --dry-run` snapshots `idr_meta.*` and automatically restores your saved configuration after the dry run finishes.
 
 ### Step 4: Launch the Interactive Web UI
 
@@ -113,7 +122,8 @@ idr ui --db demo.duckdb
 
 Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser to:
 
-- Configure sources, canonicalizers, exclusions, and survivorship visually in the **6-Step Setup Wizard**.
+- Configure sources, mappings, rules, exclusions, and survivorship in the persistent 4-tab **Identity Studio** (`1. Sources & Mappings` with merged multi-schema table discovery drawer & 1-click `Auto-Map All`, `2. Matching Rules`, `3. Survivorship`, `4. Run & Verify`).
+- Preview un-saved draft rule changes with non-saving **Start Dry Run** (`Draft Previewed — Saved Config Untouched`, `Edges Delta` & `Clusters Delta`), inspect **History**, or **Discard** drafts.
 - Trigger runs with a **Live 8-Stage Execution Progress** tracker.
 - Search entities, inspect confidence scores, create **Manual Overrides** (`FORCE_LINK`, `DO_NOT_LINK`, `ISOLATE`), or execute **GDPR Erasure** in the **Cluster Explorer**.
 
@@ -127,8 +137,8 @@ Both the CLI (`idr`) and the Web UI (`idr ui`) automatically discover local clou
 | :--- | :--- | :--- |
 | **DuckDB** | Local `*.duckdb` files in the current workspace | `IDR_DATABASE` (or `--db`) |
 | **BigQuery** | `~/.config/gcloud/application_default_credentials.json` & active `gcloud` project | `IDR_PROJECT` / `GOOGLE_CLOUD_PROJECT`, `IDR_LOCATION` |
-| **Snowflake** | `~/.snowflake/connections.toml` and `~/.snowflake/config` | `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE` |
-| **Databricks** | `~/.databrickscfg` profiles (`HOST`, `token`, `http_path`) | `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_HTTP_PATH`, `DATABRICKS_CATALOG` |
+| **Snowflake** | `~/.snowflake/connections.toml` and `~/.snowflake/config` | `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` (or RSA Key-Pair: `SNOWFLAKE_PRIVATE_KEY_PATH` / `SNOWFLAKE_PRIVATE_KEY`, `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE`, `SNOWFLAKE_AUTHENTICATOR`), `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE` |
+| **Databricks** | `~/.databrickscfg` profiles (`HOST`, `token`, `http_path`) | `DATABRICKS_HOST`, `DATABRICKS_TOKEN` (or OAuth M2M Service Principal: `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`), `DATABRICKS_HTTP_PATH`, `DATABRICKS_CATALOG` |
 
 !!! note "Automatic `--platform` Detection"
     If you pass `--db my_file.duckdb`, `--project my-gcp-project`, or set `IDR_PLATFORM`, the `idr` CLI automatically resolves `--platform` for you.

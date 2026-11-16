@@ -27,13 +27,21 @@ title: Supported Warehouses, Schema & Operations
     ```bash
     export SNOWFLAKE_ACCOUNT="xy12345.us-east-1"
     export SNOWFLAKE_USER="IDR_SERVICE_USER"
-    export SNOWFLAKE_PASSWORD="..."
     export SNOWFLAKE_WAREHOUSE="COMPUTE_WH"
     export SNOWFLAKE_DATABASE="ANALYTICS"
     export SNOWFLAKE_ROLE="IDR_ADMIN"
 
+    # Option A: Password auth
+    export SNOWFLAKE_PASSWORD="..."
+
+    # Option B: Service-Account RSA Key-Pair JWT auth (recommended for headless CI/CD)
+    export SNOWFLAKE_PRIVATE_KEY_PATH="/secrets/rsa_key.p8"
+    # Or inline PEM: export SNOWFLAKE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----..."
+    export SNOWFLAKE_PRIVATE_KEY_PASSPHRASE="..." # Optional if encrypted PEM
+    export SNOWFLAKE_AUTHENTICATOR="SNOWFLAKE_JWT"
+
     idr init --platform snowflake
-    idr apply-config --platform snowflake --config config.yaml
+    idr config apply --platform snowflake --file config.yaml
     idr run --platform snowflake --mode INCR
     ```
 
@@ -47,23 +55,29 @@ title: Supported Warehouses, Schema & Operations
     gcloud auth application-default login
 
     idr init --platform bigquery --project my-gcp-project --location US
-    idr apply-config --platform bigquery --project my-gcp-project --config config.yaml
+    idr config apply --platform bigquery --project my-gcp-project --file config.yaml
     idr run --platform bigquery --project my-gcp-project --mode INCR
     ```
 
-    - **Schema Mapping**: Maps `idr_meta`, `idr_work`, and `idr_out` to BigQuery datasets in your target GCP project.
+    - **Schema Mapping**: Maps `idr_meta`, `idr_work`, and `idr_out` to BigQuery datasets in your target GCP project (customizable via `IDR_SCHEMA_PREFIX` or `IDR_META_SCHEMA` / `IDR_WORK_SCHEMA` / `IDR_OUT_SCHEMA`).
     - **Adapter**: `idr_core/adapters/bigquery.py` (`BigQueryAdapter`).
 
 === "Databricks"
 
     ```bash
     export DATABRICKS_HOST="adb-123456789.12.azuredatabricks.net"
-    export DATABRICKS_TOKEN="dapi..."
     export DATABRICKS_HTTP_PATH="/sql/1.0/warehouses/abcdef123456"
     export DATABRICKS_CATALOG="main"
 
+    # Option A: Personal Access Token (PAT)
+    export DATABRICKS_TOKEN="dapi..."
+
+    # Option B: Service Principal OAuth M2M auth (recommended for headless jobs)
+    export DATABRICKS_CLIENT_ID="00000000-0000-0000-0000-000000000000"
+    export DATABRICKS_CLIENT_SECRET="..."
+
     idr init --platform databricks
-    idr apply-config --platform databricks --config config.yaml
+    idr config apply --platform databricks --file config.yaml
     idr run --platform databricks --mode INCR
     ```
 
@@ -72,6 +86,9 @@ title: Supported Warehouses, Schema & Operations
     - **Adapter**: `idr_core/adapters/databricks.py` (`DatabricksAdapter`).
 
     ![Databricks Full IDR Run](assets/recordings/idr-databricks-run.gif)
+
+!!! note "Custom Schema & Dataset Prefixing"
+    By default IDR uses `idr_meta`, `idr_work`, and `idr_out`. Set `IDR_SCHEMA_PREFIX` (e.g. `prod_`) or individual overrides (`IDR_META_SCHEMA`, `IDR_WORK_SCHEMA`, `IDR_OUT_SCHEMA`) across DuckDB, Snowflake, BigQuery, and Databricks to isolate multiple environments in the same catalog/database.
 
 ---
 
@@ -117,6 +134,8 @@ All tables are defined in `idr_core/schema_defs.py` (`SYSTEM_TABLES`) and mirror
     | `idr_out.golden_profile_current` | Consolidated 360° customer profile per `resolved_id`. | `resolved_id`, `email_primary`, `phone_primary`, `first_name`, `last_name`, `<dynamic_attributes>`, `updated_at` |
     | `idr_out.resolved_id_crosswalk` | Historical ledger of cluster ID merges and splits across runs. | `run_id`, `old_resolved_id`, `new_resolved_id`, `entity_key`, `change_type`, `changed_at` |
     | `idr_out.run_history` & `idr_out.stage_metrics` | Run-level and stage-level execution telemetry. | `run_id`, `run_mode`, `status`, `entities_processed`, `edges_created`, `clusters_Impacted`, `lp_iterations`, `duration_seconds` |
+    | `idr_out.config_snapshot` | Versioned JSON snapshots of source, rule, and survivorship configs for `idr config history` / `rollback`. | `config_hash`, `sources_json`, `rules_json`, `mappings_json`, `created_at` |
+    | `idr_out.dry_run_summary` & `idr_out.dry_run_results` | Non-committing preview impact tables (`compute_dry_run_summary` enriches with `proposed_edges`, `current_edges`, `edges_delta`, `proposed_clusters`, `current_clusters`, `clusters_delta`). | `run_id`, `new_entities`, `moved_entities`, `unchanged_entities`, `total_entities`, `analyzed_at` |
     | `idr_out.skipped_identifier_groups` | Identifier groups skipped for exceeding `max_group_size`. | `run_id`, `identifier_type`, `identifier_value_norm`, `group_size`, `max_allowed`, `sample_entity_keys` |
 
 ---

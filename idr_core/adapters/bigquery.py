@@ -5,6 +5,7 @@ Provides SQL execution capabilities for Google BigQuery,
 supporting both Python client library and direct execution.
 """
 
+import re
 from typing import Any, Dict, List, Optional
 
 from .base import IDRAdapter
@@ -35,7 +36,8 @@ class BigQueryAdapter(IDRAdapter):
         self.client = client
         self.project = project
         self.location = location
-        self.dataset_mapping = dataset_mapping or {}
+        self.init_schema_mapping(dataset_mapping)
+        self.dataset_mapping = dict(self.schema_mapping)
 
     @property
     def dialect(self) -> str:
@@ -84,18 +86,26 @@ class BigQueryAdapter(IDRAdapter):
         job.result()
 
     def _prepare_sql_simple(self, sql: str) -> str:
-        """Replace standard schemas with `project`.dataset."""
-        # Ensure project ID is backticked if not already
+        """Replace canonical schema references with `project`.dataset using word boundaries."""
         project_ref = self.project
-        if not project_ref.startswith("`"):
+        if project_ref and not project_ref.startswith("`"):
             project_ref = f"`{project_ref}`"
 
-        for schema in ["idr_out", "idr_meta", "idr_work"]:
-            # Determine target dataset name
+        for schema in ("idr_out", "idr_meta", "idr_work"):
             target_dataset = self.dataset_mapping.get(schema, schema)
-            # Fully qualify
-            replacement = f"{project_ref}.{target_dataset}."
-            sql = sql.replace(f"{schema}.", replacement)
+            prefix = f"{project_ref}.{target_dataset}" if project_ref else target_dataset
+            sql = re.sub(
+                rf"(?<![\w`\.]){schema}(?=\s*\.)",
+                prefix,
+                sql,
+                flags=re.IGNORECASE,
+            )
+            sql = re.sub(
+                rf"(\b(?:CREATE|DROP)\s+SCHEMA(?:\s+IF\s+(?:NOT\s+)?EXISTS)?\s+){schema}\b",
+                rf"\1{prefix}",
+                sql,
+                flags=re.IGNORECASE,
+            )
         return sql
 
     def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:

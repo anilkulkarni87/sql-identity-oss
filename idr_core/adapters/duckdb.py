@@ -23,14 +23,16 @@ class DuckDBAdapter(IDRAdapter):
         adapter = DuckDBAdapter(":memory:")
     """
 
-    def __init__(self, db_path_or_conn: Any):
+    def __init__(self, db_path_or_conn: Any, schema_mapping: Optional[Dict[str, str]] = None):
         """
         Initialize DuckDB connection.
 
         Args:
             db_path_or_conn: Path to DuckDB file (str) or existing connection object
+            schema_mapping: Optional mapping for idr_meta/idr_work/idr_out schemas
         """
         self._lock = threading.RLock()
+        self.init_schema_mapping(schema_mapping)
         if isinstance(db_path_or_conn, str):
             self.db_path = db_path_or_conn
             self.conn = duckdb.connect(db_path_or_conn)
@@ -44,12 +46,14 @@ class DuckDBAdapter(IDRAdapter):
 
     def execute(self, sql: str) -> None:
         """Execute a single SQL statement."""
+        sql = self._rewrite_schemas(sql)
         with self._lock:
             self.conn.execute(sql)
 
     def execute_script(self, sql: str) -> None:
         """Execute multiple SQL statements separated by semicolons."""
         # DuckDB handles multi-statement scripts directly
+        sql = self._rewrite_schemas(sql)
         with self._lock:
             for stmt in sql.split(";"):
                 stmt = stmt.strip()
@@ -58,6 +62,7 @@ class DuckDBAdapter(IDRAdapter):
 
     def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
         """Execute SQL and return results as list of dicts."""
+        sql = self._rewrite_schemas(sql)
         with self._lock:
             if params:
                 cursor = self.conn.execute(sql, params)
@@ -72,6 +77,7 @@ class DuckDBAdapter(IDRAdapter):
 
     def query_one(self, sql: str, params: Optional[List[Any]] = None) -> Any:
         """Execute SQL and return first value of first row."""
+        sql = self._rewrite_schemas(sql)
         with self._lock:
             if params:
                 result = self.conn.execute(sql, params).fetchone()
@@ -81,6 +87,7 @@ class DuckDBAdapter(IDRAdapter):
 
     def table_exists(self, table_fqn: str) -> bool:
         """Check if table exists."""
+        table_fqn = self._rewrite_table_fqn(table_fqn)
         with self._lock:
             try:
                 self.conn.execute(f"SELECT 1 FROM {table_fqn} LIMIT 0")
@@ -93,6 +100,7 @@ class DuckDBAdapter(IDRAdapter):
     def get_table_columns(self, table_fqn: str) -> List[Dict[str, str]]:
         """Get column names for a table (lowercase)."""
         # DESCRIBE returns: column_name, column_type, null, key, default, extra
+        table_fqn = self._rewrite_table_fqn(table_fqn)
         with self._lock:
             result = self.conn.execute(f"DESCRIBE {table_fqn}").fetchall()
             return [{"name": row[0].lower(), "type": row[1]} for row in result]
@@ -100,6 +108,7 @@ class DuckDBAdapter(IDRAdapter):
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
         """List tables in a schema."""
         if schema:
+            schema = self.schema_mapping.get(schema.lower(), schema)
             # parameterized query to prevent injection
             query = "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = ?"
             params = [schema]

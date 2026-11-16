@@ -34,6 +34,7 @@ class StageContext:
     warnings: List[str]
     generate_evidence: bool = False
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    dry_run: bool = False
 
 
 class BaseStage:
@@ -92,3 +93,41 @@ class BaseStage:
                 f"Metadata validation failed for {field_name}: {e}. "
                 f"Check your idr_meta configuration for unsafe values."
             ) from e
+
+    @staticmethod
+    def _exclusion_match_predicate(type_expr: str, value_expr: str) -> str:
+        """Build cross-dialect EXISTS predicate matching idr_meta.identifier_exclusion.
+
+        Supports EXACT and LIKE patterns, automatically treating bare LIKE patterns
+        without '%' or '_' wildcards (e.g. 'donald') as substring '%donald%' matches.
+        """
+        return f"""
+            EXISTS (
+                SELECT 1 FROM idr_meta.identifier_exclusion ex
+                WHERE (
+                    UPPER({type_expr}) = UPPER(ex.identifier_type)
+                    OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                )
+                AND (
+                    (
+                        UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT'
+                        AND REPLACE(ex.identifier_value_pattern, '%', '') = ex.identifier_value_pattern
+                        AND LOWER({value_expr}) = LOWER(ex.identifier_value_pattern)
+                    )
+                    OR (
+                        (
+                            UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE'
+                            OR REPLACE(ex.identifier_value_pattern, '%', '') != ex.identifier_value_pattern
+                        )
+                        AND LOWER({value_expr}) LIKE (
+                            CASE
+                                WHEN REPLACE(ex.identifier_value_pattern, '%', '') != ex.identifier_value_pattern
+                                  OR REPLACE(ex.identifier_value_pattern, '_', '') != ex.identifier_value_pattern
+                                THEN LOWER(ex.identifier_value_pattern)
+                                ELSE CONCAT('%', LOWER(ex.identifier_value_pattern), '%')
+                            END
+                        )
+                    )
+                )
+            )
+        """.strip()

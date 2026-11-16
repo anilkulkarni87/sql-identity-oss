@@ -4,11 +4,12 @@ import {
     Loader2, CheckCircle2, Settings, Play, Save, ClipboardList,
     ChevronDown, ChevronRight, Database, Shield, Layers, Code,
     Activity, Clock, Cpu, FileSpreadsheet, GitMerge, Network, Sparkles,
-    ArrowRight, Copy, Check, Edit3, AlertCircle
+    ArrowRight, Copy, Check, Edit3, AlertCircle, RotateCcw
 } from "lucide-react";
 import { IDRConfig } from '../../types';
 import { api } from '../../api/client';
 import { useToast } from '../../components/Toast';
+import { CustomSelect } from '../../components/CustomSelect';
 
 
 export default function StepReview({
@@ -16,24 +17,47 @@ export default function StepReview({
     onBack,
     onComplete,
     initialSaved = false,
+    hasUnsavedChanges = false,
     readOnly = false,
     warningMessage = null,
-    onUpdateConfig
+    onUpdateConfig,
+    onSaved,
+    externalSaving,
+    externalSaveProgress,
+    onTriggerSave,
+    onDiscardDraft,
 }: {
     config: IDRConfig,
     onBack: () => void,
     onComplete: () => void,
     initialSaved?: boolean,
+    hasUnsavedChanges?: boolean,
     readOnly?: boolean,
     warningMessage?: string | null,
-    onUpdateConfig?: (config: IDRConfig) => void
+    onUpdateConfig?: (config: IDRConfig) => void,
+    onSaved?: () => void,
+    externalSaving?: boolean,
+    externalSaveProgress?: {
+        status: string;
+        step?: string;
+        label?: string;
+        percent: number;
+        detail?: string;
+        elapsed_seconds?: number;
+    } | null,
+    onTriggerSave?: () => void,
+    onDiscardDraft?: () => void,
 }) {
     const { toast } = useToast();
     const navigate = useNavigate();
     type ReviewPhase = 'idle' | 'saving' | 'running' | 'success';
     const [phase, setPhase] = useState<ReviewPhase>('idle');
     const [error, setError] = useState<string | null>(null);
-    const [configSaved, setConfigSaved] = useState(initialSaved);
+    const [configSaved, setConfigSaved] = useState(initialSaved && !hasUnsavedChanges);
+
+    useEffect(() => {
+        setConfigSaved(initialSaved && !hasUnsavedChanges);
+    }, [initialSaved, hasUnsavedChanges]);
 
     // JSON Edit State
     const [isEditingJson, setIsEditingJson] = useState(false);
@@ -71,7 +95,7 @@ export default function StepReview({
         }>;
     } | null>(null);
 
-    const [saveProgress, setSaveProgress] = useState<{
+    const [localSaveProgress, setLocalSaveProgress] = useState<{
         status: string;
         step?: string;
         label?: string;
@@ -80,22 +104,24 @@ export default function StepReview({
         elapsed_seconds?: number;
     } | null>(null);
 
-    const saving = phase === 'saving';
+    const saving = externalSaving ?? (phase === 'saving');
+    const saveProgress = externalSaveProgress ?? localSaveProgress;
     const loading = phase === 'running';
     const success = phase === 'success';
 
     useEffect(() => {
-        if (phase !== 'saving') return;
+        if (phase !== 'saving' || onTriggerSave) return;
         let cancelled = false;
 
         const poll = async () => {
             try {
                 const prog = await api.getSaveConfigProgress();
                 if (cancelled) return;
-                setSaveProgress(prog);
+                setLocalSaveProgress(prog);
                 if (prog.status === 'SUCCESS') {
                     setConfigSaved(true);
                     setPhase('idle');
+                    onSaved?.();
                     toast('success', 'Configuration saved', prog.message || 'Metadata persisted to warehouse.');
                 } else if (prog.status === 'ERROR') {
                     const errMsg = prog.error || prog.detail || 'Failed to save configuration';
@@ -114,7 +140,7 @@ export default function StepReview({
             cancelled = true;
             clearInterval(interval);
         };
-    }, [phase]);
+    }, [phase, onTriggerSave, onSaved]);
 
     useEffect(() => {
         if (phase !== 'running') return;
@@ -172,9 +198,13 @@ export default function StepReview({
 
     const handleSave = async () => {
         if (readOnly) return;
+        if (onTriggerSave) {
+            onTriggerSave();
+            return;
+        }
         setPhase('saving');
         setError(null);
-        setSaveProgress({
+        setLocalSaveProgress({
             status: 'SAVING',
             step: 'validating',
             label: 'Validating configuration',
@@ -199,14 +229,22 @@ export default function StepReview({
         }
     };
 
-    const handleRun = async () => {
+    const handleRun = async (overrideDryRun?: boolean) => {
+        const effectiveDryRun = overrideDryRun ?? dryRun;
+        if (overrideDryRun !== undefined) {
+            setDryRun(overrideDryRun);
+        }
         setPhase('running');
         setError(null);
         setLiveProgress({
             status: 'RUNNING',
             elapsed_seconds: 0,
             current_stage: 'preflight',
-            current_detail: 'Starting pipeline...',
+            current_detail: (!effectiveDryRun && (!configSaved || hasUnsavedChanges))
+                ? 'Saving updated configuration to warehouse...'
+                : effectiveDryRun
+                ? 'Running ephemeral dry run (saved config untouched)...'
+                : 'Starting pipeline...',
             stages: [
                 { name: 'preflight', label: 'Preflight & Schema Check', order: 1, status: 'running' },
                 { name: 'entity_extraction', label: 'Entity Extraction', order: 2, status: 'pending' },
@@ -216,20 +254,38 @@ export default function StepReview({
                 { name: 'label_propagation', label: 'Label Propagation (Graph)', order: 6, status: 'pending' },
                 ...(strictMode ? [] : [{ name: 'fuzzy_matching', label: 'Fuzzy Matching', order: 7, status: 'pending' as const }]),
                 {
-                    name: dryRun ? 'dry_run_analysis' : 'output_generation',
-                    label: dryRun ? 'Dry Run Analysis' : 'Output & Golden Profiles',
+                    name: effectiveDryRun ? 'dry_run_analysis' : 'output_generation',
+                    label: effectiveDryRun ? 'Dry Run Analysis' : 'Output & Golden Profiles',
                     order: strictMode ? 7 : 8,
                     status: 'pending'
                 }
             ]
         });
         try {
+            const cleanConfig = {
+                ...config,
+                sources: config.sources || [],
+                rules: config.rules || [],
+                fuzzy_rules: config.fuzzy_rules || [],
+                survivorship: config.survivorship || [],
+                exclusions: config.exclusions || [],
+                overrides: config.overrides || [],
+            };
+
+            // Real commits persist config first; Dry Runs evaluate draft config ephemerally without saving.
+            if (!effectiveDryRun && !readOnly && (!configSaved || hasUnsavedChanges)) {
+                await api.saveSetupConfig(cleanConfig);
+                setConfigSaved(true);
+                onSaved?.();
+            }
+
             const result = await api.runSetup({
                 mode: runMode === 'INCREMENTAL' ? 'INCR' : 'FULL',
                 strict: strictMode,
                 max_iterations: maxIterations,
                 max_group_size: maxGroupSize,
-                dry_run: dryRun,
+                dry_run: effectiveDryRun,
+                ...(effectiveDryRun ? { config: cleanConfig } : {}),
             });
             // Fetch final progress snapshot so all completed stages reflect accurate row counts & durations
             try {
@@ -312,9 +368,9 @@ export default function StepReview({
                     </button>
                     <button
                         className={`${btnClass} ${dryRun ? 'bg-purple-600 hover:bg-purple-700' : ''}`}
-                        onClick={handleRun}
-                        disabled={loading || saving || !configSaved}
-                        title={!configSaved ? "Save configuration first" : ""}
+                        onClick={() => handleRun()}
+                        disabled={loading || saving || readOnly || totalSources === 0}
+                        title={hasUnsavedChanges ? "Saves pending edits and executes pipeline" : ""}
                     >
                         {loading ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : <Play className="mr-2 w-4 h-4" />}
                         {loading ? 'Running Pipeline...' : dryRun ? 'Start Dry Run' : 'Run Pipeline'}
@@ -490,17 +546,18 @@ export default function StepReview({
                         <div className="pt-4 border-t border-gray-700/70 space-y-4">
                             {dryRun && runResult.dry_run_summary ? (
                                 <div className="space-y-3">
-                                    <div className="flex items-center gap-2 text-purple-300 font-semibold text-sm">
-                                        <ClipboardList className="w-4 h-4" />
-                                        Dry Run Analysis — Proposed Graph Changes (No Writes Committed)
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
-                                            <span className="text-gray-400 block">Proposed Changes</span>
-                                            <span className="text-lg font-mono font-bold text-white">
-                                                {(runResult.dry_run_summary.proposed_changes ?? 0).toLocaleString()}
-                                            </span>
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2 text-purple-300 font-semibold text-sm">
+                                            <ClipboardList className="w-4 h-4" />
+                                            Dry Run Analysis — Proposed Graph Changes (No Writes Committed)
                                         </div>
+                                        <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-purple-950/60 border border-purple-700/50 text-purple-200">
+                                            {hasUnsavedChanges
+                                                ? 'Draft Previewed — Saved Config Untouched'
+                                                : 'Saved Config Previewed — Output Tables Untouched'}
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
                                         <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
                                             <span className="text-gray-400 block">New Entities</span>
                                             <span className="text-lg font-mono font-bold text-green-400">
@@ -514,20 +571,86 @@ export default function StepReview({
                                             </span>
                                         </div>
                                         <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">Edges Delta</span>
+                                            <span className={`text-lg font-mono font-bold ${
+                                                (runResult.dry_run_summary.edges_delta ?? 0) === 0
+                                                    ? 'text-gray-300'
+                                                    : (runResult.dry_run_summary.edges_delta ?? 0) < 0
+                                                    ? 'text-rose-400'
+                                                    : 'text-blue-400'
+                                            }`}>
+                                                {(runResult.dry_run_summary.edges_delta ?? 0) > 0 ? '+' : ''}
+                                                {(runResult.dry_run_summary.edges_delta ?? 0).toLocaleString()}
+                                            </span>
+                                            {runResult.dry_run_summary.current_edges !== null && runResult.dry_run_summary.current_edges !== undefined && (
+                                                <span className="text-[11px] text-gray-500 block font-mono">
+                                                    {(runResult.dry_run_summary.proposed_edges ?? 0).toLocaleString()} vs {runResult.dry_run_summary.current_edges.toLocaleString()}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                                            <span className="text-gray-400 block">Clusters Delta</span>
+                                            <span className={`text-lg font-mono font-bold ${
+                                                (runResult.dry_run_summary.clusters_delta ?? 0) === 0
+                                                    ? 'text-gray-300'
+                                                    : 'text-cyan-400'
+                                            }`}>
+                                                {(runResult.dry_run_summary.clusters_delta ?? 0) > 0 ? '+' : ''}
+                                                {(runResult.dry_run_summary.clusters_delta ?? 0).toLocaleString()}
+                                            </span>
+                                            {runResult.dry_run_summary.current_clusters !== null && runResult.dry_run_summary.current_clusters !== undefined && (
+                                                <span className="text-[11px] text-gray-500 block font-mono">
+                                                    {(runResult.dry_run_summary.proposed_clusters ?? 0).toLocaleString()} vs {runResult.dry_run_summary.current_clusters.toLocaleString()}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
                                             <span className="text-gray-400 block">Unchanged Entities</span>
                                             <span className="text-lg font-mono font-bold text-gray-300">
                                                 {(runResult.dry_run_summary.unchanged_entities ?? 0).toLocaleString()}
                                             </span>
                                         </div>
                                     </div>
-                                    <div className="flex gap-3 pt-1">
+                                    {(runResult.dry_run_summary.edges_delta ?? 0) !== 0 &&
+                                     (runResult.dry_run_summary.moved_entities ?? 0) === 0 &&
+                                     (runResult.dry_run_summary.new_entities ?? 0) === 0 && (
+                                        <div className="p-2.5 rounded-lg bg-blue-950/40 border border-blue-800/50 text-xs text-blue-200">
+                                            Graph edges changed by <strong>{(runResult.dry_run_summary.edges_delta ?? 0).toLocaleString()}</strong>, while cluster memberships remained intact because those entities remain linked via other corroborating identifiers (for example, <code>customer_id</code> or <code>phone</code>).
+                                        </div>
+                                    )}
+                                    <div className="flex flex-wrap gap-3 pt-1">
                                         <button
                                             className={btnClass}
-                                            onClick={() => { setDryRun(false); handleRun(); }}
+                                            onClick={() => handleRun(false)}
                                         >
                                             <Play className="w-4 h-4 mr-1.5" />
-                                            Execute Real Pipeline (Commit Changes)
+                                            {hasUnsavedChanges ? 'Save & Execute Real Pipeline' : 'Execute Real Pipeline (Commit Changes)'}
                                         </button>
+                                        {hasUnsavedChanges && (
+                                            <button
+                                                type="button"
+                                                className={`${btnOutlineClass} border-emerald-600/60 text-emerald-300 hover:bg-emerald-950/40`}
+                                                onClick={handleSave}
+                                                disabled={saving || readOnly}
+                                            >
+                                                <Save className="w-4 h-4 mr-1.5" />
+                                                Save Config Only
+                                            </button>
+                                        )}
+                                        {hasUnsavedChanges && onDiscardDraft && (
+                                            <button
+                                                type="button"
+                                                className={`${btnOutlineClass} border-amber-700/60 text-amber-300 hover:bg-amber-950/40`}
+                                                onClick={() => {
+                                                    onDiscardDraft();
+                                                    setPhase('idle');
+                                                    setRunResult(null);
+                                                }}
+                                            >
+                                                <RotateCcw className="w-4 h-4 mr-1.5" />
+                                                Discard Draft Changes
+                                            </button>
+                                        )}
                                         <button
                                             className={btnOutlineClass}
                                             onClick={() => { setPhase('idle'); setRunResult(null); }}
@@ -603,16 +726,20 @@ export default function StepReview({
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-gray-300">Run Mode</label>
-                        <select
+                        <label className="text-xs font-medium text-gray-300 block">Run Mode</label>
+                        <CustomSelect
                             value={runMode}
-                            onChange={(e) => setRunMode(e.target.value as any)}
-                            disabled={loading}
-                            className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="INCREMENTAL">Incremental (Delta Watermark — Faster)</option>
-                            <option value="FULL">Full Refresh (Recompute All)</option>
-                        </select>
+                            onChange={(val) => {
+                                if (!loading) setRunMode(val as 'FULL' | 'INCREMENTAL');
+                            }}
+                            options={[
+                                { value: 'INCREMENTAL', label: 'Incremental (Delta Watermark — Faster)' },
+                                { value: 'FULL', label: 'Full Refresh (Recompute All)' },
+                            ]}
+                            className="w-full"
+                            buttonClassName="text-sm py-2 bg-gray-900"
+                            menuClassName="left-0 right-0"
+                        />
                     </div>
 
                     <div className="space-y-1.5">

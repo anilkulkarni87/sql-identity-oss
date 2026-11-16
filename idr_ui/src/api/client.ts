@@ -165,6 +165,7 @@ export const api = {
             run_id: string
             updated_at: string
         }> | null
+        truncated?: boolean
     }>(`/clusters/${encodeURIComponent(clusterId)}`),
 
     manageOverride: (payload: {
@@ -178,6 +179,21 @@ export const api = {
         action?: string
         overrides?: Array<Record<string, unknown>>
     }>('/overrides', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    }),
+
+    manageExclusion: (payload: {
+        action?: 'add' | 'remove' | 'list'
+        identifier_type?: string
+        identifier_value_pattern?: string
+        match_type?: 'EXACT' | 'LIKE'
+        reason?: string
+    }) => fetchJson<{
+        status: string
+        action?: string
+        exclusions?: Array<Record<string, unknown>>
+    }>('/exclusions', {
         method: 'POST',
         body: JSON.stringify(payload),
     }),
@@ -328,12 +344,24 @@ export const api = {
         error?: string
     }>('/setup/config/save/progress'),
 
+    getConfigHistory: (limit = 15) => fetchJson<{
+        snapshots: Array<{
+            config_hash: string
+            created_at: string
+            sources_count: number
+            rules_count: number
+            exclusions_count: number
+            config: Record<string, unknown>
+        }>
+    }>(`/setup/config/history?limit=${limit}`),
+
     runSetup: (payload: {
         mode: 'INCR' | 'FULL'
         strict: boolean
         max_iterations: number
         dry_run: boolean
         max_group_size?: number
+        config?: unknown
     }) => fetchJson<Record<string, unknown>>('/setup/run', {
         method: 'POST',
         body: JSON.stringify(payload),

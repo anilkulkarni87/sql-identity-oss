@@ -23,14 +23,16 @@ class DatabricksAdapter(IDRAdapter):
         result = runner.run()
     """
 
-    def __init__(self, spark_or_conn, catalog: str = None):
+    def __init__(self, spark_or_conn, catalog: str = None, schema_mapping: Optional[Dict[str, str]] = None):
         """
         Initialize with Spark session OR Databricks SQL Connector.
 
         Args:
             spark_or_conn: SparkSession OR databricks.sql.Connection
             catalog: Unity Catalog name (optional)
+            schema_mapping: Optional mapping for idr_meta/idr_work/idr_out schemas
         """
+        self.init_schema_mapping(schema_mapping)
         self.conn_obj = spark_or_conn
         self.catalog = catalog
 
@@ -55,6 +57,7 @@ class DatabricksAdapter(IDRAdapter):
 
     def execute(self, sql: str) -> None:
         """Execute a single SQL statement."""
+        sql = self._rewrite_schemas(sql)
         if self.is_spark:
             self.conn_obj.sql(sql)
         else:
@@ -63,6 +66,7 @@ class DatabricksAdapter(IDRAdapter):
 
     def execute_script(self, sql: str) -> None:
         """Execute multiple SQL statements separated by semicolons."""
+        sql = self._rewrite_schemas(sql)
         for stmt in sql.split(";"):
             stmt = stmt.strip()
             if stmt:
@@ -93,6 +97,7 @@ class DatabricksAdapter(IDRAdapter):
 
     def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
         """Execute SQL and return results as list of dicts."""
+        sql = self._rewrite_schemas(sql)
         if self.is_spark:
             bound_sql = self._bind_spark_params(sql, params)
             df = self.conn_obj.sql(bound_sql).toPandas()
@@ -115,6 +120,7 @@ class DatabricksAdapter(IDRAdapter):
 
     def query_one(self, sql: str, params: Optional[List[Any]] = None) -> Any:
         """Execute SQL and return first value of first row."""
+        sql = self._rewrite_schemas(sql)
         if self.is_spark:
             bound_sql = self._bind_spark_params(sql, params)
             result = self.conn_obj.sql(bound_sql).collect()
@@ -134,6 +140,7 @@ class DatabricksAdapter(IDRAdapter):
 
     def table_exists(self, table_fqn: str) -> bool:
         """Check if table exists without triggering TABLE_OR_VIEW_NOT_FOUND errors."""
+        table_fqn = self._rewrite_table_fqn(table_fqn)
         clean_fqn = table_fqn.replace("`", "").replace('"', "").strip()
         parts = [p for p in clean_fqn.split(".") if p]
         if len(parts) in (2, 3):
@@ -172,6 +179,7 @@ class DatabricksAdapter(IDRAdapter):
     def get_table_columns(self, table_fqn: str) -> List[Dict[str, str]]:
         """Get column names for a table (lowercase)."""
         # DESCRIBE returns col_name (0), data_type (1), comment (2)
+        table_fqn = self._rewrite_table_fqn(table_fqn)
         if self.is_spark:
             result = self.conn_obj.sql(f"DESCRIBE TABLE {table_fqn}").collect()
             columns = []
@@ -222,6 +230,7 @@ class DatabricksAdapter(IDRAdapter):
 
         target_schemas = []
         if schema:
+            schema = self.schema_mapping.get(schema.lower(), schema)
             if not re.match(r"^[a-zA-Z0-9_\.]+$", schema):
                 raise ValueError(
                     f"Invalid schema name: {schema} (Only alphanumeric, underscore, dot allowed)"
@@ -232,18 +241,15 @@ class DatabricksAdapter(IDRAdapter):
                 target_schemas.append(f"{self.catalog}.{schema}")
         else:
             found = self.list_schemas()
-            target_schemas = [
-                s
-                for s in found
-                if s.lower()
-                not in (
-                    "information_schema",
-                    "sys",
-                    "idr_meta",
-                    "idr_work",
-                    "idr_out",
-                )
-            ]
+            excluded_schemas = {
+                "information_schema",
+                "sys",
+                "idr_meta",
+                "idr_work",
+                "idr_out",
+                *{v.lower() for v in self.schema_mapping.values()},
+            }
+            target_schemas = [s for s in found if s.lower() not in excluded_schemas]
             if not target_schemas:
                 target_schemas = ["default"]
 

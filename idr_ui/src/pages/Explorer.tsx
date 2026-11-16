@@ -293,6 +293,25 @@ export default function Explorer() {
         }
     }
 
+    const handleExcludeIdentifier = async (identifierType: string, identifierValue: string) => {
+        if (!identifierValue) return
+        try {
+            await api.manageExclusion({
+                action: 'add',
+                identifier_type: identifierType,
+                identifier_value_pattern: identifierValue,
+                match_type: 'EXACT',
+                reason: `Excluded from cluster ${selectedCluster || 'explorer'}`,
+            })
+            setActionNotice(
+                `Added ${identifierType} exclusion for "${identifierValue}". Re-run in INCR mode to split affected clusters.`
+            )
+            setTimeout(() => setActionNotice(null), 6000)
+        } catch (err: any) {
+            setActionNotice(`Failed to save exclusion: ${err?.message || err}`)
+        }
+    }
+
     const handlePreviewRtbf = async (resolvedId: string) => {
         if (rtbfInFlightRef.current || rtbfLoading !== null) return
         rtbfInFlightRef.current = true
@@ -904,22 +923,33 @@ export default function Explorer() {
                                                 className="p-3 bg-gray-900/70 hover:bg-gray-700/40 rounded-lg border border-gray-700/60 transition-colors text-xs space-y-2"
                                             >
                                                 {/* Identifier Type & Value */}
-                                                <div className="flex items-center justify-between">
+                                                <div className="flex items-center justify-between gap-2">
                                                     <span
                                                         className={`px-2 py-0.5 rounded text-[11px] font-medium border ${badge.badgeBg} ${badge.badgeText} ${badge.border}`}
                                                     >
                                                         {edge.identifier_type}
                                                     </span>
-                                                    <span className="font-mono text-[10px] text-gray-400">
+                                                    <span className="font-mono text-[10px] text-gray-400 truncate">
                                                         Rule: {edge.rule_id || 'EXACT'}
                                                     </span>
-                                                    <button
-                                                        onClick={() => handleStewardshipOverride('DO_NOT_LINK', edge.left_entity_key, edge.right_entity_key)}
-                                                        className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 hover:bg-rose-950/60 text-gray-400 hover:text-rose-300 border border-gray-700 hover:border-rose-800/60 transition-colors"
-                                                        title="Add DO_NOT_LINK override between these two entities"
-                                                    >
-                                                        Unlink Pair
-                                                    </button>
+                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                        {edge.identifier_value && (
+                                                            <button
+                                                                onClick={() => handleExcludeIdentifier(edge.identifier_type, edge.identifier_value)}
+                                                                className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 hover:bg-amber-950/60 text-gray-400 hover:text-amber-300 border border-gray-700 hover:border-amber-800/60 transition-colors"
+                                                                title={`Exclude "${edge.identifier_value}" from future matching`}
+                                                            >
+                                                                Exclude Value
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => handleStewardshipOverride('DO_NOT_LINK', edge.left_entity_key, edge.right_entity_key)}
+                                                            className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 hover:bg-rose-950/60 text-gray-400 hover:text-rose-300 border border-gray-700 hover:border-rose-800/60 transition-colors"
+                                                            title="Add DO_NOT_LINK override between these two entities"
+                                                        >
+                                                            Unlink Pair
+                                                        </button>
+                                                    </div>
                                                 </div>
 
                                                 <p className="font-mono text-xs text-gray-200 font-medium truncate bg-gray-800/60 px-2 py-1 rounded border border-gray-700/40">

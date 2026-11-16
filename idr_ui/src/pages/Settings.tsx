@@ -567,7 +567,7 @@ export default function Settings() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                     <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/60">
                         <span className="text-gray-400 block text-[11px]">IDR Engine</span>
-                        <span className="font-mono text-gray-200 font-semibold mt-0.5 block">v0.5.0</span>
+                        <span className="font-mono text-gray-200 font-semibold mt-0.5 block">v0.6.1</span>
                     </div>
                     <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/60">
                         <span className="text-gray-400 block text-[11px]">License</span>

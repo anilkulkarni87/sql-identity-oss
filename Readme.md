@@ -39,10 +39,10 @@ That's it! The engine will:
 
 - **Unified Core Package** - Headless-first execution via `idr_core`, CLI, Python, and `dbt_idr`
 - **🤖 Agent-Native MCP Server** - 23 tools + `/mcp` Streamable HTTP, two-step confirmation guardrails, triage loop, `SKILL.md` & `llms.txt`
-- **🖥️ Optional Explorer UI** - Visualization dashboard, setup wizard, and one-click GDPR Forget
+- **🖥️ Identity Studio & Explorer UI** - 4-tab Identity Studio (merged multi-schema discovery & auto-mapping, rules, survivorship, dry-run verification), cluster visualizer, config version history, and one-click GDPR Forget
 - **🪝 Event Webhooks** - Non-blocking `run.completed`, `guardrail.skipped_groups_spike`, and `privacy.erasure_completed` hooks
 - **🎯 Confidence Scoring** - Cluster quality metrics (0-1)
-- **🔒 Dry Run Mode** - Preview changes before committing
+- **🔒 Ephemeral Dry Run & Config Versioning** - Preview draft YAML/UI rule changes (`--config ... --dry-run`) with `Edges Delta` & `Clusters Delta` metrics without mutating `idr_meta.*`, plus `idr config history` / `idr config rollback`
 - **🛡️ Data Quality Controls** - strict mode, max_group_size, exclusion lists
 - **📈 Incremental Processing** - Watermark-based efficiency at scale
 - **🔍 Full Audit Trail** - Every decision is traceable
@@ -89,11 +89,16 @@ The `idr` CLI is the standard way to run on all platforms.
 # 1. Initialize DB
 idr init --platform [duckdb|bigquery|snowflake|databricks] --db demo.duckdb
 
-# 2. Configure (using YAML)
-idr apply-config --platform [platform] --db demo.duckdb --config examples/config_retail.yaml
+# 2. Configure (using YAML; legacy alias `idr apply-config` also supported)
+idr config apply --platform [platform] --db demo.duckdb --file examples/config_retail.yaml
 
-# 3. Run Pipeline (FULL or INCR)
+# 3. Preview a draft YAML without saving config or mutating output tables
+idr run --platform [platform] --db demo.duckdb --mode FULL --config candidate.yaml --dry-run
+
+# 4. Run Pipeline (FULL or INCR) & manage config history/rollback
 idr run --platform [platform] --db demo.duckdb --mode FULL
+idr config history --platform [platform] --db demo.duckdb
+idr config rollback --platform [platform] --db demo.duckdb
 
 # 4. Launch Interactive Web UI + API
 idr ui --db demo.duckdb
