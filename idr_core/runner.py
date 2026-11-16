@@ -423,7 +423,7 @@ class IDRRunner:
     def _record_run_start(self, config: RunConfig) -> None:
         """Record run start in history table."""
         # Compute hash of metadata configuration for reproducibility
-        config_hash = self._compute_config_hash()
+        config_hash = self._compute_config_hash(record_snapshot=not config.dry_run)
 
         # Check for config drift in INCR mode against the last successful run
         if config.run_mode == "INCR" and config_hash != "unknown":
@@ -457,7 +457,7 @@ class IDRRunner:
                     {self._dialect["current_timestamp"]}, 0, {self._dialect["current_timestamp"]}, '{config_hash}')
         """)
 
-    def _compute_config_hash(self) -> str:
+    def _compute_config_hash(self, record_snapshot: bool = False) -> str:
         """Compute a hash of metadata tables for reproducibility tracking.
 
         Returns a SHA256 hash of the combined metadata configuration:
@@ -500,24 +500,35 @@ class IDRRunner:
             config_json = json.dumps(config_data, sort_keys=True, default=str)
             config_hash = hashlib.sha256(config_json.encode()).hexdigest()[:16]  # Short hash
 
-            # Store snapshot (dedupe by hash using INSERT OR IGNORE / INSERT IGNORE)
-            sources_json = json.dumps(sources or [], default=str).replace("'", "''")
-            rules_json = json.dumps(rules or [], default=str).replace("'", "''")
-            mappings_json = json.dumps(mappings or [], default=str).replace("'", "''")
+            if record_snapshot:
+                try:
+                    exists = self.adapter.query_one(
+                        f"SELECT 1 FROM idr_out.config_snapshot WHERE config_hash = '{config_hash}'"
+                    )
+                    if not exists:
+                        from .config import sql_to_config
 
-            try:
-                exists = self.adapter.query_one(
-                    f"SELECT 1 FROM idr_out.config_snapshot WHERE config_hash = '{config_hash}'"
-                )
-                if not exists:
-                    self.adapter.execute(f"""
-                        INSERT INTO idr_out.config_snapshot
-                        (config_hash, sources_json, rules_json, mappings_json, created_at)
-                        VALUES ('{config_hash}', '{sources_json}', '{rules_json}', '{mappings_json}',
-                                {self._dialect["current_timestamp"]})
-                    """)
-            except Exception:
-                pass  # Snapshot storage is best-effort
+                        full_cfg = sql_to_config(self.adapter)
+                        sources_json = json.dumps(full_cfg.get("sources", []), default=str).replace("'", "''")
+                        rules_json = json.dumps(
+                            {
+                                "rules": full_cfg.get("rules", []),
+                                "fuzzy_rules": full_cfg.get("fuzzy_rules", []),
+                                "exclusions": full_cfg.get("exclusions", []),
+                                "overrides": full_cfg.get("overrides", []),
+                                "use_default_exclusions": bool(full_cfg.get("use_default_exclusions", False)),
+                            },
+                            default=str,
+                        ).replace("'", "''")
+                        mappings_json = json.dumps(full_cfg.get("survivorship", []), default=str).replace("'", "''")
+                        self.adapter.execute(f"""
+                            INSERT INTO idr_out.config_snapshot
+                            (config_hash, sources_json, rules_json, mappings_json, created_at)
+                            VALUES ('{config_hash}', '{sources_json}', '{rules_json}', '{mappings_json}',
+                                    {self._dialect["current_timestamp"]})
+                        """)
+                except Exception:
+                    pass  # Snapshot storage is best-effort
 
             return config_hash
         except Exception:
