@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     Database, GitGraph, Play, Layers, Shield, FileCode2, X,
@@ -19,6 +20,7 @@ import StepReview from './StepReview';
 export default function SetupWizard() {
     const machine = useWizardMachine();
     const { toast } = useToast();
+    const [searchParams] = useSearchParams();
     const queryClient = useQueryClient();
 
     const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -69,7 +71,8 @@ export default function SetupWizard() {
             }
 
             if (status.connected) {
-                machine.goToStage('map');
+                machine.resetDraftForUnconfiguredWarehouse();
+                machine.goToStage(preferredStage === 'connect' ? 'connect' : 'map');
             }
         } catch (error) {
             console.error("Failed to load setup config:", error);
@@ -78,7 +81,8 @@ export default function SetupWizard() {
     };
 
     useEffect(() => {
-        checkConfigAndNavigate('map');
+        const requestedStep = searchParams.get('step') as WizardStage | null;
+        checkConfigAndNavigate(requestedStep === 'connect' ? 'connect' : 'map');
     }, []);
 
     // Poll save progress whenever Studio header save is active
@@ -142,6 +146,7 @@ export default function SetupWizard() {
                 survivorship: machine.mappingConfig.survivorship || [],
                 exclusions: machine.mappingConfig.exclusions || [],
                 overrides: machine.mappingConfig.overrides || [],
+                lenses: machine.mappingConfig.lenses || [],
             };
             await api.saveSetupConfigAsync(cleanConfig);
         } catch (err: any) {

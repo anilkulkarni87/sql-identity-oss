@@ -66,6 +66,7 @@ class RunConfig:
     max_group_size: Optional[int] = None
     max_moved_entities_pct: Optional[float] = None
     max_cluster_delta_pct: Optional[float] = None
+    lens: Optional[str] = None
 
     def __post_init__(self):
         mode = str(self.run_mode or "").upper()
@@ -349,6 +350,7 @@ class IDRRunner:
                 )
                 output_rows = output.generate_output()
                 self._end_stage("output_generation", output_rows or 0)
+                self._run_configured_lenses(config, graph, output)
                 status = "SUCCESS"
             else:
                 self._start_stage("dry_run_analysis")
@@ -378,6 +380,44 @@ class IDRRunner:
                 extra={"run_id": self.run_id, "event": "run_failed"},
             )
             return self._complete_run(start_time, config, status="FAILED", error=str(e))
+
+    def _run_configured_lenses(
+        self, config: RunConfig, graph: GraphStage, output: OutputStage
+    ) -> None:
+        """Resolve and materialize any active multi-lens definitions from idr_meta.lens_definition."""
+        if not self.adapter.table_exists("idr_meta.lens_definition"):
+            return
+        rows = self.adapter.query("""
+            SELECT lens_id, include_types_json, exclude_types_json, source_filter_json, max_group_size
+            FROM idr_meta.lens_definition
+            WHERE is_active = TRUE
+            ORDER BY lens_id ASC
+        """)
+        if not rows:
+            return
+        target_lens = (config.lens or "").strip()
+        selected_rows = [
+            row for row in rows
+            if not target_lens or str(row["lens_id"]) == target_lens
+        ]
+        if not selected_rows:
+            return
+
+        self._start_stage("lens_resolution")
+        total_lens_clusters = 0
+        for row in selected_rows:
+            lid = str(row["lens_id"])
+            lens_def = {
+                "lens_id": lid,
+                "include_types": json.loads(row["include_types_json"]) if row.get("include_types_json") else [],
+                "exclude_types": json.loads(row["exclude_types_json"]) if row.get("exclude_types_json") else [],
+                "source_filter": json.loads(row["source_filter_json"]) if row.get("source_filter_json") else [],
+                "max_group_size": row.get("max_group_size"),
+            }
+            lens_stats = graph.resolve_lens(lens_def, config.max_iters)
+            output.materialize_lens_output(lid)
+            total_lens_clusters += int((lens_stats or {}).get("clusters", 0))
+        self._end_stage("lens_resolution", total_lens_clusters)
 
     # ===== Run Tracking =====
 

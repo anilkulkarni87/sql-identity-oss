@@ -244,3 +244,70 @@ idr privacy forget --platform duckdb --db demo.duckdb \
 3. Recomputes or removes affected cluster summaries in `idr_out.identity_clusters_current` and `idr_out.golden_profile_current`.
 4. Inserts an immutable audit record (`request_id`, `request_type`, `target_value`, `affected_entities_count`, `affected_clusters_count`, `tables_purged`, `requested_by`, `reason`, `executed_at`, `status`) into `idr_meta.privacy_audit_log`.
 
+---
+
+## 6. Multi-Lens Identity Views (`lenses:`)
+
+Different downstream teams often need different definitions of "who is the same customer" over the **exact same source data** — for example:
+- **Compliance / Login (`strict_person`)**: merge only on high-precision keys (`EMAIL`, `CUSTOMER_ID`) so family members sharing a phone or home address never merge.
+- **Marketing / Attribution (`household`)**: merge on `EMAIL`, `PHONE`, and `ADDRESS_ID` to see household-level reach.
+- **Brand / Channel Isolation (`instore_only`)**: restrict the graph to a subset of sources via glob patterns (`*instore*`, `crm*`).
+
+Instead of maintaining separate config files or re-scanning your warehouse tables N times, **Multi-Lens Identity** (also referred to as **Identity Lenses** or **Policy Views**) runs Stages 1–5 (entity extraction, canonicalization, exclusions, and superset edge building into `idr_work.edges_new`) **once**, and then projects each lens's policy over that superset edge graph in **Stage 8 (`Multi-Lens Views`)**.
+
+### Configuration (`lenses:`)
+
+Add an optional `lenses:` list to your `config.yaml` (or configure it via the dropdowns in **Identity Studio → 2. Matching Rules → Multi-Lens Identity Views**):
+
+```yaml
+lenses:
+  - id: strict_person
+    include_types: [EMAIL, CUSTOMER_ID]
+
+  - id: household
+    include_types: [EMAIL, PHONE, ADDRESS_ID, CUSTOMER_ID]
+    max_group_size: 25
+
+  - id: instore_only
+    include_types: [PHONE, INSTORE_ACCOUNT_ID, CUSTOMER_ID]
+    exclude_types: [ADDRESS_ID]
+    source_filter: ["*instore*"]
+```
+
+| Field | Description |
+| :--- | :--- |
+| `id` | Unique identifier for the lens (alphanumeric/underscores). |
+| `include_types` | Optional allow-list of identifier types (e.g. `["EMAIL", "PHONE"]`). Empty = all active rule types. `MANUAL_OVERRIDE` (`FORCE_LINK`) edges are preserved. |
+| `exclude_types` | Optional deny-list of identifier types to omit from this lens. |
+| `source_filter` | Optional list of source-ID glob patterns (e.g. `["crm*", "*instore*"]`) to isolate brands, regions, or channels. |
+| `max_group_size` | Optional cluster-size guardrail specific to this lens. |
+
+### How It Works & Output Tables
+1. **Metadata (`idr_meta.lens_definition`)**: Stores active lens definitions and is included in `idr_out.config_snapshot` for versioning and rollback.
+2. **Per-Lens Graph Resolution (`resolve_lens`)**: Filters `idr_work.edges_new` (and historical `idr_out.identity_edges_current` in `INCR` mode) by `include_types`, `exclude_types`, `source_filter`, and `ISOLATE`/`DO_NOT_LINK` overrides, runs connected-components label propagation, and stabilizes `resolved_id` independently per lens.
+3. **Materialized Outputs**:
+   - `idr_out.identity_lens_membership_current` (`lens_id`, `entity_key`, `resolved_id`, `updated_at`, `run_id`)
+   - `idr_out.identity_lens_clusters_current` (`lens_id`, `resolved_id`, `cluster_size`, `updated_at`, `run_id`)
+
+### CLI & UI Usage
+
+```bash
+# Run all configured lenses in one pass (default)
+idr run --platform duckdb --db warehouse.duckdb --mode FULL
+
+# Run a single lens only
+idr run --platform duckdb --db warehouse.duckdb --mode INCR --lens strict_person
+
+# List configured lenses
+idr lenses list --platform duckdb --db warehouse.duckdb
+
+# Compare clusterings between two lenses (shows merged-in-A-only vs merged-in-B-only)
+idr lenses diff strict_person household --platform duckdb --db warehouse.duckdb --limit 25
+```
+
+In the Web UI:
+- **Identity Studio → 2. Matching Rules**: Configure lenses using the **Include types**, **Exclude types**, and **Source filter** dropdowns.
+- **Identity Studio → 4. Run & Verify**: Optionally select a single **Target Lens**, and monitor Stage 8 (**Multi-Lens Views**) runtime and row counts.
+- **Explorer**: Switch between **Primary Graph** and any lens using the **Lens** dropdown, or click **Compare Lenses** to inspect cross-lens merge differences.
+
+

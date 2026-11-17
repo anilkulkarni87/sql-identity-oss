@@ -34,7 +34,7 @@ class BigQueryAdapter(IDRAdapter):
             dataset_mapping: Map of schema names to dataset names (e.g. {'idr_out': 'my_dataset'})
         """
         self.client = client
-        self.project = project
+        self.project = project or getattr(client, "project", None)
         self.location = location
         self.init_schema_mapping(dataset_mapping)
         self.dataset_mapping = dict(self.schema_mapping)

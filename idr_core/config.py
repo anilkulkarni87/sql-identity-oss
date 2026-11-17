@@ -766,6 +766,32 @@ ON {join_cond}
         }
         statements.append(generate_upsert("idr_meta.survivorship_rule", ["attribute_name"], data))
 
+    # Multi-Lens definitions (optional)
+    for lens in (config.get("lenses") or []):
+        raw_lid = str(lens.get("id") or lens.get("lens_id") or "").strip()
+        lens_id = validate_identifier(raw_lid, "lens.id")
+        inc = [
+            str(t).strip().upper()
+            for t in (lens.get("include_types") or lens.get("include_rules") or [])
+            if str(t).strip()
+        ]
+        exc = [
+            str(t).strip().upper()
+            for t in (lens.get("exclude_types") or lens.get("exclude_rules") or [])
+            if str(t).strip()
+        ]
+        src_flt = [str(s).strip() for s in (lens.get("source_filter") or []) if str(s).strip()]
+        mgs = int(lens["max_group_size"]) if lens.get("max_group_size") else None
+        data = {
+            "lens_id": lens_id,
+            "include_types_json": json.dumps(inc),
+            "exclude_types_json": json.dumps(exc),
+            "source_filter_json": json.dumps(src_flt),
+            "max_group_size": mgs,
+            "is_active": True,
+        }
+        statements.append(generate_upsert("idr_meta.lens_definition", ["lens_id"], data))
+
     if batched:
         batched_statements: List[str] = []
         safe_chunk = max(1, int(chunk_size or 100))
@@ -1067,6 +1093,29 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 }
                 for row in ov_rows
             ]
+
+        # 7. Multi-Lens Definitions
+        try:
+            lens_rows = adapter.query("""
+                SELECT lens_id, include_types_json, exclude_types_json, source_filter_json, max_group_size
+                FROM idr_meta.lens_definition
+                WHERE is_active = TRUE
+                ORDER BY lens_id ASC
+            """)
+            if lens_rows:
+                config["lenses"] = []
+                for lrow in lens_rows:
+                    ldef: Dict[str, Any] = {
+                        "id": lrow["lens_id"],
+                        "include_types": json.loads(lrow["include_types_json"]) if lrow.get("include_types_json") else [],
+                        "exclude_types": json.loads(lrow["exclude_types_json"]) if lrow.get("exclude_types_json") else [],
+                        "source_filter": json.loads(lrow["source_filter_json"]) if lrow.get("source_filter_json") else [],
+                    }
+                    if lrow.get("max_group_size") is not None:
+                        ldef["max_group_size"] = int(lrow["max_group_size"])
+                    config["lenses"].append(ldef)
+        except Exception:
+            pass
 
         return config
 
@@ -1474,6 +1523,7 @@ META_CONFIG_TABLES = (
     "survivorship_rule",
     "identifier_exclusion",
     "identity_override",
+    "lens_definition",
 )
 
 
@@ -1539,6 +1589,8 @@ def parse_config_snapshot_row(row: Dict[str, Any]) -> Dict[str, Any]:
             config_dict["exclusions"] = parsed_rules.get("exclusions", [])
             config_dict["overrides"] = parsed_rules.get("overrides", [])
             config_dict["use_default_exclusions"] = parsed_rules.get("use_default_exclusions", False)
+            if parsed_rules.get("lenses"):
+                config_dict["lenses"] = parsed_rules["lenses"]
         else:
             config_dict["rules"] = parsed_rules
 
@@ -1625,6 +1677,7 @@ def apply_config_to_warehouse(
         "idr_meta.rule",
         "idr_meta.fuzzy_rule",
         "idr_meta.survivorship_rule",
+        "idr_meta.lens_definition",
     ):
         try:
             if adapter.table_exists(meta_table):
@@ -1657,6 +1710,7 @@ def apply_config_to_warehouse(
             "exclusions": cfg.get("exclusions", []),
             "overrides": cfg.get("overrides", []),
             "use_default_exclusions": bool(cfg.get("use_default_exclusions", False)),
+            "lenses": cfg.get("lenses", []),
         }
     )
     mappings_json = json.dumps(cfg.get("survivorship", []))
@@ -1864,4 +1918,65 @@ def compute_dry_run_summary(
         "shadow_preserved_entities": shadow_preserved_entities,
         "corroborating_identifier_types": corroborating_identifier_types,
     }
+
+
+def compute_lens_diff(
+    adapter, lens_a: str, lens_b: str, limit: int = 25
+) -> Dict[str, Any]:
+    """Compare resolved cluster boundaries between two lenses (or 'default' vs a lens)."""
+    safe_a = "default" if str(lens_a).strip().lower() == "default" else validate_identifier(str(lens_a).strip(), "lens_a")
+    safe_b = "default" if str(lens_b).strip().lower() == "default" else validate_identifier(str(lens_b).strip(), "lens_b")
+    safe_limit = max(1, min(int(limit or 25), 200))
+
+    def _src_sql(name: str) -> str:
+        if name == "default":
+            return "(SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current)"
+        return f"(SELECT entity_key, resolved_id FROM idr_out.identity_lens_membership_current WHERE lens_id = '{name}')"
+
+    src_a = _src_sql(safe_a)
+    src_b = _src_sql(safe_b)
+
+    clusters_a = int(adapter.query_one(f"SELECT COUNT(DISTINCT resolved_id) FROM {src_a}") or 0)
+    clusters_b = int(adapter.query_one(f"SELECT COUNT(DISTINCT resolved_id) FROM {src_b}") or 0)
+    entities_compared = int(
+        adapter.query_one(f"SELECT COUNT(*) FROM {src_a} a JOIN {src_b} b ON a.entity_key = b.entity_key")
+        or 0
+    )
+
+    merged_in_b_only = adapter.query(f"""
+        SELECT
+            b.resolved_id AS resolved_b,
+            COUNT(DISTINCT a.resolved_id) AS distinct_a_clusters,
+            COUNT(*) AS entity_count
+        FROM {src_a} a
+        JOIN {src_b} b ON a.entity_key = b.entity_key
+        GROUP BY b.resolved_id
+        HAVING COUNT(DISTINCT a.resolved_id) > 1
+        ORDER BY entity_count DESC, b.resolved_id ASC
+        LIMIT {safe_limit}
+    """)
+
+    merged_in_a_only = adapter.query(f"""
+        SELECT
+            a.resolved_id AS resolved_a,
+            COUNT(DISTINCT b.resolved_id) AS distinct_b_clusters,
+            COUNT(*) AS entity_count
+        FROM {src_a} a
+        JOIN {src_b} b ON a.entity_key = b.entity_key
+        GROUP BY a.resolved_id
+        HAVING COUNT(DISTINCT b.resolved_id) > 1
+        ORDER BY entity_count DESC, a.resolved_id ASC
+        LIMIT {safe_limit}
+    """)
+
+    return {
+        "lens_a": safe_a,
+        "lens_b": safe_b,
+        "lens_a_clusters": clusters_a,
+        "lens_b_clusters": clusters_b,
+        "entities_compared": entities_compared,
+        "merged_in_b_only": merged_in_b_only,
+        "merged_in_a_only": merged_in_a_only,
+    }
+
 

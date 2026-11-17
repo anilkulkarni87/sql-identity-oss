@@ -363,6 +363,7 @@ export const api = {
         max_group_size?: number
         max_moved_entities_pct?: number
         max_cluster_delta_pct?: number
+        lens?: string
         config?: unknown
     }) => fetchJson<Record<string, unknown>>('/setup/run', {
         method: 'POST',
@@ -485,5 +486,80 @@ export const api = {
     }>('/ai/ask', {
         method: 'POST',
         body: JSON.stringify({ question })
-    })
+    }),
+
+    suggestConfigAi: (tables?: string[], prompt = 'Suggest identifier mappings, matching rules, survivorship, and multi-lens views.') => fetchJson<{
+        pii_masked: boolean
+        provider: string
+        model: string
+        suggested_config: Record<string, unknown>
+    }>('/ai/suggest-config', {
+        method: 'POST',
+        body: JSON.stringify({
+            ...(tables && tables.length > 0 ? { tables } : {}),
+            prompt
+        })
+    }),
+
+    // Multi-Lens Identity
+    listLenses: () => fetchJson<{
+        lenses: Array<{
+            id: string
+            include_types: string[]
+            exclude_types: string[]
+            source_filter: string[]
+            max_group_size: number | null
+            cluster_count: number
+            entity_count: number
+        }>
+    }>('/lenses'),
+
+    diffLenses: (lensA: string, lensB: string, limit = 25) => fetchJson<{
+        lens_a: string
+        lens_b: string
+        lens_a_clusters: number
+        lens_b_clusters: number
+        entities_compared: number
+        merged_in_b_only: Array<{ entity_key: string; resolved_a: string; resolved_b: string }>
+        merged_in_a_only: Array<{ entity_key: string; resolved_a: string; resolved_b: string }>
+    }>(`/lenses/diff?lens_a=${encodeURIComponent(lensA)}&lens_b=${encodeURIComponent(lensB)}&limit=${limit}`),
+
+    getLensClusters: (lensId: string, q?: string, limit = 50) => {
+        const params = new URLSearchParams({ limit: String(limit) })
+        if (q && q.trim()) params.set('q', q.trim())
+        return fetchJson<Array<{
+            resolved_id: string
+            cluster_size: number
+            confidence_score: number
+        }>>(`/lenses/${encodeURIComponent(lensId)}/clusters?${params.toString()}`)
+    },
+
+    getLensClusterDetail: (lensId: string, resolvedId: string) => fetchJson<{
+        resolved_id: string
+        super_cluster_id?: string | null
+        cluster_size: number
+        confidence_score: number | null
+        entities: Array<{
+            entity_key: string
+            source_id: string
+            source_key: string
+        }>
+        edges: Array<{
+            left_entity_key: string
+            right_entity_key: string
+            identifier_type: string
+            identifier_value: string
+            rule_id: string
+        }>
+        golden_profile?: Record<string, unknown> | null
+        crosswalk_history?: Array<{
+            previous_resolved_id: string
+            current_resolved_id: string
+            change_type: string
+            entities_moved: number
+            run_id: string
+            updated_at: string
+        }> | null
+        truncated?: boolean
+    }>(`/lenses/${encodeURIComponent(lensId)}/clusters/${encodeURIComponent(resolvedId)}`)
 }

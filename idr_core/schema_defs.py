@@ -234,6 +234,20 @@ SYSTEM_TABLES: List[TableDef] = [
     ),
     TableDef(
         schema="idr_meta",
+        name="lens_definition",
+        description="Multi-lens identity boundary definitions (policy-scoped graph views).",
+        columns=[
+            ColumnDef("lens_id", ColumnType.STRING, is_pk=True),
+            ColumnDef("include_types_json", ColumnType.STRING),
+            ColumnDef("exclude_types_json", ColumnType.STRING),
+            ColumnDef("source_filter_json", ColumnType.STRING),
+            ColumnDef("max_group_size", ColumnType.INT),
+            ColumnDef("is_active", ColumnType.BOOL, default="TRUE"),
+            ColumnDef("updated_at", ColumnType.TIMESTAMP),
+        ],
+    ),
+    TableDef(
+        schema="idr_meta",
         name="privacy_audit_log",
         description="Immutable zero-PII compliance audit log for GDPR/CCPA Right to be Forgotten.",
         columns=[
@@ -405,6 +419,30 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("identifier_type", ColumnType.STRING, is_pk=True),
             ColumnDef("identifier_value_norm", ColumnType.STRING),
             ColumnDef("is_hashed", ColumnType.BOOL, default="FALSE"),
+            ColumnDef("updated_at", ColumnType.TIMESTAMP),
+            ColumnDef("run_id", ColumnType.STRING),
+        ],
+    ),
+    TableDef(
+        schema="idr_out",
+        name="identity_lens_membership_current",
+        description="Per-lens entity_key to resolved_id cluster membership.",
+        columns=[
+            ColumnDef("lens_id", ColumnType.STRING, is_pk=True),
+            ColumnDef("entity_key", ColumnType.STRING, is_pk=True),
+            ColumnDef("resolved_id", ColumnType.STRING),
+            ColumnDef("updated_at", ColumnType.TIMESTAMP),
+            ColumnDef("run_id", ColumnType.STRING),
+        ],
+    ),
+    TableDef(
+        schema="idr_out",
+        name="identity_lens_clusters_current",
+        description="Per-lens cluster summary counts.",
+        columns=[
+            ColumnDef("lens_id", ColumnType.STRING, is_pk=True),
+            ColumnDef("resolved_id", ColumnType.STRING, is_pk=True),
+            ColumnDef("cluster_size", ColumnType.INT),
             ColumnDef("updated_at", ColumnType.TIMESTAMP),
             ColumnDef("run_id", ColumnType.STRING),
         ],
