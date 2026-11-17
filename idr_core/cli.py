@@ -307,6 +307,27 @@ Examples:
     )
     qs_parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
+    # === idr demo ===
+    demo_parser = subparsers.add_parser(
+        "demo",
+        help="Generate demo data, run IDR, and launch the Explorer UI + /mcp in one command",
+    )
+    demo_parser.add_argument(
+        "--rows", type=int, default=10000, help="Number of demo records (default: 10000)"
+    )
+    demo_parser.add_argument(
+        "--output", "-o", default="quickstart_demo.duckdb", help="Output DuckDB path"
+    )
+    demo_parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    demo_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    demo_parser.add_argument("--port", type=int, default=8000, help="Port to bind to (default: 8000)")
+    demo_parser.add_argument(
+        "--no-browser", action="store_true", help="Do not automatically open the browser"
+    )
+    demo_parser.add_argument(
+        "--quiet", action="store_true", help="Hide per-request HTTP access logs"
+    )
+
     # === idr bootstrap ===
     bootstrap_parser = subparsers.add_parser(
         "bootstrap",
@@ -498,6 +519,9 @@ Examples:
 
     if parsed_args.command == "quickstart":
         return handle_quickstart(parsed_args)
+
+    if parsed_args.command == "demo":
+        return handle_demo(parsed_args)
 
     if parsed_args.command == "bootstrap":
         return handle_bootstrap(parsed_args)
@@ -1085,6 +1109,34 @@ def handle_quickstart(args) -> int:
         rows=args.rows,
         seed=args.seed,
     )
+
+
+def handle_demo(args) -> int:
+    """Generate demo DuckDB dataset, run IDR, and launch the bundled Explorer UI + /mcp."""
+    from idr_core.quickstart import run_quickstart
+
+    rc = run_quickstart(
+        output=args.output,
+        rows=args.rows,
+        seed=args.seed,
+    )
+    if rc != 0:
+        return rc
+
+    args.platform = "duckdb"
+    args.db = args.output
+    args.project = None
+    args.location = "US"
+    args.account = None
+    args.user = None
+    args.password = None
+    args.warehouse = None
+    args.database = None
+    args.schema = "PUBLIC"
+    args.role = None
+    args.reload = False
+    args.open = not getattr(args, "no_browser", False)
+    return handle_serve(args)
 
 
 def handle_doctor(args) -> int:

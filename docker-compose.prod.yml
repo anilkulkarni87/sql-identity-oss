@@ -1,6 +1,6 @@
 services:
   api:
-    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-oss}/idr-api:${IDR_IMAGE_TAG:-0.6.1}
+    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-oss}/idr-api:${IDR_IMAGE_TAG:-0.7.0}
     pull_policy: always
     container_name: idr-api
     ports:
@@ -8,6 +8,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - IDR_DATABASE=${IDR_DATABASE:-/data/idr.duckdb}
+      - IDR_DB_PATH=${IDR_DB_PATH:-/data/idr.duckdb}
       - IDR_CORS_ORIGINS=${IDR_CORS_ORIGINS:-http://localhost:3000}
       - IDR_AUTH_ISSUER=${IDR_AUTH_ISSUER:-}
       - IDR_AUTH_AUDIENCE=${IDR_AUTH_AUDIENCE:-account}
@@ -32,7 +33,7 @@ services:
       - idr-net
 
   ui:
-    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-oss}/idr-ui:${IDR_IMAGE_TAG:-0.6.1}
+    image: ${IDR_IMAGE_REGISTRY:-ghcr.io/anilkulkarni87/sql-identity-oss}/idr-ui:${IDR_IMAGE_TAG:-0.7.0}
     pull_policy: always
     container_name: idr-ui
     ports:

@@ -12,10 +12,45 @@ Provides:
 from __future__ import annotations
 
 import json
+import re
 import time
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set
 
 from .llm import LLMClient, mask_pii_payload
+
+
+def get_configured_pii_keys(adapter: Any) -> Set[str]:
+    """Collect mapped identifier and attribute column/field names from idr_meta.*."""
+    keys: Set[str] = set()
+    if adapter is None:
+        return keys
+    for query, cols in (
+        (
+            "SELECT identifier_type, identifier_value_expr FROM idr_meta.identifier_mapping",
+            ("identifier_type", "identifier_value_expr"),
+        ),
+        (
+            "SELECT attribute_name, attribute_expr FROM idr_meta.entity_attribute_mapping",
+            ("attribute_name", "attribute_expr"),
+        ),
+    ):
+        try:
+            for row in adapter.query(query):
+                for col in cols:
+                    val = str(row.get(col) or "").strip().lower()
+                    if val and re.match(r"^[a-z0-9_]+$", val):
+                        keys.add(val)
+        except Exception:
+            pass
+    return keys
+
+
+def _apply_pii_mask(adapter: Any, payload: Any, client: LLMClient) -> Any:
+    if not client.config.effective_mask_pii:
+        return payload
+    extra = get_configured_pii_keys(adapter)
+    return mask_pii_payload(payload, extra_sensitive_keys=extra)
 
 
 def test_llm_connection(client: Optional[LLMClient] = None) -> Dict[str, Any]:
@@ -80,7 +115,7 @@ def explain_cluster_with_ai(
     """Generate a plain-English explanation of why a cluster merged and any risks."""
     client = client or LLMClient()
     ctx = _fetch_cluster_context(adapter, resolved_id)
-    payload = mask_pii_payload(ctx) if client.config.effective_mask_pii else ctx
+    payload = _apply_pii_mask(adapter, ctx, client)
 
     cluster = payload.get("cluster") or {}
     members = payload.get("members") or []
@@ -181,7 +216,7 @@ def triage_with_ai(
         ctx = _fetch_cluster_context(adapter, c["resolved_id"], max_members=15, max_edges=25)
         enriched.append(ctx)
 
-    payload = mask_pii_payload(enriched) if client.config.effective_mask_pii else enriched
+    payload = _apply_pii_mask(adapter, enriched, client)
     prompt = (
         "Review these flagged identity clusters and return JSON with a 'proposals' array.\n"
         "Each proposal must have: resolved_id, action ('KEEP' | 'DO_NOT_LINK' | 'ISOLATE' | 'ADD_EXCLUSION'), "
@@ -236,8 +271,9 @@ def ask_identity_graph(
 
     try:
         summary["recent_runs"] = adapter.query(
-            "SELECT run_id, run_mode, status, entities_processed, edges_created, clusters_impacted "
-            "FROM idr_out.run_history ORDER BY started_at DESC LIMIT 5"
+            "SELECT run_id, run_mode, status, started_at, duration_seconds, "
+            "entities_processed, edges_created, clusters_impacted "
+            "FROM idr_out.run_history ORDER BY started_at DESC LIMIT 10"
         )
     except Exception:
         summary["recent_runs"] = []
@@ -250,7 +286,33 @@ def ask_identity_graph(
     except Exception:
         summary["skipped_groups"] = []
 
-    safe_summary = mask_pii_payload(summary) if client.config.effective_mask_pii else summary
+    try:
+        from .config import sql_to_config
+
+        cfg = sql_to_config(adapter)
+        summary["active_config"] = {
+            "sources": [
+                {
+                    "id": s.get("id"),
+                    "table": s.get("table"),
+                    "entity_key": s.get("entity_key"),
+                    "identifiers": [i.get("type") for i in (s.get("identifiers") or []) if i.get("type")],
+                }
+                for s in (cfg.get("sources") or [])[:25]
+            ],
+            "rules": cfg.get("rules") or [],
+            "fuzzy_rules": cfg.get("fuzzy_rules") or [],
+            "lenses": cfg.get("lenses") or [],
+            "exclusions_count": len(cfg.get("exclusions") or []),
+            "exclusions_sample": (cfg.get("exclusions") or [])[:15],
+            "overrides_count": len(cfg.get("overrides") or []),
+            "overrides_sample": (cfg.get("overrides") or [])[:15],
+            "survivorship_count": len(cfg.get("survivorship") or []),
+        }
+    except Exception:
+        summary["active_config"] = {}
+
+    safe_summary = _apply_pii_mask(adapter, summary, client)
     safe_question = question
 
     answer = client.chat(
@@ -337,5 +399,574 @@ def suggest_config_with_ai(
         "provider": client.config.provider,
         "model": client.config.resolved_model(),
         "suggested_config": config_dict,
+    }
+
+
+def get_run_runtime_trend(adapter: Any, days: int = 14) -> Dict[str, Any]:
+    """Summarize recent IDR run durations, today's runs, and stage-level timing breakdown."""
+    runs: List[Dict[str, Any]] = []
+    try:
+        runs = adapter.query(
+            """
+            SELECT
+                run_id,
+                run_mode,
+                status,
+                CAST(started_at AS VARCHAR) AS started_at,
+                duration_seconds,
+                entities_processed,
+                edges_created,
+                clusters_impacted
+            FROM idr_out.run_history
+            ORDER BY started_at DESC
+            LIMIT 30
+            """
+        )
+    except Exception:
+        try:
+            runs = adapter.query(
+                """
+                SELECT
+                    run_id,
+                    run_mode,
+                    status,
+                    started_at,
+                    duration_seconds,
+                    entities_processed,
+                    edges_created,
+                    clusters_impacted
+                FROM idr_out.run_history
+                ORDER BY started_at DESC
+                LIMIT 30
+                """
+            )
+        except Exception:
+            runs = []
+
+    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    local_prefix = datetime.now().strftime("%Y-%m-%d")
+    today_runs = [
+        r for r in runs
+        if str(r.get("started_at") or "").startswith((today_prefix, local_prefix))
+    ]
+    durations = [
+        float(r["duration_seconds"])
+        for r in runs
+        if r.get("duration_seconds") is not None and str(r.get("status", "")).upper() in ("SUCCESS", "DRY_RUN_COMPLETE", "")
+    ]
+    latest = runs[0] if runs else None
+    avg_dur = round(sum(durations) / len(durations), 2) if durations else None
+    delta_pct = None
+    if latest and latest.get("duration_seconds") is not None and avg_dur and avg_dur > 0:
+        delta_pct = round(((float(latest["duration_seconds"]) - avg_dur) / avg_dur) * 100.0, 1)
+
+    latest_stages: List[Dict[str, Any]] = []
+    if latest and latest.get("run_id"):
+        try:
+            latest_stages = adapter.query(
+                """
+                SELECT stage_name, duration_seconds, rows_out
+                FROM idr_out.stage_metrics
+                WHERE run_id = ?
+                ORDER BY stage_order ASC
+                """,
+                params=[latest["run_id"]],
+            )
+        except Exception:
+            latest_stages = []
+
+    return {
+        "total_runs_checked": len(runs),
+        "today_runs": today_runs,
+        "latest_run": latest,
+        "avg_duration_seconds": avg_dur,
+        "min_duration_seconds": round(min(durations), 2) if durations else None,
+        "max_duration_seconds": round(max(durations), 2) if durations else None,
+        "latest_vs_avg_pct": delta_pct,
+        "latest_stages": latest_stages,
+        "recent_runs": runs[:10],
+    }
+
+
+def find_cluster_bridge(
+    adapter: Any,
+    entity_key_a: str,
+    entity_key_b: str,
+    max_edges: int = 500,
+) -> Dict[str, Any]:
+    """Find the shortest bridge path between two entities and suggest a DO_NOT_LINK/exclusion fix."""
+    from collections import deque
+
+    mem_a = adapter.query(
+        "SELECT resolved_id FROM idr_out.identity_resolved_membership_current WHERE entity_key = ? LIMIT 1",
+        params=[entity_key_a],
+    )
+    mem_b = adapter.query(
+        "SELECT resolved_id FROM idr_out.identity_resolved_membership_current WHERE entity_key = ? LIMIT 1",
+        params=[entity_key_b],
+    )
+    rid_a = mem_a[0]["resolved_id"] if mem_a else None
+    rid_b = mem_b[0]["resolved_id"] if mem_b else None
+
+    if not rid_a or not rid_b or rid_a != rid_b:
+        return {
+            "connected": False,
+            "resolved_id_a": rid_a,
+            "resolved_id_b": rid_b,
+            "hops": 0,
+            "path": [],
+            "summary": f"{entity_key_a} and {entity_key_b} are not in the same cluster.",
+        }
+
+    edge_rows = adapter.query(
+        f"""
+        SELECT e.left_entity_key, e.right_entity_key, e.identifier_type, e.identifier_value_norm
+        FROM idr_out.identity_edges_current e
+        JOIN idr_out.identity_resolved_membership_current m1
+          ON e.left_entity_key = m1.entity_key
+        WHERE m1.resolved_id = ?
+        LIMIT {int(max_edges)}
+        """,
+        params=[rid_a],
+    )
+
+    adj: Dict[str, List[Dict[str, str]]] = {}
+    for er in edge_rows:
+        u = str(er["left_entity_key"])
+        v = str(er["right_entity_key"])
+        itype = str(er.get("identifier_type") or "")
+        ival = str(er.get("identifier_value_norm") or "")
+        adj.setdefault(u, []).append({"to": v, "identifier_type": itype, "identifier_value": ival})
+        adj.setdefault(v, []).append({"to": u, "identifier_type": itype, "identifier_value": ival})
+
+    queue: deque = deque([(entity_key_a, [])])
+    visited = {entity_key_a}
+    found_path: List[Dict[str, str]] = []
+    while queue:
+        curr, path = queue.popleft()
+        if curr == entity_key_b:
+            found_path = path
+            break
+        for edge in adj.get(curr, []):
+            nxt = edge["to"]
+            if nxt not in visited:
+                visited.add(nxt)
+                queue.append(
+                    (
+                        nxt,
+                        path
+                        + [
+                            {
+                                "from": curr,
+                                "to": nxt,
+                                "identifier_type": edge["identifier_type"],
+                                "identifier_value": edge["identifier_value"],
+                            }
+                        ],
+                    )
+                )
+
+    bridge = found_path[-1] if found_path else None
+    chain_str = " -> ".join(
+        [f"{p['from']} --({p['identifier_type']}:{p['identifier_value']})--> {p['to']}" for p in found_path]
+    )
+    return {
+        "connected": bool(found_path),
+        "resolved_id": rid_a,
+        "hops": len(found_path),
+        "path": found_path,
+        "summary": chain_str or f"Both entities belong to {rid_a}, but no direct edge path was found within {max_edges} edges.",
+        "recommended_override": (
+            {
+                "action": "add",
+                "override_type": "DO_NOT_LINK",
+                "entity_key_a": bridge["from"],
+                "entity_key_b": bridge["to"],
+                "reason": f"Break bridge on {bridge['identifier_type']}",
+            }
+            if bridge
+            else None
+        ),
+        "recommended_exclusion": (
+            {
+                "action": "add",
+                "identifier_type": bridge["identifier_type"],
+                "identifier_value_pattern": bridge["identifier_value"],
+                "match_type": "EXACT",
+                "reason": f"Toxic bridge value in {rid_a}",
+            }
+            if bridge and bridge.get("identifier_value")
+            else None
+        ),
+    }
+
+
+def diagnose_run_anomalies(adapter: Any) -> Dict[str, Any]:
+    """Return a compact, high-signal anomaly & drift report without raw table dumps."""
+    trend = get_run_runtime_trend(adapter)
+    latest = trend.get("latest_run") or {}
+    delta_pct = trend.get("latest_vs_avg_pct")
+    stages = trend.get("latest_stages") or []
+    slowest_stage = (
+        max(stages, key=lambda s: float(s.get("duration_seconds") or 0))
+        if stages
+        else None
+    )
+
+    skipped_hubs: List[Dict[str, Any]] = []
+    try:
+        skipped_hubs = adapter.query(
+            """
+            SELECT identifier_type, identifier_value_norm, group_size, max_allowed
+            FROM idr_out.skipped_identifier_groups
+            ORDER BY group_size DESC
+            LIMIT 5
+            """
+        )
+    except Exception:
+        skipped_hubs = []
+
+    anomalies: List[str] = []
+    if delta_pct is not None and delta_pct >= 25.0:
+        anomalies.append(
+            f"Latest run `{latest.get('run_id')}` took {latest.get('duration_seconds')}s (+{delta_pct}% vs {trend.get('avg_duration_seconds')}s avg)."
+        )
+    if slowest_stage:
+        anomalies.append(
+            f"Slowest stage: `{slowest_stage.get('stage_name')}` ({slowest_stage.get('duration_seconds')}s)."
+        )
+    if skipped_hubs:
+        top = skipped_hubs[0]
+        anomalies.append(
+            f"Found {len(skipped_hubs)} oversized/skipped identifier hub(s); top hub `{top.get('identifier_type')}:{top.get('identifier_value_norm')}` has {top.get('group_size')} entities (limit {top.get('max_allowed')})."
+        )
+
+    return {
+        "latest_run_id": latest.get("run_id"),
+        "latest_duration_seconds": latest.get("duration_seconds"),
+        "avg_duration_seconds": trend.get("avg_duration_seconds"),
+        "runtime_delta_pct": delta_pct,
+        "slowest_stage": slowest_stage,
+        "skipped_hubs": skipped_hubs,
+        "anomalies": anomalies,
+        "recommended_exclusions": [
+            {
+                "identifier_type": h.get("identifier_type"),
+                "identifier_value_pattern": h.get("identifier_value_norm"),
+                "match_type": "EXACT",
+                "group_size": h.get("group_size"),
+            }
+            for h in skipped_hubs
+        ],
+    }
+
+
+def draft_lens_from_goal(
+    adapter: Any,
+    goal: str,
+    client: Optional[LLMClient] = None,
+) -> Dict[str, Any]:
+    """Synthesize a validated lens definition from active warehouse rules & natural-language goal."""
+    from .config import sql_to_config
+
+    cfg = sql_to_config(adapter)
+    available_types = sorted(
+        {
+            str(k).strip().upper()
+            for r in (cfg.get("rules") or [])
+            for k in (r.get("match_keys") or ([r["match_key"]] if r.get("match_key") else []))
+            if str(k).strip()
+        }
+        | {
+            str(i.get("type") or "").strip().upper()
+            for s in (cfg.get("sources") or [])
+            for i in (s.get("identifiers") or [])
+            if str(i.get("type") or "").strip()
+        }
+    )
+    available_sources = sorted({str(s.get("id")) for s in (cfg.get("sources") or []) if s.get("id")})
+
+    drafted: Optional[Dict[str, Any]] = None
+    if client is not None:
+        prompt = (
+            "Draft a single SQL Identity Resolution lens JSON object.\n"
+            'Schema: {"id": "snake_case_id", "include_types": [...], "exclude_types": [...], "source_filter": [...], "max_group_size": int|null}\n'
+            f"Available identifier types: {available_types}\n"
+            f"Available source IDs: {available_sources}\n"
+            f"User Goal: {goal}"
+        )
+        try:
+            raw = client.chat(
+                [
+                    {"role": "system", "content": "Return valid JSON only for a single lens object."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                json_mode=True,
+            )
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and (parsed.get("id") or parsed.get("lens_id")):
+                drafted = parsed
+        except Exception:
+            drafted = None
+
+    if not drafted:
+        g = (goal or "").lower()
+        strict = any(w in g for w in ("strict", "login", "person", "high precision"))
+        household = "household" in g or "family" in g
+        lid = "strict_person" if strict else ("household" if household else "custom_lens")
+        inc = [t for t in available_types if t in ("EMAIL", "CUSTOMER_ID")] if strict else available_types
+        if not inc:
+            inc = available_types
+        drafted = {
+            "id": lid,
+            "include_types": inc,
+            "exclude_types": ["PHONE", "ADDRESS_ID"] if strict else [],
+            "source_filter": [],
+            **({"max_group_size": 25} if household else {}),
+        }
+
+    return {
+        "lens": drafted,
+        "available_types": available_types,
+        "available_sources": available_sources,
+    }
+
+
+def _fallback_classify_copilot_intent(message: str) -> Dict[str, Any]:
+    msg = (message or "").lower()
+    if any(k in msg for k in ("anomal", "drift", "toxic", "hub", "skipped", "why slow", "regression")):
+        return {"intent": "diagnose_anomalies"}
+    if any(k in msg for k in ("draft lens", "create lens", "new lens", "author lens")):
+        return {"intent": "draft_lens", "goal": message}
+    if any(k in msg for k in ("run idr", "run full", "run incr", "incremental", "full load", "trigger run", "execute idr")):
+        mode = "FULL" if "full" in msg else "INCR"
+        return {"intent": "propose_run", "mode": mode, "dry_run": "dry" in msg, "lens": None}
+    if any(k in msg for k in ("runtime", "run time", "how long", "duration", "slower", "faster", "changed", "recent days", "today")):
+        return {"intent": "get_runtime_trend"}
+    if "diff" in msg or "compare lens" in msg:
+        return {"intent": "diff_lenses", "lens_a": None, "lens_b": None}
+    if "doctor" in msg or "health" in msg or "diagnostic" in msg:
+        return {"intent": "run_doctor"}
+    return {"intent": "general_qa"}
+
+
+def copilot_chat(
+    adapter: Any,
+    message: str,
+    history: Optional[List[Dict[str, str]]] = None,
+    client: Optional[LLMClient] = None,
+) -> Dict[str, Any]:
+    """Route natural-language operational requests to safe warehouse tools or confirmation cards."""
+    client = client or LLMClient()
+
+    router_prompt = (
+        "Classify the user's SQL Identity Resolution request into JSON.\n"
+        "Allowed intents:\n"
+        '1. {"intent": "diagnose_anomalies"}\n'
+        '2. {"intent": "draft_lens", "goal": string}\n'
+        '3. {"intent": "propose_run", "mode": "INCR"|"FULL", "dry_run": true|false, "lens": string|null}\n'
+        '4. {"intent": "get_runtime_trend"}\n'
+        '5. {"intent": "diff_lenses", "lens_a": string|null, "lens_b": string|null}\n'
+        '6. {"intent": "run_doctor"}\n'
+        '7. {"intent": "general_qa"}\n'
+        f"User message: {message}"
+    )
+    parsed_intent: Dict[str, Any] = {}
+    try:
+        raw = client.chat(
+            [
+                {"role": "system", "content": "Return valid JSON only."},
+                {"role": "user", "content": router_prompt},
+            ],
+            temperature=0.0,
+            json_mode=True,
+        )
+        candidate = json.loads(raw)
+        if isinstance(candidate, dict) and candidate.get("intent"):
+            parsed_intent = candidate
+    except Exception:
+        parsed_intent = {}
+
+    if not parsed_intent:
+        parsed_intent = _fallback_classify_copilot_intent(message)
+
+    intent = str(parsed_intent.get("intent") or "general_qa")
+
+    if intent == "diagnose_anomalies":
+        report = diagnose_run_anomalies(adapter)
+        safe_report = _apply_pii_mask(adapter, report, client)
+        anomalies = safe_report.get("anomalies") or []
+        summary_text = (
+            "\n".join(f"- {a}" for a in anomalies)
+            if anomalies
+            else "No runtime regressions or oversized identifier hubs detected in recent runs."
+        )
+        return {
+            "intent": "diagnose_anomalies",
+            "answer": summary_text,
+            "proposed_action": None,
+            "metrics": safe_report,
+            "pii_masked": client.config.effective_mask_pii,
+            "provider": client.config.provider,
+            "model": client.config.resolved_model(),
+        }
+
+    if intent == "draft_lens":
+        goal = str(parsed_intent.get("goal") or message)
+        drafted = draft_lens_from_goal(adapter, goal, client=client)
+        lens_obj = drafted["lens"]
+        return {
+            "intent": "draft_lens",
+            "answer": f"Drafted lens `{lens_obj.get('id')}`:\n```json\n{json.dumps(lens_obj, indent=2)}\n```",
+            "proposed_action": None,
+            "metrics": drafted,
+            "pii_masked": client.config.effective_mask_pii,
+            "provider": client.config.provider,
+            "model": client.config.resolved_model(),
+        }
+
+    if intent == "propose_run":
+        mode = "FULL" if str(parsed_intent.get("mode", "")).upper() == "FULL" else "INCR"
+        dry_run = bool(parsed_intent.get("dry_run", False))
+        lens = parsed_intent.get("lens") or None
+        label = f"Run IDR ({mode})" + (f" · lens: {lens}" if lens else "") + (" [Dry Run]" if dry_run else "")
+        return {
+            "intent": "propose_run",
+            "answer": (
+                f"Ready to execute an **{mode}** identity resolution run"
+                + (f" for lens `{lens}`" if lens else "")
+                + ". Confirm below to start the pipeline."
+            ),
+            "proposed_action": {
+                "type": "run_pipeline",
+                "label": label,
+                "mode": mode,
+                "dry_run": dry_run,
+                "lens": lens,
+            },
+            "metrics": None,
+            "pii_masked": client.config.effective_mask_pii,
+            "provider": client.config.provider,
+            "model": client.config.resolved_model(),
+        }
+
+    if intent == "get_runtime_trend":
+        trend = get_run_runtime_trend(adapter)
+        safe_trend = _apply_pii_mask(adapter, trend, client)
+        try:
+            answer = client.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Summarize the IDR runtime telemetry concisely using ONLY the numbers provided. "
+                            "Highlight today's runtime, recent average, trend delta, and slowest stages."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Telemetry:\n{json.dumps(safe_trend, default=str)}\n\nQuestion: {message}",
+                    },
+                ]
+            ).strip()
+        except Exception:
+            latest = trend.get("latest_run") or {}
+            answer = (
+                f"Latest run `{latest.get('run_id', 'n/a')}` ({latest.get('run_mode', 'n/a')}) took "
+                f"`{latest.get('duration_seconds', 'n/a')}s` (average across {trend.get('total_runs_checked', 0)} runs: "
+                f"`{trend.get('avg_duration_seconds', 'n/a')}s`)."
+            )
+        return {
+            "intent": "get_runtime_trend",
+            "answer": answer,
+            "proposed_action": None,
+            "metrics": trend,
+            "pii_masked": client.config.effective_mask_pii,
+            "provider": client.config.provider,
+            "model": client.config.resolved_model(),
+        }
+
+    if intent == "diff_lenses":
+        from .config import compute_lens_diff
+
+        lens_a = parsed_intent.get("lens_a")
+        lens_b = parsed_intent.get("lens_b")
+        if not lens_a or not lens_b:
+            try:
+                lrows = adapter.query(
+                    "SELECT lens_id FROM idr_meta.lens_definition WHERE is_active = TRUE ORDER BY lens_id ASC LIMIT 2"
+                )
+                if len(lrows) >= 2:
+                    lens_a = lens_a or lrows[0]["lens_id"]
+                    lens_b = lens_b or lrows[1]["lens_id"]
+            except Exception:
+                pass
+        if lens_a and lens_b:
+            try:
+                diff = compute_lens_diff(adapter, str(lens_a), str(lens_b), limit=10)
+                return {
+                    "intent": "diff_lenses",
+                    "answer": (
+                        f"Compared `{diff['lens_a']}` ({diff['lens_a_clusters']} clusters) vs "
+                        f"`{diff['lens_b']}` ({diff['lens_b_clusters']} clusters) across "
+                        f"{diff['entities_compared']} overlapping entities."
+                    ),
+                    "proposed_action": None,
+                    "metrics": diff,
+                    "pii_masked": client.config.effective_mask_pii,
+                    "provider": client.config.provider,
+                    "model": client.config.resolved_model(),
+                }
+            except Exception as exc:
+                return {
+                    "intent": "diff_lenses",
+                    "answer": f"Could not compare lenses: {exc}",
+                    "proposed_action": None,
+                    "metrics": None,
+                    "pii_masked": client.config.effective_mask_pii,
+                    "provider": client.config.provider,
+                    "model": client.config.resolved_model(),
+                }
+
+    if intent == "run_doctor":
+        try:
+            from .doctor import IDRDoctor
+
+            report = IDRDoctor(adapter).run_all()
+            checks = [
+                {"name": c.name, "status": c.status.value, "message": c.message}
+                for c in getattr(report, "checks", [])
+            ]
+            return {
+                "intent": "run_doctor",
+                "answer": f"Completed {len(checks)} warehouse readiness checks.",
+                "proposed_action": None,
+                "metrics": {"checks": checks},
+                "pii_masked": client.config.effective_mask_pii,
+                "provider": client.config.provider,
+                "model": client.config.resolved_model(),
+            }
+        except Exception as exc:
+            return {
+                "intent": "run_doctor",
+                "answer": f"Doctor diagnostics failed: {exc}",
+                "proposed_action": None,
+                "metrics": None,
+                "pii_masked": client.config.effective_mask_pii,
+                "provider": client.config.provider,
+                "model": client.config.resolved_model(),
+            }
+
+    # Fallback: general Q&A over identity graph & telemetry
+    qa = ask_identity_graph(adapter, message, client=client)
+    return {
+        "intent": "general_qa",
+        "answer": qa["answer"],
+        "proposed_action": None,
+        "metrics": None,
+        "pii_masked": qa["pii_masked"],
+        "provider": qa["provider"],
+        "model": qa["model"],
     }
 

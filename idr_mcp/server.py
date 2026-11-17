@@ -1227,6 +1227,60 @@ def submit_evaluation_label(
         return {"status": "ERROR", "error": f"Failed to submit evaluation label: {str(e)}"}
 
 
+@mcp.tool()
+def explain_cluster_bridge(entity_key_a: str, entity_key_b: str) -> Dict[str, Any]:
+    """
+    Token-efficient multi-hop forensics: return ONLY the shortest edge bridge path
+    connecting two entity keys and the recommended DO_NOT_LINK/exclusion fix.
+    """
+    from idr_core.ai_assistant import find_cluster_bridge, get_configured_pii_keys
+    from idr_core.llm import mask_pii_payload
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    res = find_cluster_bridge(adapter, entity_key_a, entity_key_b)
+    if should_mask_pii():
+        res = mask_pii_payload(res, extra_sensitive_keys=get_configured_pii_keys(adapter))
+    return res
+
+
+@mcp.tool()
+def diagnose_run_anomalies() -> Dict[str, Any]:
+    """
+    Token-efficient drift & regression triage: compare latest run vs recent baseline
+    and return only runtime regressions, slowest stage, and top skipped hubs.
+    """
+    from idr_core.ai_assistant import diagnose_run_anomalies as _diagnose
+    from idr_core.ai_assistant import get_configured_pii_keys
+    from idr_core.llm import mask_pii_payload
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    res = _diagnose(adapter)
+    if should_mask_pii():
+        res = mask_pii_payload(res, extra_sensitive_keys=get_configured_pii_keys(adapter))
+    return res
+
+
+@mcp.tool()
+def diff_lenses_summary(lens_a: str, lens_b: str, limit: int = 10) -> Dict[str, Any]:
+    """
+    Token-efficient cross-lens diff: compare clusterings between two lenses
+    (e.g. strict_person vs household) with compact sample rows.
+    """
+    from idr_core.config import compute_lens_diff
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    try:
+        return compute_lens_diff(adapter, lens_a, lens_b, limit=limit)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # --- MCP Resources & Prompts (Self-Documenting Specs for Agents) ---
 
 

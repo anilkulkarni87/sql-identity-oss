@@ -488,6 +488,25 @@ export const api = {
         body: JSON.stringify({ question })
     }),
 
+    copilotChat: (message: string, history?: Array<{ role: string; content: string }>) => fetchJson<{
+        intent: string
+        answer: string
+        proposed_action: {
+            type: 'run_pipeline'
+            label: string
+            mode: 'INCR' | 'FULL'
+            dry_run: boolean
+            lens: string | null
+        } | null
+        metrics: Record<string, any> | null
+        pii_masked: boolean
+        provider: string
+        model: string
+    }>('/ai/copilot', {
+        method: 'POST',
+        body: JSON.stringify({ message, history })
+    }),
+
     suggestConfigAi: (tables?: string[], prompt = 'Suggest identifier mappings, matching rules, survivorship, and multi-lens views.') => fetchJson<{
         pii_masked: boolean
         provider: string

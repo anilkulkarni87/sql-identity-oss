@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 _EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-])([A-Za-z0-9._%+-]*)(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
 _PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})(?!\d)")
@@ -38,6 +38,12 @@ _SENSITIVE_KEY_TOKENS = (
     "full_name",
     "identifier_value",
     "raw_value",
+    "dob",
+    "date_of_birth",
+    "birth_date",
+    "ip_address",
+    "zip_code",
+    "postal_code",
 )
 
 
@@ -70,20 +76,36 @@ def mask_pii_text(text: str) -> str:
     return masked
 
 
-def mask_pii_payload(obj: Any, parent_key: str = "") -> Any:
+def mask_pii_payload(
+    obj: Any,
+    parent_key: str = "",
+    extra_sensitive_keys: Optional[Iterable[str]] = None,
+) -> Any:
     """Recursively mask PII fields in dicts/lists before sending to a remote LLM."""
-    if isinstance(obj, dict):
-        return {k: mask_pii_payload(v, parent_key=str(k).lower()) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [mask_pii_payload(item, parent_key=parent_key) for item in obj]
-    if isinstance(obj, str):
-        masked = mask_pii_text(obj)
-        if masked == obj and any(tok in parent_key for tok in _SENSITIVE_KEY_TOKENS):
-            if len(obj) <= 2:
-                return "***"
-            return f"{obj[0]}***{obj[-1]}"
-        return masked
-    return obj
+    extra_set = (
+        {str(k).strip().lower() for k in extra_sensitive_keys if str(k).strip()}
+        if extra_sensitive_keys
+        else set()
+    )
+
+    def _walk(val: Any, key: str) -> Any:
+        if isinstance(val, dict):
+            return {k: _walk(v, str(k).lower()) for k, v in val.items()}
+        if isinstance(val, list):
+            return [_walk(item, key) for item in val]
+        if isinstance(val, str):
+            masked = mask_pii_text(val)
+            is_sensitive = any(tok in key for tok in _SENSITIVE_KEY_TOKENS) or (
+                key in extra_set
+            )
+            if masked == val and is_sensitive:
+                if len(val) <= 2:
+                    return "***"
+                return f"{val[0]}***{val[-1]}"
+            return masked
+        return val
+
+    return _walk(obj, parent_key.lower())
 
 
 def _ollama_root_url(base_url: Optional[str]) -> str:

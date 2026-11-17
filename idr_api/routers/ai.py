@@ -8,7 +8,7 @@ PII masking is automatically enabled for non-local endpoints.
 from __future__ import annotations
 
 from threading import RLock
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from idr_api.dependencies import get_adapter, get_current_user, get_user_key
 from idr_core.ai_assistant import (
     ask_identity_graph,
+    copilot_chat,
     explain_cluster_with_ai,
     suggest_config_with_ai,
     test_llm_connection,
@@ -182,6 +183,30 @@ def ask_ai(
         return ask_identity_graph(
             adapter,
             payload.question,
+            client=LLMClient(cfg),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class AICopilotRequest(BaseModel):
+    message: str
+    history: Optional[List[Dict[str, str]]] = None
+
+
+@router.post("/copilot")
+def copilot(
+    payload: AICopilotRequest,
+    adapter=Depends(get_adapter),
+    current_user: dict = Depends(get_current_user),
+    store: LLMConfigStore = Depends(get_llm_config_store),
+):
+    try:
+        cfg = store.get(get_user_key(current_user))
+        return copilot_chat(
+            adapter,
+            payload.message,
+            history=payload.history,
             client=LLMClient(cfg),
         )
     except Exception as exc:

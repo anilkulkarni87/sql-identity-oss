@@ -1,8 +1,9 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import {
     LayoutDashboard, Network, History, Settings as SettingsIcon,
-    Database, Wand2, PanelLeftClose, PanelLeftOpen, Menu, X
+    Database, Wand2, PanelLeftClose, PanelLeftOpen, Menu, X, Sparkles
 } from 'lucide-react'
+import AICopilotDrawer from './components/AICopilotDrawer'
 import Dashboard from './pages/Dashboard'
 import Explorer from './pages/Explorer'
 import Runs from './pages/Runs'
@@ -31,6 +32,18 @@ export default function App() {
     const auth = useIDRAuth()
     const [collapsed, setCollapsed] = useState(false)
     const [mobileOpen, setMobileOpen] = useState(false)
+    const [copilotOpen, setCopilotOpen] = useState(false)
+
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault()
+                setCopilotOpen((prev) => !prev)
+            }
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [])
 
     useEffect(() => {
         if (auth.isAuthenticated && auth.user?.access_token) {
@@ -204,6 +217,16 @@ export default function App() {
                         </div>
 
                         <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setCopilotOpen(true)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-medium text-blue-300 transition"
+                                title="Open AI Copilot (Cmd+K)"
+                            >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>AI Copilot</span>
+                                <kbd className="hidden sm:inline text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">⌘K</kbd>
+                            </button>
                             {connectionStatus?.connected && (
                                 <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300 font-mono">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
@@ -225,6 +248,7 @@ export default function App() {
                         </Routes>
                     </main>
                 </div>
+                <AICopilotDrawer open={copilotOpen} onClose={() => setCopilotOpen(false)} />
             </div>
         </ToastProvider>
     )
