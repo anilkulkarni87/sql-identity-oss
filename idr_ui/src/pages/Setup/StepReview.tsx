@@ -73,6 +73,7 @@ export default function StepReview({
     const [maxGroupSize, setMaxGroupSize] = useState(10000);
     const [maxMovedEntitiesPct, setMaxMovedEntitiesPct] = useState('');
     const [maxClusterDeltaPct, setMaxClusterDeltaPct] = useState('');
+    const [selectedLens, setSelectedLens] = useState('');
     const [dryRun, setDryRun] = useState(false);
     const [runResult, setRunResult] = useState<any>(null);
 
@@ -223,6 +224,7 @@ export default function StepReview({
                 survivorship: config.survivorship || [],
                 exclusions: config.exclusions || [],
                 overrides: config.overrides || [],
+                lenses: config.lenses || [],
             };
             await api.saveSetupConfigAsync(cleanConfig);
         } catch (err: any) {
@@ -260,7 +262,15 @@ export default function StepReview({
                     label: effectiveDryRun ? 'Dry Run Analysis' : 'Output & Golden Profiles',
                     order: strictMode ? 7 : 8,
                     status: 'pending'
-                }
+                },
+                ...(!effectiveDryRun && ((config.lenses || []).length > 0 || !!selectedLens)
+                    ? [{
+                        name: 'lens_resolution',
+                        label: 'Multi-Lens Views',
+                        order: strictMode ? 8 : 9,
+                        status: 'pending' as const,
+                    }]
+                    : [])
             ]
         });
         try {
@@ -272,6 +282,7 @@ export default function StepReview({
                 survivorship: config.survivorship || [],
                 exclusions: config.exclusions || [],
                 overrides: config.overrides || [],
+                lenses: config.lenses || [],
             };
 
             // Real commits persist config first; Dry Runs evaluate draft config ephemerally without saving.
@@ -290,6 +301,7 @@ export default function StepReview({
                 max_group_size: maxGroupSize,
                 ...(parsedMovedPct && parsedMovedPct > 0 ? { max_moved_entities_pct: parsedMovedPct } : {}),
                 ...(parsedClusterPct && parsedClusterPct > 0 ? { max_cluster_delta_pct: parsedClusterPct } : {}),
+                ...(selectedLens ? { lens: selectedLens } : {}),
                 dry_run: effectiveDryRun,
                 ...(effectiveDryRun ? { config: cleanConfig } : {}),
             });
@@ -803,6 +815,25 @@ export default function StepReview({
                             placeholder="10000"
                         />
                     </div>
+
+                    {(config.lenses || []).length > 0 && (
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-gray-300 block">Target Lens (Optional)</label>
+                            <CustomSelect
+                                value={selectedLens}
+                                onChange={(val) => {
+                                    if (!loading) setSelectedLens(val);
+                                }}
+                                options={[
+                                    { value: '', label: `All Lenses (${(config.lenses || []).length}) + Primary` },
+                                    ...(config.lenses || []).map((l) => ({ value: l.id, label: l.id })),
+                                ]}
+                                className="w-full"
+                                buttonClassName="text-sm py-2 bg-gray-900"
+                                menuClassName="left-0 right-0"
+                            />
+                        </div>
+                    )}
 
                     <div className="space-y-1.5">
                         <label className="text-xs font-medium text-gray-300 flex items-center justify-between">

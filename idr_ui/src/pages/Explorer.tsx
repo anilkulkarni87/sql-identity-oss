@@ -28,6 +28,10 @@ export default function Explorer() {
     const debouncedSearchQuery = useDebounce(searchQuery, 300)
 
     const [selectedCluster, setSelectedCluster] = useState<string | null>(null)
+    const [selectedLens, setSelectedLens] = useState<string>('')
+    const [diffModalOpen, setDiffModalOpen] = useState(false)
+    const [diffLensA, setDiffLensA] = useState<string>('')
+    const [diffLensB, setDiffLensB] = useState<string>('')
     const [aiExplanation, setAiExplanation] = useState<string | null>(null)
     const [aiExplaining, setAiExplaining] = useState(false)
     const [aiCustomPrompt, setAiCustomPrompt] = useState('')
@@ -44,15 +48,33 @@ export default function Explorer() {
     const [rtbfLoading, setRtbfLoading] = useState<'preview' | 'purge' | null>(null)
     const rtbfInFlightRef = useRef(false)
 
+    const { data: lensesData } = useQuery({
+        queryKey: ['lenses'],
+        queryFn: () => api.listLenses(),
+    })
+    const availableLenses = lensesData?.lenses || []
+
+    const { data: lensDiffData, isLoading: diffLoading } = useQuery({
+        queryKey: ['lens-diff', diffLensA, diffLensB],
+        queryFn: () => api.diffLenses(diffLensA, diffLensB, 25),
+        enabled: diffModalOpen && !!diffLensA && !!diffLensB && diffLensA !== diffLensB,
+    })
+
     const { data: searchResults, isLoading: searching } = useQuery({
-        queryKey: ['search', debouncedSearchQuery],
-        queryFn: () => api.searchEntities(debouncedSearchQuery),
-        enabled: debouncedSearchQuery.trim().length >= 3
+        queryKey: ['search', selectedLens, debouncedSearchQuery],
+        queryFn: () =>
+            selectedLens
+                ? api.getLensClusters(selectedLens, debouncedSearchQuery)
+                : api.searchEntities(debouncedSearchQuery),
+        enabled: selectedLens ? true : debouncedSearchQuery.trim().length >= 3
     })
 
     const { data: clusterDetail } = useQuery({
-        queryKey: ['cluster', selectedCluster],
-        queryFn: () => api.getCluster(selectedCluster!),
+        queryKey: ['cluster', selectedLens, selectedCluster],
+        queryFn: () =>
+            selectedLens
+                ? api.getLensClusterDetail(selectedLens, selectedCluster!)
+                : api.getCluster(selectedCluster!),
         enabled: !!selectedCluster
     })
 
@@ -373,6 +395,42 @@ export default function Explorer() {
                         Search and explore unified entity clusters, inspect incident identifiers, and verify Golden Profiles.
                     </p>
                 </div>
+                {availableLenses.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
+                            Lens
+                        </label>
+                        <select
+                            value={selectedLens}
+                            onChange={(e) => {
+                                setSelectedLens(e.target.value)
+                                setSelectedCluster(null)
+                                setSelectedNode(null)
+                            }}
+                            className="bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="">Primary Graph (Default)</option>
+                            {availableLenses.map((l) => (
+                                <option key={l.id} value={l.id}>
+                                    {l.id} ({l.cluster_count} clusters)
+                                </option>
+                            ))}
+                        </select>
+                        {availableLenses.length >= 2 && (
+                            <button
+                                onClick={() => {
+                                    setDiffLensA(availableLenses[0].id)
+                                    setDiffLensB(availableLenses[1].id)
+                                    setDiffModalOpen(true)
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-blue-300 flex items-center gap-1.5 transition"
+                            >
+                                <GitBranch className="w-3.5 h-3.5" />
+                                Compare Lenses
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Search Bar */}
@@ -991,13 +1049,127 @@ export default function Explorer() {
             )}
 
             {/* Empty State */}
-            {!selectedCluster && searchQuery.trim().length < 3 && (
+            {!selectedCluster && !selectedLens && searchQuery.trim().length < 3 && (
                 <div className="text-center py-24 text-gray-500 bg-gray-800/30 rounded-2xl border border-gray-800/60">
                     <Search className="w-14 h-14 mx-auto mb-3 opacity-40 text-blue-400" />
                     <h3 className="text-base font-semibold text-gray-300">Search for any identity entity</h3>
                     <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
                         Type an email address, phone number, loyalty ID, or customer key to inspect its cluster and connected graph.
                     </p>
+                </div>
+            )}
+
+            {/* Lens Diff Modal */}
+            {diffModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                                <GitBranch className="w-5 h-5 text-blue-400" />
+                                Compare Identity Lenses
+                            </h2>
+                            <button
+                                onClick={() => setDiffModalOpen(false)}
+                                className="text-gray-400 hover:text-white"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-5 space-y-4 overflow-y-auto">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">Lens A</label>
+                                    <select
+                                        value={diffLensA}
+                                        onChange={(e) => setDiffLensA(e.target.value)}
+                                        className="w-full bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-3 py-2"
+                                    >
+                                        {availableLenses.map((l) => (
+                                            <option key={l.id} value={l.id}>{l.id}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">Lens B</label>
+                                    <select
+                                        value={diffLensB}
+                                        onChange={(e) => setDiffLensB(e.target.value)}
+                                        className="w-full bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-3 py-2"
+                                    >
+                                        {availableLenses.map((l) => (
+                                            <option key={l.id} value={l.id}>{l.id}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {diffLensA === diffLensB ? (
+                                <p className="text-sm text-amber-400">Select two different lenses to compare.</p>
+                            ) : diffLoading ? (
+                                <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Computing cross-lens diff...
+                                </div>
+                            ) : lensDiffData ? (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div className="bg-slate-800/70 rounded-lg p-3 border border-slate-700/60">
+                                            <div className="text-xs text-gray-400">{lensDiffData.lens_a} Clusters</div>
+                                            <div className="text-xl font-bold text-white">{lensDiffData.lens_a_clusters}</div>
+                                        </div>
+                                        <div className="bg-slate-800/70 rounded-lg p-3 border border-slate-700/60">
+                                            <div className="text-xs text-gray-400">{lensDiffData.lens_b} Clusters</div>
+                                            <div className="text-xl font-bold text-white">{lensDiffData.lens_b_clusters}</div>
+                                        </div>
+                                        <div className="bg-slate-800/70 rounded-lg p-3 border border-slate-700/60">
+                                            <div className="text-xs text-gray-400">Entities Compared</div>
+                                            <div className="text-xl font-bold text-white">{lensDiffData.entities_compared}</div>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+                                            Merged in {lensDiffData.lens_b} only ({lensDiffData.merged_in_b_only.length})
+                                        </h4>
+                                        {lensDiffData.merged_in_b_only.length === 0 ? (
+                                            <p className="text-xs text-gray-500">None</p>
+                                        ) : (
+                                            <div className="bg-slate-950/60 rounded-lg border border-slate-800 divide-y divide-slate-800 max-h-44 overflow-y-auto">
+                                                {lensDiffData.merged_in_b_only.map((row, i) => (
+                                                    <div key={i} className="px-3 py-2 text-xs flex justify-between gap-2 text-gray-300">
+                                                        <span className="font-mono text-blue-300">{row.entity_key}</span>
+                                                        <span className="text-gray-400 font-mono truncate">
+                                                            {row.resolved_a} → {row.resolved_b}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+                                            Merged in {lensDiffData.lens_a} only ({lensDiffData.merged_in_a_only.length})
+                                        </h4>
+                                        {lensDiffData.merged_in_a_only.length === 0 ? (
+                                            <p className="text-xs text-gray-500">None</p>
+                                        ) : (
+                                            <div className="bg-slate-950/60 rounded-lg border border-slate-800 divide-y divide-slate-800 max-h-44 overflow-y-auto">
+                                                {lensDiffData.merged_in_a_only.map((row, i) => (
+                                                    <div key={i} className="px-3 py-2 text-xs flex justify-between gap-2 text-gray-300">
+                                                        <span className="font-mono text-blue-300">{row.entity_key}</span>
+                                                        <span className="text-gray-400 font-mono truncate">
+                                                            {row.resolved_a} ← {row.resolved_b}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

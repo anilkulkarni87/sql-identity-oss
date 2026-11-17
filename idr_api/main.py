@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from idr_api.dependencies import get_manager
-from idr_api.routers import ai, connection, dashboard, explorer, runs, schema, setup
+from idr_api.routers import ai, connection, dashboard, explorer, lenses, runs, schema, setup
 
 REQUEST_COUNT = Counter(
     "idr_http_requests_total",
@@ -222,6 +222,7 @@ app.include_router(setup.router)
 app.include_router(connection.router)
 app.include_router(dashboard.router)
 app.include_router(explorer.router)
+app.include_router(lenses.router)
 app.include_router(runs.router)
 app.include_router(schema.router)
 app.include_router(ai.router)

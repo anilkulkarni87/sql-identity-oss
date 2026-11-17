@@ -288,6 +288,16 @@ def suggest_config_with_ai(
 
     prompt = (
         "Generate a valid sql-identity-oss JSON config matching the user's goal and profiled tables.\n"
+        "Return a JSON object with this exact top-level shape:\n"
+        '{"sources": [{"id": "table_id", "table": "schema.table", "entity_type": "PERSON", '
+        '"entity_key": "pk_col", "watermark_column": "updated_at", '
+        '"identifiers": [{"type": "email", "expr": "email_col"}], '
+        '"attributes": [{"name": "first_name", "expr": "first_name"}]}], '
+        '"rules": [{"id": "100", "type": "EXACT", "match_keys": ["email"], "priority": 1, "canonicalize": "EMAIL_STANDARD"}], '
+        '"survivorship": [{"attribute": "first_name", "strategy": "RECENCY"}], '
+        '"use_default_exclusions": true, '
+        '"lenses": [{"id": "strict_person", "include_types": ["EMAIL", "CUSTOMER_ID"]}, '
+        '{"id": "household", "include_types": ["EMAIL", "PHONE", "ADDRESS_ID", "CUSTOMER_ID"], "max_group_size": 25}]}\n\n'
         "Available survivorship strategies: RECENCY, PRIORITY, PRIORITY_RECENCY, LATEST_FROM_SOURCE, "
         "FREQUENCY, ANY_TRUE, ALL_TRUE, EARLIEST, AGG_MAX, AGG_MIN, AGG_SUM, COLLECT_DISTINCT.\n"
         "Available canonicalizers: EMAIL_STANDARD, EMAIL_STRIP_PLUS, PHONE_US_10, PHONE_DIGITS, "
@@ -297,12 +307,31 @@ def suggest_config_with_ai(
     )
     raw = client.chat(
         [
-            {"role": "system", "content": "Return valid JSON only representing an IDR config object."},
+            {"role": "system", "content": "Return valid JSON only with top-level keys: sources, rules, survivorship, use_default_exclusions, lenses."},
             {"role": "user", "content": prompt},
         ],
         json_mode=True,
     )
     config_dict = json.loads(raw)
+    if isinstance(config_dict, dict):
+        if "sources" not in config_dict:
+            for wrapper_key in ("config", "suggested_config", "idr_config"):
+                nested = config_dict.get(wrapper_key)
+                if isinstance(nested, dict) and nested.get("sources"):
+                    config_dict = nested
+                    break
+        base_cfg = (
+            profiler_summary.get("suggested_config")
+            if isinstance(profiler_summary, dict)
+            and isinstance(profiler_summary.get("suggested_config"), dict)
+            else profiler_summary
+        )
+        if not config_dict.get("sources") and isinstance(base_cfg, dict) and base_cfg.get("sources"):
+            config_dict["sources"] = base_cfg["sources"]
+            if not config_dict.get("rules") and base_cfg.get("rules"):
+                config_dict["rules"] = base_cfg["rules"]
+            if not config_dict.get("survivorship") and base_cfg.get("survivorship"):
+                config_dict["survivorship"] = base_cfg["survivorship"]
     return {
         "pii_masked": client.config.effective_mask_pii,
         "provider": client.config.provider,

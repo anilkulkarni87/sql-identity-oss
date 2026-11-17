@@ -78,7 +78,7 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
 
                 from idr_core.adapters.bigquery import BigQueryAdapter
 
-                project = params.get("project")
+                project = params.get("project") or None
                 credentials_json = params.get("credentials_json") or params.get("credentials")
 
                 if credentials_json:
@@ -90,7 +90,9 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
                     client = bigquery.Client(project=project)
 
                 adapter = BigQueryAdapter(
-                    client, project=project, location=params.get("location", "US")
+                    client,
+                    project=project or getattr(client, "project", None),
+                    location=params.get("location", "US"),
                 )
             except ImportError:
                 raise HTTPException(400, "BigQuery client not installed")
@@ -204,6 +206,7 @@ class IDRConfig(BaseModel):
     survivorship: Optional[List[Dict[str, Any]]] = None
     exclusions: Optional[List[Dict[str, Any]]] = None
     overrides: Optional[List[Dict[str, Any]]] = None
+    lenses: Optional[List[Dict[str, Any]]] = None
     use_default_exclusions: Optional[bool] = False
 
 
@@ -404,6 +407,7 @@ class RunRequest(BaseModel):
     max_group_size: Optional[int] = None
     max_moved_entities_pct: Optional[float] = None
     max_cluster_delta_pct: Optional[float] = None
+    lens: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
 
 
@@ -431,7 +435,9 @@ def _broadcast_progress_event(user_key: str, event_data: Dict[str, Any]) -> None
                 pass
 
 
-def _build_initial_progress(mode: str, dry_run: bool, strict: bool) -> Dict[str, Any]:
+def _build_initial_progress(
+    mode: str, dry_run: bool, strict: bool, has_lenses: bool = False
+) -> Dict[str, Any]:
     import time
 
     stage_defs = [
@@ -446,6 +452,11 @@ def _build_initial_progress(mode: str, dry_run: bool, strict: bool) -> Dict[str,
             "name": "dry_run_analysis" if dry_run else "output_generation",
             "label": "Dry Run Analysis" if dry_run else "Output & Golden Profiles",
         },
+        *(
+            [{"name": "lens_resolution", "label": "Multi-Lens Views"}]
+            if (has_lenses and not dry_run)
+            else []
+        ),
     ]
     return {
         "run_id": None,
@@ -569,9 +580,23 @@ async def run_pipeline(
             max_group_size=request.max_group_size,
             max_moved_entities_pct=request.max_moved_entities_pct,
             max_cluster_delta_pct=request.max_cluster_delta_pct,
+            lens=request.lens,
         )
 
-        progress_state = _build_initial_progress(config.run_mode, config.dry_run, config.strict)
+        has_lenses = bool(request.lens)
+        if not has_lenses and not config.dry_run:
+            try:
+                if adapter.table_exists("idr_meta.lens_definition"):
+                    cnt = adapter.query_one(
+                        "SELECT COUNT(*) FROM idr_meta.lens_definition WHERE is_active = TRUE"
+                    )
+                    has_lenses = bool(cnt and int(cnt) > 0)
+            except Exception:
+                has_lenses = False
+
+        progress_state = _build_initial_progress(
+            config.run_mode, config.dry_run, config.strict, has_lenses=has_lenses
+        )
         _ACTIVE_RUN_PROGRESS[user_key] = progress_state
         _ACTIVE_RUN_PROGRESS["__default__"] = progress_state
         _broadcast_progress_event(user_key, {"event": "run_start", "progress": copy.deepcopy(progress_state)})

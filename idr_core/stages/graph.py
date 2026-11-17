@@ -825,3 +825,271 @@ class GraphStage(BaseStage):
             "SELECT COUNT(DISTINCT super_cluster_id) FROM idr_work.fuzzy_results"
         )
         return count or 0
+
+    @staticmethod
+    def _glob_to_sql_like(pattern: str) -> str:
+        safe = str(pattern).strip().replace("'", "''")
+        return safe.replace("*", "%").replace("?", "_")
+
+    def resolve_lens(self, lens_def: Dict, max_iters: int) -> Dict[str, int]:
+        """Filter superset edges by lens policy and run LP + bijective stabilization for one lens."""
+        lens_id = self._validate_metadata_value(lens_def["lens_id"], "identifier", "lens_id")
+        include_types = [
+            self._validate_metadata_value(str(t).strip().upper(), "identifier", "lens.include_types")
+            for t in (lens_def.get("include_types") or [])
+            if str(t).strip()
+        ]
+        exclude_types = [
+            self._validate_metadata_value(str(t).strip().upper(), "identifier", "lens.exclude_types")
+            for t in (lens_def.get("exclude_types") or [])
+            if str(t).strip()
+        ]
+        source_filter = [str(s).strip() for s in (lens_def.get("source_filter") or []) if str(s).strip()]
+
+        prefix_expr = (
+            "SPLIT(entity_key, ':')[SAFE_OFFSET(0)]"
+            if self.adapter.dialect == "bigquery"
+            else "SPLIT_PART(entity_key, ':', 1)"
+        )
+        if source_filter:
+            like_clauses = [f"{prefix_expr} LIKE '{self._glob_to_sql_like(pat)}'" for pat in source_filter]
+            src_pred = "(" + " OR ".join(like_clauses) + ")"
+        else:
+            src_pred = "1=1"
+
+        self.adapter.execute(f"""
+            CREATE OR REPLACE TABLE idr_work.entities_lens AS
+            SELECT DISTINCT entity_key
+            FROM idr_work.entities_delta
+            WHERE run_id = '{self.run_id}' AND {src_pred}
+        """)
+
+        type_preds = ["1=1"]
+        if include_types:
+            in_list = ", ".join(f"'{t}'" for t in include_types)
+            type_preds.append(f"(UPPER(e.identifier_type) IN ({in_list}) OR UPPER(e.identifier_type) = 'MANUAL_OVERRIDE')")
+        if exclude_types:
+            ex_list = ", ".join(f"'{t}'" for t in exclude_types)
+            type_preds.append(f"UPPER(e.identifier_type) NOT IN ({ex_list})")
+        edge_type_pred = " AND ".join(type_preds)
+
+        existing_edges_sql = ""
+        if self.run_mode == "INCR" and self.adapter.table_exists("idr_out.identity_edges_current"):
+            try:
+                edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_edges_current") or 0
+                if edge_cnt > 0:
+                    reex_filter = ""
+                    if self.adapter.table_exists("idr_work.reextracted_entities"):
+                        reex_filter = (
+                            "AND NOT EXISTS (SELECT 1 FROM idr_work.reextracted_entities r "
+                            "WHERE r.entity_key = e.left_entity_key OR r.entity_key = e.right_entity_key)"
+                        )
+                    excl_filter = ""
+                    if self.adapter.table_exists("idr_meta.identifier_exclusion"):
+                        excl_e = self._exclusion_match_predicate("e.identifier_type", "e.identifier_value_norm")
+                        excl_filter = f"AND NOT {excl_e}"
+                    existing_edges_sql = f"""
+                        UNION ALL
+                        SELECT e.left_entity_key AS src, e.right_entity_key AS dst
+                        FROM idr_out.identity_edges_current e
+                        JOIN idr_work.entities_lens el1 ON e.left_entity_key = el1.entity_key
+                        JOIN idr_work.entities_lens el2 ON e.right_entity_key = el2.entity_key
+                        WHERE {edge_type_pred} {reex_filter} {excl_filter}
+                        UNION ALL
+                        SELECT e.right_entity_key AS src, e.left_entity_key AS dst
+                        FROM idr_out.identity_edges_current e
+                        JOIN idr_work.entities_lens el1 ON e.left_entity_key = el1.entity_key
+                        JOIN idr_work.entities_lens el2 ON e.right_entity_key = el2.entity_key
+                        WHERE {edge_type_pred} {reex_filter} {excl_filter}
+                    """
+            except Exception:
+                pass
+
+        self.adapter.execute(f"""
+            CREATE OR REPLACE TABLE idr_work.lp_edges_lens AS
+            SELECT e.left_entity_key AS src, e.right_entity_key AS dst
+            FROM idr_work.edges_new e
+            JOIN idr_work.entities_lens el1 ON e.left_entity_key = el1.entity_key
+            JOIN idr_work.entities_lens el2 ON e.right_entity_key = el2.entity_key
+            WHERE {edge_type_pred}
+            UNION ALL
+            SELECT e.right_entity_key AS src, e.left_entity_key AS dst
+            FROM idr_work.edges_new e
+            JOIN idr_work.entities_lens el1 ON e.left_entity_key = el1.entity_key
+            JOIN idr_work.entities_lens el2 ON e.right_entity_key = el2.entity_key
+            WHERE {edge_type_pred}
+            {existing_edges_sql}
+        """)
+
+        if self.adapter.table_exists("idr_meta.identity_override"):
+            try:
+                ov_cnt = self.adapter.query_one(
+                    "SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE"
+                ) or 0
+                if ov_cnt > 0:
+                    self.adapter.execute("""
+                        DELETE FROM idr_work.lp_edges_lens
+                        WHERE src IN (
+                            SELECT entity_key_a FROM idr_meta.identity_override
+                            WHERE is_active = TRUE AND UPPER(override_type) = 'ISOLATE'
+                        )
+                        OR dst IN (
+                            SELECT entity_key_a FROM idr_meta.identity_override
+                            WHERE is_active = TRUE AND UPPER(override_type) = 'ISOLATE'
+                        )
+                    """)
+                    self.adapter.execute("""
+                        CREATE OR REPLACE TABLE idr_work.lp_edges_lens_filtered AS
+                        SELECT e.*
+                        FROM idr_work.lp_edges_lens e
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM idr_meta.identity_override o
+                            WHERE o.is_active = TRUE AND UPPER(o.override_type) = 'DO_NOT_LINK'
+                              AND (
+                                  (e.src = o.entity_key_a AND e.dst = o.entity_key_b)
+                                  OR (e.src = o.entity_key_b AND e.dst = o.entity_key_a)
+                              )
+                        )
+                    """)
+                    self._swap_tables("idr_work.lp_edges_lens", "idr_work.lp_edges_lens_filtered")
+            except Exception:
+                pass
+
+        raw_mgs = lens_def.get("max_group_size")
+        if raw_mgs is not None and int(raw_mgs) > 0:
+            mgs = int(raw_mgs)
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.lp_edges_lens_capped AS
+                WITH hub_nodes AS (
+                    SELECT src AS node_key
+                    FROM idr_work.lp_edges_lens
+                    GROUP BY src
+                    HAVING COUNT(*) >= {mgs}
+                )
+                SELECT e.*
+                FROM idr_work.lp_edges_lens e
+                WHERE NOT EXISTS (SELECT 1 FROM hub_nodes h WHERE h.node_key = e.src)
+                  AND NOT EXISTS (SELECT 1 FROM hub_nodes h WHERE h.node_key = e.dst)
+            """)
+            self._swap_tables("idr_work.lp_edges_lens", "idr_work.lp_edges_lens_capped")
+
+        edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.lp_edges_lens") or 0
+        iterations = 0
+        if edge_cnt == 0:
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.lp_labels_lens AS
+                SELECT DISTINCT entity_key, entity_key AS label
+                FROM idr_work.entities_lens
+            """)
+        else:
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.lp_labels_lens AS
+                SELECT DISTINCT src AS entity_key, src AS label
+                FROM idr_work.lp_edges_lens
+            """)
+            for i in range(max_iters):
+                iterations = i + 1
+                self.adapter.execute("""
+                    CREATE OR REPLACE TABLE idr_work.lp_labels_lens_new AS
+                    WITH candidate_labels AS (
+                        SELECT l.entity_key, l.label AS candidate_label
+                        FROM idr_work.lp_labels_lens l
+                        UNION ALL
+                        SELECT e.src AS entity_key, l2.label AS candidate_label
+                        FROM idr_work.lp_edges_lens e
+                        JOIN idr_work.lp_labels_lens l2 ON e.dst = l2.entity_key
+                    )
+                    SELECT entity_key, MIN(candidate_label) AS label
+                    FROM candidate_labels
+                    GROUP BY entity_key
+                """)
+                changes = self.adapter.query_one("""
+                    SELECT COUNT(*) FROM idr_work.lp_labels_lens prev
+                    JOIN idr_work.lp_labels_lens_new curr ON prev.entity_key = curr.entity_key
+                    WHERE prev.label != curr.label
+                """) or 0
+                self._swap_tables("idr_work.lp_labels_lens", "idr_work.lp_labels_lens_new")
+                if changes == 0:
+                    break
+
+            self.adapter.execute("""
+                INSERT INTO idr_work.lp_labels_lens (entity_key, label)
+                SELECT el.entity_key, el.entity_key AS label
+                FROM idr_work.entities_lens el
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM idr_work.lp_labels_lens l WHERE l.entity_key = el.entity_key
+                )
+            """)
+
+        self._stabilize_lens_resolved_ids(lens_id)
+        clusters = int(self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels_lens") or 0)
+        return {"lens_id": lens_id, "iterations": iterations, "clusters": clusters}
+
+    def _stabilize_lens_resolved_ids(self, lens_id: str) -> None:
+        """Stabilize resolved_id values for a specific lens against its own historical membership."""
+        try:
+            if not self.adapter.table_exists("idr_out.identity_lens_membership_current"):
+                return
+            prev_cnt = self.adapter.query_one(
+                f"SELECT COUNT(*) FROM idr_out.identity_lens_membership_current WHERE lens_id = '{lens_id}'"
+            ) or 0
+            if prev_cnt == 0:
+                return
+
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.lp_labels_lens_stabilized AS
+                WITH prev_lens_mem AS (
+                    SELECT entity_key, resolved_id, updated_at
+                    FROM idr_out.identity_lens_membership_current
+                    WHERE lens_id = '{lens_id}'
+                ),
+                prev_cluster_stats AS (
+                    SELECT resolved_id AS prev_resolved_id, COUNT(*) AS prev_size, MIN(updated_at) AS prev_created_at
+                    FROM prev_lens_mem
+                    GROUP BY resolved_id
+                ),
+                overlap AS (
+                    SELECT
+                        l.label AS raw_label,
+                        m.resolved_id AS prev_resolved_id,
+                        pcs.prev_size,
+                        pcs.prev_created_at,
+                        COUNT(*) AS shared_entities,
+                        MAX(CASE WHEN l.entity_key = m.resolved_id THEN 1 ELSE 0 END) AS has_anchor
+                    FROM idr_work.lp_labels_lens l
+                    JOIN prev_lens_mem m ON l.entity_key = m.entity_key
+                    JOIN prev_cluster_stats pcs ON m.resolved_id = pcs.prev_resolved_id
+                    GROUP BY l.label, m.resolved_id, pcs.prev_size, pcs.prev_created_at
+                ),
+                claimed_prev AS (
+                    SELECT
+                        raw_label, prev_resolved_id, prev_size, prev_created_at,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY prev_resolved_id
+                            ORDER BY
+                                CASE WHEN raw_label = prev_resolved_id THEN 1 ELSE 0 END DESC,
+                                has_anchor DESC,
+                                shared_entities DESC,
+                                raw_label ASC
+                        ) AS prev_claim_rn
+                    FROM overlap
+                ),
+                winning_cluster AS (
+                    SELECT
+                        raw_label, prev_resolved_id AS winning_resolved_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY raw_label
+                            ORDER BY prev_size DESC, prev_created_at ASC, prev_resolved_id ASC
+                        ) AS win_rn
+                    FROM claimed_prev
+                    WHERE prev_claim_rn = 1
+                )
+                SELECT
+                    l.entity_key,
+                    COALESCE(w.winning_resolved_id, l.label) AS label
+                FROM idr_work.lp_labels_lens l
+                LEFT JOIN winning_cluster w ON l.label = w.raw_label AND w.win_rn = 1
+            """)
+            self._swap_tables("idr_work.lp_labels_lens", "idr_work.lp_labels_lens_stabilized")
+        except Exception as e:
+            self.logger.warning(f"Failed to stabilize lens '{lens_id}' resolved_ids: {e}")

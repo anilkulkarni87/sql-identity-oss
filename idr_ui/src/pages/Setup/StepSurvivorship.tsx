@@ -56,6 +56,15 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
             });
         });
 
+        (config.survivorship || []).forEach(r => {
+            if (r.attribute) {
+                allAttrs.add(r.attribute);
+                if (!attrSources[r.attribute] && r.source_priority && r.source_priority.length > 0) {
+                    attrSources[r.attribute] = [...r.source_priority];
+                }
+            }
+        });
+
         const attrList = Array.from(allAttrs).sort();
         setAttributes(attrList);
         setSourcesByAttr(attrSources);
@@ -75,9 +84,13 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
 
             let priority = validSources;
             if (existing?.source_priority && existing.source_priority.length > 0) {
-                const filtered = existing.source_priority.filter(s => validSet.has(s));
-                const missing = validSources.filter(s => !filtered.includes(s));
-                priority = [...filtered, ...missing];
+                if (validSet.size > 0) {
+                    const filtered = existing.source_priority.filter(s => validSet.has(s));
+                    const missing = validSources.filter(s => !filtered.includes(s));
+                    priority = [...filtered, ...missing];
+                } else {
+                    priority = existing.source_priority;
+                }
             }
 
             initialRules[attr] = existing ? {

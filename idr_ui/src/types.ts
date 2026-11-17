@@ -77,6 +77,14 @@ export interface SurvivorshipRule {
     strict_source?: boolean;
 }
 
+export interface LensRule {
+    id: string;
+    include_types?: string[];
+    exclude_types?: string[];
+    source_filter?: string[];
+    max_group_size?: number;
+}
+
 export interface IDRConfig {
     sources: SourceConfig[];
     rules?: MatchingRule[];
@@ -84,6 +92,7 @@ export interface IDRConfig {
     survivorship?: SurvivorshipRule[];
     exclusions?: ExclusionRule[];
     overrides?: OverrideRule[];
+    lenses?: LensRule[];
     use_default_exclusions?: boolean;
 }
 

@@ -284,6 +284,7 @@ class ProfileBuilder:
                     CAST(NULL AS {str_type}) AS source_id,
                     CAST(NULL AS {ts_type}) AS recency_ts,
                     {null_cols}
+                FROM (SELECT 1 AS _dummy) _empty
                 WHERE 1 = 0
             """
 

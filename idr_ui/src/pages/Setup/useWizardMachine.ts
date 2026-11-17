@@ -73,16 +73,20 @@ export function useWizardMachine() {
     const handleConnectionSuccess = useCallback((data: any) => {
         setConnectionData(data);
         setIsConnected(true);
-        setIsConfigured(false);
         setHasUnsavedChanges(false);
-        setSelectedTables([]);
-        setMappingConfig({ sources: [] });
         if (data?.warning) {
             setInitWarning(data.warning);
         } else {
             setInitWarning(null);
         }
         setStage('map');
+    }, []);
+
+    const resetDraftForUnconfiguredWarehouse = useCallback(() => {
+        setIsConfigured(false);
+        setHasUnsavedChanges(false);
+        setSelectedTables([]);
+        setMappingConfig({ sources: [] });
     }, []);
 
     const updateConfigDraft = useCallback((config: IDRConfig) => {
@@ -130,6 +134,7 @@ export function useWizardMachine() {
         setMappingConfig: updateConfigDraft,
         markConfigSaved,
         handleConnectionSuccess,
+        resetDraftForUnconfiguredWarehouse,
         hydrateFromSavedConfig,
     };
 }

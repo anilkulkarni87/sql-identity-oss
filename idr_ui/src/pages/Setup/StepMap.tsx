@@ -112,6 +112,8 @@ export default function StepMap({
     const [scanLoading, setScanLoading] = useState(false);
     const [scanError, setScanError] = useState<string | null>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
+    const [aiSuggesting, setAiSuggesting] = useState(false);
+    const [aiNotice, setAiNotice] = useState<string | null>(null);
 
     const latestInitialConfigRef = useRef<IDRConfig | undefined>(initialConfig);
     latestInitialConfigRef.current = initialConfig;
@@ -119,32 +121,38 @@ export default function StepMap({
     const latestColumnsRef = useRef<Record<string, TableColumn[]>>(columns);
     latestColumnsRef.current = columns;
 
-    const initialAutoScannedRef = useRef(false);
+    const latestConfigRef = useRef<Record<string, SourceConfig>>(config);
+    latestConfigRef.current = config;
 
-    // Keep config synced when an external source (like JSON import) replaces initialConfig
+    const initialAutoScannedRef = useRef(false);
+    const lastEmittedSourcesSigRef = useRef<string>('');
+
+    // Keep config synced when an external source (like JSON import or warehouse hydrate) replaces initialConfig
     useEffect(() => {
         if (!initialConfig?.sources) return;
-        setConfig(prev => {
-            const next: Record<string, SourceConfig> = { ...prev };
-            for (const src of initialConfig.sources) {
-                if (src.table && !next[src.table]) {
-                    next[src.table] = {
-                        ...src,
-                        identifiers: (src.identifiers || []).map(i => ({
-                            ...i,
-                            column: i.column || i.expr || '',
-                            expr: i.expr || i.column || '',
-                        })),
-                        attributes: (src.attributes || []).map(a => ({
-                            ...a,
-                            column: a.column || a.expr || a.name,
-                            expr: a.expr || a.column || a.name,
-                        })),
-                    };
-                }
+        const incomingSig = JSON.stringify(initialConfig.sources);
+        if (incomingSig === lastEmittedSourcesSigRef.current) return;
+        lastEmittedSourcesSigRef.current = incomingSig;
+
+        const next: Record<string, SourceConfig> = {};
+        for (const src of initialConfig.sources) {
+            if (src.table) {
+                next[src.table] = {
+                    ...src,
+                    identifiers: (src.identifiers || []).map(i => ({
+                        ...i,
+                        column: i.column || i.expr || '',
+                        expr: i.expr || i.column || '',
+                    })),
+                    attributes: (src.attributes || []).map(a => ({
+                        ...a,
+                        column: a.column || a.expr || a.name,
+                        expr: a.expr || a.column || a.name,
+                    })),
+                };
             }
-            return next;
-        });
+        }
+        setConfig(next);
     }, [initialConfig?.sources]);
 
     // Ensure activeTable stays valid when tables change
@@ -237,7 +245,9 @@ export default function StepMap({
     ) => {
         setConfig(nextMap);
         setValidationError(null);
-        onChange?.(buildFinalConfig(nextMap, nextTables, nextCols));
+        const built = buildFinalConfig(nextMap, nextTables, nextCols);
+        lastEmittedSourcesSigRef.current = JSON.stringify(built.sources);
+        onChange?.(built);
     };
 
     useEffect(() => {
@@ -245,12 +255,11 @@ export default function StepMap({
     }, [tables]);
 
     const loadColumns = async () => {
-        const missing = tables.filter(t => !columns[t] || !config[t]);
+        const missing = tables.filter(t => !latestColumnsRef.current[t] || !latestConfigRef.current[t]);
         if (missing.length === 0) return;
 
         setLoadingCols(true);
-        const newCols: Record<string, TableColumn[]> = { ...columns };
-        const newConfig: Record<string, SourceConfig> = { ...config };
+        const newCols: Record<string, TableColumn[]> = { ...latestColumnsRef.current };
         let initializedAny = false;
 
         try {
@@ -261,15 +270,40 @@ export default function StepMap({
                     cols = (data.columns || []) as TableColumn[];
                     newCols[table] = cols;
                 }
+            }
+            setColumns(newCols);
 
-                if (!newConfig[table]) {
+            // Re-read latest config AFTER async column discovery so we never overwrite hydrated warehouse/JSON config
+            const currentMap: Record<string, SourceConfig> = { ...latestConfigRef.current };
+            const initialSources = latestInitialConfigRef.current?.sources || [];
+            for (const src of initialSources) {
+                if (src.table && !currentMap[src.table]) {
+                    currentMap[src.table] = {
+                        ...src,
+                        identifiers: (src.identifiers || []).map(i => ({
+                            ...i,
+                            column: i.column || i.expr || '',
+                            expr: i.expr || i.column || '',
+                        })),
+                        attributes: (src.attributes || []).map(a => ({
+                            ...a,
+                            column: a.column || a.expr || a.name,
+                            expr: a.expr || a.column || a.name,
+                        })),
+                    };
+                }
+            }
+
+            for (const table of tables) {
+                if (!currentMap[table]) {
+                    const cols = newCols[table] || [];
                     const likelyKey =
                         cols.find(c => c.name.toLowerCase().includes('id') && !c.name.toLowerCase().includes('email'))?.name ||
                         cols[0]?.name ||
                         'AUTO';
                     const likelyWatermark = guessDefaultWatermark(cols, likelyKey);
 
-                    newConfig[table] = {
+                    currentMap[table] = {
                         id: table.replace(/\./g, '_'),
                         table,
                         entity_key: likelyKey,
@@ -281,10 +315,11 @@ export default function StepMap({
                     initializedAny = true;
                 }
             }
-            setColumns(newCols);
             if (initializedAny) {
-                setConfig(newConfig);
-                onChange?.(buildFinalConfig(newConfig, tables, newCols));
+                setConfig(currentMap);
+                const built = buildFinalConfig(currentMap, tables, newCols);
+                lastEmittedSourcesSigRef.current = JSON.stringify(built.sources);
+                onChange?.(built);
             }
         } catch (err: any) {
             setScanError(err.message || String(err));
@@ -485,15 +520,58 @@ export default function StepMap({
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                     {tables.length > 0 && (
-                        <button
-                            type="button"
-                            onClick={() => applyAutoMapForTables(tables)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold transition-colors"
-                            title="Automatically classify common identifier and profile columns across all sources"
-                        >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            Auto-Map All
-                        </button>
+                        <>
+                            <button
+                                type="button"
+                                disabled={aiSuggesting}
+                                onClick={async () => {
+                                    setAiSuggesting(true);
+                                    setValidationError(null);
+                                    setAiNotice(null);
+                                    try {
+                                        const res = await api.suggestConfigAi(
+                                            tables,
+                                            'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views (strict_person vs household) for these tables.'
+                                        );
+                                        const suggested = res.suggested_config as unknown as IDRConfig;
+                                        if (suggested && Array.isArray(suggested.sources) && suggested.sources.length > 0) {
+                                            const merged: IDRConfig = {
+                                                ...latestInitialConfigRef.current,
+                                                ...suggested,
+                                            };
+                                            const nextTables = suggested.sources
+                                                .map(s => s.table)
+                                                .filter((t): t is string => Boolean(t));
+                                            if (nextTables.length > 0) {
+                                                onTablesChange?.(nextTables);
+                                            }
+                                            onChange?.(merged);
+                                            setAiNotice(`AI (${res.model}) suggested mappings, rules, and lenses. Review and click Save Config.`);
+                                        } else {
+                                            setValidationError('AI did not return any source mappings.');
+                                        }
+                                    } catch (err: any) {
+                                        setValidationError(`AI Suggest failed: ${err?.message || err}`);
+                                    } finally {
+                                        setAiSuggesting(false);
+                                    }
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 disabled:opacity-50 text-purple-200 border border-purple-500/40 text-xs font-semibold transition-colors"
+                                title="Use configured Local AI (Ollama) / LLM to suggest mappings, rules, survivorship, and lenses from schema metadata"
+                            >
+                                {aiSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                                {aiSuggesting ? 'AI Suggesting...' : 'AI Suggest Config'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => applyAutoMapForTables(tables)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold transition-colors"
+                                title="Automatically classify common identifier and profile columns across all sources"
+                            >
+                                <Wand2 className="w-3.5 h-3.5" />
+                                Auto-Map All
+                            </button>
+                        </>
                     )}
                     <button
                         type="button"
@@ -510,6 +588,16 @@ export default function StepMap({
                     </button>
                 </div>
             </div>
+
+            {aiNotice && (
+                <div className="bg-purple-950/40 border border-purple-500/40 rounded-xl p-3 text-xs text-purple-200 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 shrink-0 text-purple-300" />
+                        {aiNotice}
+                    </span>
+                    <button type="button" onClick={() => setAiNotice(null)} className="text-purple-300 hover:text-white">✕</button>
+                </div>
+            )}
 
             {validationError && (
                 <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 text-xs text-amber-200 flex items-center gap-2">

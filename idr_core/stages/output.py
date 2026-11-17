@@ -694,3 +694,68 @@ class OutputStage(BaseStage):
             FROM idr_out.dry_run_results
             WHERE run_id = '{self.run_id}'
         """)
+
+    def materialize_lens_output(self, lens_id: str) -> int:
+        """Persist per-lens cluster memberships and cluster summaries."""
+        safe_lens = self._validate_metadata_value(lens_id, "identifier", "lens_id")
+        current_ts = self._dialect["current_timestamp"]
+
+        self.upsert(
+            target_table="idr_out.identity_lens_membership_current",
+            source_query=f"""
+                SELECT
+                    '{safe_lens}' AS lens_id,
+                    entity_key,
+                    label AS resolved_id,
+                    {current_ts} AS updated_at,
+                    '{self.run_id}' AS run_id
+                FROM idr_work.lp_labels_lens
+            """,
+            key_cols=["lens_id", "entity_key"],
+            update_cols=["resolved_id", "updated_at", "run_id"],
+            insert_cols=["lens_id", "entity_key", "resolved_id", "updated_at", "run_id"],
+        )
+
+        if self.config and self.config.run_mode == "FULL":
+            self.adapter.execute(f"""
+                DELETE FROM idr_out.identity_lens_membership_current
+                WHERE lens_id = '{safe_lens}' AND run_id != '{self.run_id}'
+            """)
+
+        self.upsert(
+            target_table="idr_out.identity_lens_clusters_current",
+            source_query=f"""
+                SELECT
+                    '{safe_lens}' AS lens_id,
+                    label AS resolved_id,
+                    COUNT(*) AS cluster_size,
+                    {current_ts} AS updated_at,
+                    '{self.run_id}' AS run_id
+                FROM idr_work.lp_labels_lens
+                GROUP BY label
+            """,
+            key_cols=["lens_id", "resolved_id"],
+            update_cols=["cluster_size", "updated_at", "run_id"],
+            insert_cols=["lens_id", "resolved_id", "cluster_size", "updated_at", "run_id"],
+        )
+
+        if self.config and self.config.run_mode == "FULL":
+            self.adapter.execute(f"""
+                DELETE FROM idr_out.identity_lens_clusters_current
+                WHERE lens_id = '{safe_lens}' AND run_id != '{self.run_id}'
+            """)
+        else:
+            self.adapter.execute(f"""
+                DELETE FROM idr_out.identity_lens_clusters_current
+                WHERE lens_id = '{safe_lens}'
+                  AND resolved_id NOT IN (
+                      SELECT DISTINCT resolved_id
+                      FROM idr_out.identity_lens_membership_current
+                      WHERE lens_id = '{safe_lens}'
+                  )
+            """)
+
+        cnt = self.adapter.query_one(
+            f"SELECT COUNT(DISTINCT resolved_id) FROM idr_out.identity_lens_membership_current WHERE lens_id = '{safe_lens}'"
+        )
+        return int(cnt or 0)

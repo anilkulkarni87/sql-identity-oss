@@ -102,6 +102,11 @@ Examples:
         default=None,
         help="Blast-radius circuit breaker: abort live Stage 8 commit if absolute cluster count delta percentage exceeds threshold (0-100]",
     )
+    run_parser.add_argument(
+        "--lens",
+        default=None,
+        help="Optional named lens ID from idr_meta.lens_definition to materialize",
+    )
 
     # === idr config ===
     config_parser = subparsers.add_parser("config", help="Configuration management")
@@ -436,6 +441,21 @@ Examples:
     triage_parser.add_argument("--model", help="Model name")
     triage_parser.add_argument("--base-url", help="Custom base URL")
 
+    # === idr lenses ===
+    lenses_parser = subparsers.add_parser("lenses", help="Multi-lens identity graph utilities")
+    lenses_subparsers = lenses_parser.add_subparsers(dest="lenses_cmd")
+
+    lenses_list_p = lenses_subparsers.add_parser("list", help="List configured identity lenses")
+    _add_connection_args(lenses_list_p, include_dataset=True)
+
+    lenses_diff_p = lenses_subparsers.add_parser(
+        "diff", help="Compare cluster boundaries between two lenses (or 'default' vs a lens)"
+    )
+    lenses_diff_p.add_argument("lens_a", help="First lens ID (or 'default')")
+    lenses_diff_p.add_argument("lens_b", help="Second lens ID (or 'default')")
+    lenses_diff_p.add_argument("--limit", type=int, default=25, help="Max differing clusters to show")
+    _add_connection_args(lenses_diff_p, include_dataset=True)
+
     # Parse arguments
     parsed_args = parser.parse_args(args)
 
@@ -505,6 +525,12 @@ Examples:
 
     if parsed_args.command == "triage":
         return handle_triage(parsed_args)
+
+    if parsed_args.command == "lenses":
+        if not getattr(parsed_args, "lenses_cmd", None):
+            lenses_parser.print_help()
+            return 0
+        return handle_lenses(parsed_args)
 
     return 0
 
@@ -903,6 +929,7 @@ def handle_run(args) -> int:
             max_group_size=getattr(args, "max_group_size", None),
             max_moved_entities_pct=getattr(args, "max_moved_pct", None),
             max_cluster_delta_pct=getattr(args, "max_cluster_delta_pct", None),
+            lens=getattr(args, "lens", None),
         )
         result = runner.run(config)
 
@@ -1324,6 +1351,56 @@ def handle_triage(args) -> int:
     for p in proposals:
         print(f"- {p.get('resolved_id')}: [{p.get('action')}] {p.get('reason')}")
     return 0
+
+
+def handle_lenses(args) -> int:
+    """Handle `idr lenses list|diff` commands."""
+    from idr_core.config import compute_lens_diff, sql_to_config
+
+    try:
+        adapter = get_adapter(args)
+    except Exception as e:
+        print(f"Error creating adapter: {e}")
+        return 1
+
+    try:
+        if args.lenses_cmd == "list":
+            cfg = sql_to_config(adapter)
+            lenses = cfg.get("lenses") or []
+            if not lenses:
+                print("No active lenses configured in idr_meta.lens_definition.")
+                return 0
+            print(f"Configured Identity Lenses ({len(lenses)}):")
+            for ldef in lenses:
+                inc = ", ".join(ldef.get("include_types") or ["*"])
+                exc = ", ".join(ldef.get("exclude_types") or []) or "none"
+                src = ", ".join(ldef.get("source_filter") or ["*"])
+                print(f"  - {ldef['id']}: include=[{inc}] exclude=[{exc}] sources=[{src}]")
+            return 0
+
+        if args.lenses_cmd == "diff":
+            diff = compute_lens_diff(adapter, args.lens_a, args.lens_b, limit=getattr(args, "limit", 25))
+            print(f"\n{'=' * 60}")
+            print(f"  Lens Boundary Diff: {diff['lens_a']} vs {diff['lens_b']}")
+            print(f"{'=' * 60}")
+            print(f"  {diff['lens_a']} clusters:   {diff['lens_a_clusters']:,}")
+            print(f"  {diff['lens_b']} clusters:   {diff['lens_b_clusters']:,}")
+            print(f"  Entities compared:   {diff['entities_compared']:,}")
+            print(f"  Merged in {diff['lens_b']} only: {len(diff['merged_in_b_only'])} cluster(s)")
+            for row in diff["merged_in_b_only"][:10]:
+                print(
+                    f"    - {row['resolved_b']}: combines {row['distinct_a_clusters']} {diff['lens_a']} clusters ({row['entity_count']} entities)"
+                )
+            print(f"  Merged in {diff['lens_a']} only: {len(diff['merged_in_a_only'])} cluster(s)")
+            for row in diff["merged_in_a_only"][:10]:
+                print(
+                    f"    - {row['resolved_a']}: combines {row['distinct_b_clusters']} {diff['lens_b']} clusters ({row['entity_count']} entities)"
+                )
+            print(f"{'=' * 60}\n")
+            return 0
+        return 0
+    finally:
+        adapter.close()
 
 
 if __name__ == "__main__":

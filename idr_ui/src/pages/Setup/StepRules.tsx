@@ -3,7 +3,7 @@ import {
     GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2,
     ShieldAlert, Link2, AlertCircle
 } from "lucide-react";
-import { ExclusionRule, IDRConfig, MatchingRule, OverrideRule } from '../../types';
+import { ExclusionRule, IDRConfig, LensRule, MatchingRule, OverrideRule } from '../../types';
 import { api } from '../../api/client';
 import { CustomSelect } from '../../components/CustomSelect';
 
@@ -52,6 +52,14 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
     const [newOvKeyA, setNewOvKeyA] = useState<string>('');
     const [newOvKeyB, setNewOvKeyB] = useState<string>('');
     const [newOvReason, setNewOvReason] = useState<string>('');
+    const [lenses, setLenses] = useState<LensRule[]>(config.lenses || []);
+    const [newLensId, setNewLensId] = useState<string>('');
+    const [newLensInclude, setNewLensInclude] = useState<string[]>([]);
+    const [newLensExclude, setNewLensExclude] = useState<string[]>([]);
+    const [newLensSources, setNewLensSources] = useState<string[]>([]);
+    const [newLensMaxGroup, setNewLensMaxGroup] = useState<string>('');
+    const [openLensDropdown, setOpenLensDropdown] = useState<'include' | 'exclude' | 'sources' | null>(null);
+    const [customSourceGlob, setCustomSourceGlob] = useState<string>('');
     const [availableTypes, setAvailableTypes] = useState<string[]>([]);
     const [availableAttributes, setAvailableAttributes] = useState<string[]>([]);
     const [fuzzyTemplates, setFuzzyTemplates] = useState<FuzzyTemplate[]>([]);
@@ -67,8 +75,9 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
         f: MatchingRule[],
         e: ExclusionRule[],
         o: OverrideRule[],
-        d: boolean
-    ) => JSON.stringify({ r, f, e, o, d });
+        d: boolean,
+        l: LensRule[]
+    ) => JSON.stringify({ r, f, e, o, d, l });
 
     useEffect(() => {
         const incomingSig = serializeRuleSlice(
@@ -76,13 +85,15 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             config.fuzzy_rules || [],
             config.exclusions || [],
             config.overrides || [],
-            !!config.use_default_exclusions
+            !!config.use_default_exclusions,
+            config.lenses || []
         );
         if (incomingSig !== lastEmittedSigRef.current) {
             setRules(combineFromConfig(config));
             setExclusions(config.exclusions || []);
             setUseDefaultExclusions(!!config.use_default_exclusions);
             setOverrides(config.overrides || []);
+            setLenses(config.lenses || []);
             lastEmittedSigRef.current = incomingSig;
         }
 
@@ -120,14 +131,15 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
         nextRules: MatchingRule[],
         nextExcl: ExclusionRule[] = exclusions,
         nextOv: OverrideRule[] = overrides,
-        nextDefExcl: boolean = useDefaultExclusions
+        nextDefExcl: boolean = useDefaultExclusions,
+        nextLenses: LensRule[] = lenses
     ) => {
         const exact = nextRules.filter(r => r.type === 'EXACT');
         const fuzzy = nextRules.filter(r => r.type === 'FUZZY').map(r => ({
             ...r,
             score_expr: resolveTemplateSql(r.score_expr || '', r.fuzzy_attribute || availableAttributes[0] || 'first_name'),
         }));
-        lastEmittedSigRef.current = serializeRuleSlice(exact, fuzzy, nextExcl, nextOv, nextDefExcl);
+        lastEmittedSigRef.current = serializeRuleSlice(exact, fuzzy, nextExcl, nextOv, nextDefExcl, nextLenses);
         setValidationError(null);
         onChange?.({
             ...latestConfigRef.current,
@@ -135,6 +147,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             fuzzy_rules: fuzzy,
             exclusions: nextExcl,
             overrides: nextOv,
+            lenses: nextLenses,
             use_default_exclusions: nextDefExcl,
         });
     };
@@ -309,8 +322,76 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             fuzzy_rules: fuzzy,
             exclusions,
             overrides,
+            lenses,
             use_default_exclusions: useDefaultExclusions,
         });
+    };
+
+    const addLens = () => {
+        const id = newLensId.trim().replace(/\s+/g, '_');
+        if (!id) return;
+        const parsedMax = newLensMaxGroup.trim() ? parseInt(newLensMaxGroup, 10) : undefined;
+        const nextLenses: LensRule[] = [
+            ...lenses.filter(l => l.id !== id),
+            {
+                id,
+                include_types: newLensInclude.map(t => t.toUpperCase()),
+                exclude_types: newLensExclude.map(t => t.toUpperCase()),
+                source_filter: newLensSources,
+                ...(parsedMax && parsedMax > 0 ? { max_group_size: parsedMax } : {}),
+            },
+        ];
+        setLenses(nextLenses);
+        setNewLensId('');
+        setNewLensInclude([]);
+        setNewLensExclude([]);
+        setNewLensSources([]);
+        setNewLensMaxGroup('');
+        setOpenLensDropdown(null);
+        emitChange(rules, exclusions, overrides, useDefaultExclusions, nextLenses);
+    };
+
+    const toggleLensSelection = (
+        selected: string[],
+        setSelected: (next: string[]) => void,
+        value: string
+    ) => {
+        setSelected(
+            selected.includes(value)
+                ? selected.filter(v => v !== value)
+                : [...selected, value]
+        );
+    };
+
+    const availableSourceIds = Array.from(
+        new Set((config.sources || []).map(s => s.id).filter(Boolean))
+    ).sort();
+
+    const lensTypeOptions = Array.from(
+        new Set([
+            ...availableTypes.map(t => t.toUpperCase()),
+            ...rules.flatMap(r => [
+                ...(r.match_keys || []),
+                ...((r as unknown as { match_key?: string }).match_key
+                    ? [(r as unknown as { match_key?: string }).match_key!]
+                    : []),
+            ]).map(t => String(t).trim().toUpperCase()).filter(Boolean),
+            ...(config.rules || []).flatMap(r => [
+                ...(r.match_keys || []),
+                ...((r as unknown as { match_key?: string }).match_key
+                    ? [(r as unknown as { match_key?: string }).match_key!]
+                    : []),
+            ]).map(t => String(t).trim().toUpperCase()).filter(Boolean),
+            ...(config.sources || []).flatMap(s =>
+                (s.identifiers || []).map(i => String(i.type || '').trim().toUpperCase())
+            ).filter(Boolean),
+        ])
+    ).sort();
+
+    const removeLens = (idx: number) => {
+        const nextLenses = lenses.filter((_, i) => i !== idx);
+        setLenses(nextLenses);
+        emitChange(rules, exclusions, overrides, useDefaultExclusions, nextLenses);
     };
 
     const blockingKeyOptions = Array.from(new Set([...availableTypes, ...availableAttributes])).map(t => ({
@@ -716,6 +797,237 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                         </div>
                     )}
                 </div>
+            </div>
+
+            {/* Multi-Lens Identity Views */}
+            <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h3 className="text-sm font-semibold text-white">Multi-Lens Identity Views (Optional)</h3>
+                        <p className="text-xs text-slate-400">
+                            Materialize multiple policy-bounded identity graphs (e.g., strict_person vs household) from one scan.
+                        </p>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                    <input
+                        type="text"
+                        value={newLensId}
+                        onChange={(e) => setNewLensId(e.target.value)}
+                        placeholder="Lens ID (e.g. strict_person)"
+                        className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                    />
+
+                    {/* Include Types Dropdown */}
+                    <div className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setOpenLensDropdown(openLensDropdown === 'include' ? null : 'include')}
+                            className="w-full flex items-center justify-between bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-left text-white hover:border-slate-500"
+                        >
+                            <span className="truncate">
+                                {newLensInclude.length > 0
+                                    ? `Include: ${newLensInclude.join(', ')}`
+                                    : 'Include types (all)'}
+                            </span>
+                            <span className="text-slate-400 ml-1">▾</span>
+                        </button>
+                        {openLensDropdown === 'include' && (
+                            <div className="absolute z-30 mt-1 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-2 space-y-1 max-h-52 overflow-y-auto">
+                                {lensTypeOptions.length === 0 ? (
+                                    <div className="text-[11px] text-slate-400 px-1 py-1">No identifier types found</div>
+                                ) : (
+                                    lensTypeOptions.map(t => (
+                                        <label
+                                            key={t}
+                                            className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-800 cursor-pointer text-xs text-slate-200"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={newLensInclude.includes(t)}
+                                                onChange={() => toggleLensSelection(newLensInclude, setNewLensInclude, t)}
+                                                className="rounded border-slate-600 bg-slate-950 text-blue-500"
+                                            />
+                                            <span>{t}</span>
+                                        </label>
+                                    ))
+                                )}
+                                {newLensInclude.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setNewLensInclude([])}
+                                        className="w-full text-left px-2 pt-1 text-[11px] text-slate-400 hover:text-white border-t border-slate-800"
+                                    >
+                                        Clear selection
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Exclude Types Dropdown */}
+                    <div className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setOpenLensDropdown(openLensDropdown === 'exclude' ? null : 'exclude')}
+                            className="w-full flex items-center justify-between bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-left text-white hover:border-slate-500"
+                        >
+                            <span className="truncate">
+                                {newLensExclude.length > 0
+                                    ? `Exclude: ${newLensExclude.join(', ')}`
+                                    : 'Exclude types (none)'}
+                            </span>
+                            <span className="text-slate-400 ml-1">▾</span>
+                        </button>
+                        {openLensDropdown === 'exclude' && (
+                            <div className="absolute z-30 mt-1 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-2 space-y-1 max-h-52 overflow-y-auto">
+                                {lensTypeOptions.length === 0 ? (
+                                    <div className="text-[11px] text-slate-400 px-1 py-1">No identifier types found</div>
+                                ) : (
+                                    lensTypeOptions.map(t => (
+                                        <label
+                                            key={t}
+                                            className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-800 cursor-pointer text-xs text-slate-200"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={newLensExclude.includes(t)}
+                                                onChange={() => toggleLensSelection(newLensExclude, setNewLensExclude, t)}
+                                                className="rounded border-slate-600 bg-slate-950 text-blue-500"
+                                            />
+                                            <span>{t}</span>
+                                        </label>
+                                    ))
+                                )}
+                                {newLensExclude.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setNewLensExclude([])}
+                                        className="w-full text-left px-2 pt-1 text-[11px] text-slate-400 hover:text-white border-t border-slate-800"
+                                    >
+                                        Clear selection
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Source Filter Dropdown */}
+                    <div className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setOpenLensDropdown(openLensDropdown === 'sources' ? null : 'sources')}
+                            className="w-full flex items-center justify-between bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-left text-white hover:border-slate-500"
+                        >
+                            <span className="truncate">
+                                {newLensSources.length > 0
+                                    ? `Sources: ${newLensSources.join(', ')}`
+                                    : 'Source filter (all)'}
+                            </span>
+                            <span className="text-slate-400 ml-1">▾</span>
+                        </button>
+                        {openLensDropdown === 'sources' && (
+                            <div className="absolute z-30 mt-1 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-2 space-y-1 max-h-60 overflow-y-auto">
+                                {availableSourceIds.map(sid => (
+                                    <label
+                                        key={sid}
+                                        className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-800 cursor-pointer text-xs text-slate-200"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={newLensSources.includes(sid)}
+                                            onChange={() => toggleLensSelection(newLensSources, setNewLensSources, sid)}
+                                            className="rounded border-slate-600 bg-slate-950 text-blue-500"
+                                        />
+                                        <span className="truncate">{sid}</span>
+                                    </label>
+                                ))}
+                                <div className="pt-1.5 mt-1 border-t border-slate-800 flex gap-1">
+                                    <input
+                                        type="text"
+                                        value={customSourceGlob}
+                                        onChange={(e) => setCustomSourceGlob(e.target.value)}
+                                        placeholder="Custom glob (e.g. crm*)"
+                                        className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-white"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const g = customSourceGlob.trim();
+                                            if (g && !newLensSources.includes(g)) {
+                                                setNewLensSources([...newLensSources, g]);
+                                            }
+                                            setCustomSourceGlob('');
+                                        }}
+                                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] text-blue-300 rounded"
+                                    >
+                                        Add
+                                    </button>
+                                </div>
+                                {newLensSources.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setNewLensSources([])}
+                                        className="w-full text-left px-2 pt-1 text-[11px] text-slate-400 hover:text-white border-t border-slate-800"
+                                    >
+                                        Clear selection
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex gap-2">
+                        <input
+                            type="number"
+                            min="2"
+                            value={newLensMaxGroup}
+                            onChange={(e) => setNewLensMaxGroup(e.target.value)}
+                            placeholder="Max size"
+                            className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white"
+                        />
+                        <button
+                            type="button"
+                            onClick={addLens}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium whitespace-nowrap"
+                        >
+                            + Add Lens
+                        </button>
+                    </div>
+                </div>
+                {lenses.length > 0 && (
+                    <div className="space-y-1.5">
+                        {lenses.map((l, idx) => (
+                            <div
+                                key={`${l.id}-${idx}`}
+                                className="flex items-center justify-between bg-slate-950/70 border border-slate-800 rounded-lg px-3 py-2 text-xs"
+                            >
+                                <div className="flex flex-wrap items-center gap-2 text-slate-300">
+                                    <span className="font-mono font-semibold text-blue-300">{l.id}</span>
+                                    {l.include_types && l.include_types.length > 0 && (
+                                        <span className="text-slate-400">include: {l.include_types.join(', ')}</span>
+                                    )}
+                                    {l.exclude_types && l.exclude_types.length > 0 && (
+                                        <span className="text-slate-400">exclude: {l.exclude_types.join(', ')}</span>
+                                    )}
+                                    {l.source_filter && l.source_filter.length > 0 && (
+                                        <span className="text-slate-400">sources: {l.source_filter.join(', ')}</span>
+                                    )}
+                                    {l.max_group_size && (
+                                        <span className="text-amber-400">max_size: {l.max_group_size}</span>
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => removeLens(idx)}
+                                    className="text-rose-400 hover:text-rose-300 text-xs"
+                                >
+                                    Remove
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="flex justify-between pt-3 border-t border-slate-800/80">
