@@ -637,8 +637,9 @@ class GraphStage(BaseStage):
             """)
             # Guard against the rare case where a fallback candidate (or its ':split:<hash>' suffix)
             # collides with a winning_resolved_id, another component's label, or an untouched historical ID.
+            max_retries = 5
             attempt = 0
-            while attempt < 5:
+            while True:
                 collisions = self.adapter.query("""
                     SELECT DISTINCT s.label AS colliding_label
                     FROM idr_work.lp_labels_stabilized s
@@ -658,6 +659,11 @@ class GraphStage(BaseStage):
                 """)
                 if not collisions:
                     break
+                if attempt >= max_retries:
+                    colliding_list = ", ".join(str(c["colliding_label"]) for c in collisions)
+                    raise RuntimeError(
+                        f"Fallback cluster ID collision unresolved after {max_retries} retries: {colliding_list}"
+                    )
                 attempt += 1
                 for crow in collisions:
                     clabel = crow["colliding_label"]
@@ -683,6 +689,8 @@ class GraphStage(BaseStage):
             """)
             self.adapter.execute("DROP TABLE IF EXISTS idr_work.lp_labels_stabilized")
             self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_stabilized_final")
+        except RuntimeError:
+            raise
         except Exception as e:
             self.logger.warning(f"Failed to stabilize resolved_ids: {e}")
 

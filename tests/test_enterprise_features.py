@@ -1262,6 +1262,81 @@ def test_blast_radius_veto_bypasses_restore_with_zero_writes(adapter, monkeypatc
     assert m == {"crm:1": "crm:1", "crm:2": "crm:1"}
 
 
+def test_stabilize_resolved_ids_exhaustion_stops_run_and_preserves_graph(adapter, monkeypatch):
+    """
+    If the initial fallback candidate and all 5 retry candidates collide with reserved
+    historical cluster IDs, _stabilize_resolved_ids must raise RuntimeError and
+    IDRRunner.run must fail before mutating the persisted output graph.
+    """
+    import hashlib
+    from types import SimpleNamespace
+
+    import idr_core.runner as runner_mod
+
+    adapter.execute("""
+        CREATE TABLE ex_users (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        INSERT INTO ex_users VALUES
+            ('a', 'solo@acmecorp.io', CURRENT_TIMESTAMP),
+            ('b', 'pair@acmecorp.io', CURRENT_TIMESTAMP),
+            ('c', 'pair@acmecorp.io', CURRENT_TIMESTAMP);
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "ex_users",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "email", "expr": "email"}],
+            }
+        ],
+        "rules": [{"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"}],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    # Seed prior membership where {crm:b, crm:c} -> 'crm:a', and untouched historical rows
+    # occupy the initial fallback suffix AND all 5 retry suffixes for a deterministic run_id.
+    run_id = "run_exhaust00000"
+    monkeypatch.setattr(runner_mod.uuid, "uuid4", lambda: SimpleNamespace(hex="exhaust00000"))
+
+    candidates = [f"crm:a:split:{hashlib.md5(b'crm:a').hexdigest()[:8]}"]
+    for attempt in range(1, 6):
+        seed = f"crm:a:{run_id}:{attempt}".encode()
+        candidates.append(f"crm:a:split:{hashlib.md5(seed).hexdigest()[:8]}")
+
+    values_sql = ",\n".join(
+        [
+            "('crm:b', 'crm:a', TIMESTAMP '2026-10-01', 'r1')",
+            "('crm:c', 'crm:a', TIMESTAMP '2026-10-01', 'r1')",
+        ]
+        + [
+            f"('hist:{idx}', '{cand}', TIMESTAMP '2026-10-01', 'r1')"
+            for idx, cand in enumerate(candidates)
+        ]
+    )
+    adapter.execute(f"""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id, updated_at, run_id)
+        VALUES {values_sql}
+    """)
+
+    before = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+
+    res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    assert res.status == "FAILED"
+    assert "Fallback cluster ID collision unresolved after 5 retries" in (res.error or "")
+
+    after = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert after == before
+
+
+
 
 
 
