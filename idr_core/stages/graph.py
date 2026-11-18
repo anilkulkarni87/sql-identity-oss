@@ -692,7 +692,8 @@ class GraphStage(BaseStage):
         except RuntimeError:
             raise
         except Exception as e:
-            self.logger.warning(f"Failed to stabilize resolved_ids: {e}")
+            self.logger.error(f"Failed to stabilize resolved_ids: {e}")
+            raise RuntimeError(f"Failed to stabilize resolved_ids: {e}") from e
 
     def run_fuzzy_matching(self, max_iters: int) -> int:
         """

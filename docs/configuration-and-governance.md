@@ -202,7 +202,7 @@ When automated rules need human-in-the-loop correction, stewards can define over
 | Override Type | Effect on Graph Resolution |
 | :--- | :--- |
 | **`FORCE_LINK`** | Injects a synthetic edge between `entity_key_a` and `entity_key_b` so both records always resolve into the same cluster, even if they share zero identifiers. |
-| **`DO_NOT_LINK`** | Removes any direct edge between `entity_key_a` and `entity_key_b` **and** detaches the higher entity key from any shared identifier anchor group containing both records. |
+| **`DO_NOT_LINK`** | Removes any direct edge between `entity_key_a` and `entity_key_b`, asymmetrically detaches `max(entity_key_a, entity_key_b)` from any shared identifier anchor group containing both records, and—if the pair remains connected via a multi-hop, multi-identifier bridge—severs edges incident to `max(entity_key_a, entity_key_b)` and re-converges. |
 | **`ISOLATE`** | Strips all identifiers from `entity_key_a` prior to edge building so `entity_key_a` is guaranteed to remain a singleton cluster (`resolved_id = entity_key_a`). |
 
 ```sql
