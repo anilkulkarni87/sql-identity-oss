@@ -1336,6 +1336,62 @@ def test_stabilize_resolved_ids_exhaustion_stops_run_and_preserves_graph(adapter
     assert after == before
 
 
+def test_advisory_run_lock_blocks_concurrent_run_and_recovers_stale_lock(adapter):
+    """
+    Active advisory lock in idr_meta.run_state blocks concurrent runs without releasing
+    the active holder's lock, while stale locks older than lock_ttl_seconds are reclaimed
+    and released cleanly on completion.
+    """
+    adapter.execute("""
+        CREATE TABLE lock_users (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        INSERT INTO lock_users VALUES ('1', 'lock@acmecorp.io', CURRENT_TIMESTAMP);
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "lock_users",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "email", "expr": "email"}],
+            }
+        ],
+        "rules": [{"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"}],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    # 1. Active lock blocks a second run and preserves the holder's lock
+    from datetime import datetime, timezone
+
+    utc_now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    adapter.execute(f"""
+        INSERT INTO idr_meta.run_state (table_id, last_watermark_value, last_run_id, updated_at)
+        VALUES ('__idr_run_lock__', NULL, 'run_active_holder', TIMESTAMP '{utc_now_str}')
+    """)
+    blocked = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    assert blocked.status == "FAILED"
+    assert "Concurrent IDR run in progress" in (blocked.error or "")
+    holder = adapter.query_one(
+        "SELECT last_run_id FROM idr_meta.run_state WHERE table_id = '__idr_run_lock__'"
+    )
+    assert holder == "run_active_holder"
+
+    # 2. Stale lock is reclaimed, run succeeds, and lock is released
+    adapter.execute("""
+        UPDATE idr_meta.run_state
+        SET updated_at = TIMESTAMP '2020-01-01 00:00:00'
+        WHERE table_id = '__idr_run_lock__'
+    """)
+    ok = IDRRunner(adapter).run(RunConfig(run_mode="FULL", lock_ttl_seconds=60))
+    assert ok.status == "SUCCESS"
+    released = adapter.query_one(
+        "SELECT last_run_id FROM idr_meta.run_state WHERE table_id = '__idr_run_lock__'"
+    )
+    assert released is None
+
+
+
 
 
 

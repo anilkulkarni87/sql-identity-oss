@@ -68,6 +68,8 @@ class RunConfig:
     max_cluster_delta_pct: Optional[float] = None
     lens: Optional[str] = None
     skip_lenses: bool = False
+    lock_ttl_seconds: int = 3600
+    force_unlock: bool = False
 
     def __post_init__(self):
         mode = str(self.run_mode or "").upper()
@@ -233,17 +235,23 @@ class IDRRunner:
         graph = GraphStage(ctx, config=config)
         output = OutputStage(ctx, config=config)
 
+        lock_acquired = False
         try:
-            # 1. Preflight validation (before recording run to avoid self-detection)
+            # 1. Preflight validation (before recording run or locking)
             self._start_stage("preflight")
             preflight.run()
             self._end_stage("preflight")
+
+            # Acquire advisory run lock in idr_meta.run_state so concurrent runs / dry runs
+            # do not overwrite shared idr_work staging tables or idr_meta config tables.
+            self._acquire_run_lock(config)
+            lock_acquired = True
 
             # Check for optional evidence generation after preflight schema checks
             self._generate_evidence = preflight.load_evidence_flag()
             ctx.generate_evidence = self._generate_evidence
 
-            # Record run start (after preflight passes)
+            # Record run start (after preflight and lock acquisition)
             self._record_run_start(config)
 
             # 2. Entity extraction
@@ -381,6 +389,71 @@ class IDRRunner:
                 extra={"run_id": self.run_id, "event": "run_failed"},
             )
             return self._complete_run(start_time, config, status="FAILED", error=str(e))
+        finally:
+            if lock_acquired:
+                self._release_run_lock()
+
+    def _acquire_run_lock(self, config: RunConfig) -> None:
+        """Acquire an advisory run lock in idr_meta.run_state to serialize concurrent runs."""
+        if not self.adapter.table_exists("idr_meta.run_state"):
+            return
+        lock_key = "__idr_run_lock__"
+        rows = self.adapter.query(
+            f"SELECT last_run_id, updated_at FROM idr_meta.run_state WHERE table_id = '{lock_key}'"
+        )
+        if rows and rows[0].get("last_run_id") and not config.force_unlock:
+            active_run_id = str(rows[0]["last_run_id"])
+            locked_at = rows[0].get("updated_at")
+            is_stale = False
+            if locked_at is not None:
+                if isinstance(locked_at, str):
+                    try:
+                        locked_dt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
+                    except ValueError:
+                        locked_dt = None
+                else:
+                    locked_dt = locked_at
+                if locked_dt is not None:
+                    now_utc = datetime.now(timezone.utc)
+                    if locked_dt.tzinfo is None:
+                        locked_dt = locked_dt.replace(tzinfo=timezone.utc)
+                    age_seconds = (now_utc - locked_dt).total_seconds()
+                    is_stale = age_seconds > max(0, int(config.lock_ttl_seconds))
+            if not is_stale:
+                raise RuntimeError(
+                    f"Concurrent IDR run in progress (run_id={active_run_id}, started_at={locked_at}). "
+                    f"Wait for completion or pass force_unlock=True."
+                )
+            self.logger.warning(
+                f"Reclaiming stale advisory run lock from {active_run_id} (started_at={locked_at})",
+                extra={"run_id": self.run_id},
+            )
+
+        utc_now_lit = f"TIMESTAMP '{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}'"
+        if rows:
+            self.adapter.execute(f"""
+                UPDATE idr_meta.run_state
+                SET last_run_id = '{self.run_id}', updated_at = {utc_now_lit}
+                WHERE table_id = '{lock_key}'
+            """)
+        else:
+            self.adapter.execute(f"""
+                INSERT INTO idr_meta.run_state (table_id, last_watermark_value, last_run_id, updated_at)
+                VALUES ('{lock_key}', NULL, '{self.run_id}', {utc_now_lit})
+            """)
+
+    def _release_run_lock(self) -> None:
+        """Release the advisory run lock if still held by this run_id."""
+        try:
+            if not self.adapter.table_exists("idr_meta.run_state"):
+                return
+            self.adapter.execute(f"""
+                UPDATE idr_meta.run_state
+                SET last_run_id = NULL, updated_at = {self._dialect["current_timestamp"]}
+                WHERE table_id = '__idr_run_lock__' AND last_run_id = '{self.run_id}'
+            """)
+        except Exception as e:
+            self.logger.warning(f"Failed to release advisory run lock: {e}")
 
     def _run_configured_lenses(
         self, config: RunConfig, graph: GraphStage, output: OutputStage
