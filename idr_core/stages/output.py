@@ -409,8 +409,15 @@ class OutputStage(BaseStage):
         current_ts = self._dialect["current_timestamp"]
         snapshots = self._snapshot_current_outputs()
 
+        # Pre-write blast-radius veto runs BEFORE any current-output mutation and
+        # bypasses _restore_current_outputs so vetoed runs perform zero current-table writes.
         try:
             self._enforce_blast_radius_gate(snapshots)
+        except Exception:
+            self._cleanup_output_snapshots(snapshots)
+            raise
+
+        try:
 
             # 1. Identify impacted clusters for confidence scoring
             self.adapter.execute("""

@@ -1137,6 +1137,132 @@ def test_dry_run_corroboration_excludes_same_identifier_type(adapter):
     assert summary["corroborating_identifier_types"] == []
 
 
+def test_stabilize_resolved_ids_prevents_generated_suffix_collision(adapter):
+    """
+    If an existing untouched cluster (crm:d) already holds the deterministic suffix ID
+    'crm:a:split:db42ceb5', the fallback allocator must detect the collision and assign
+    a distinct non-colliding ID to the disconnected singleton {crm:a}.
+    """
+    import hashlib
+    import logging
+
+    from idr_core.adapters.base import get_dialect_config
+    from idr_core.stages.base import StageContext
+    from idr_core.stages.graph import GraphStage
+
+    colliding_suffix = f"crm:a:split:{hashlib.md5(b'crm:a').hexdigest()[:8]}"
+    adapter.execute(f"""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id, updated_at, run_id)
+        VALUES
+            ('crm:b', 'crm:a', TIMESTAMP '2026-10-01', 'r1'),
+            ('crm:c', 'crm:a', TIMESTAMP '2026-10-01', 'r1'),
+            ('crm:d', '{colliding_suffix}', TIMESTAMP '2026-10-01', 'r1')
+    """)
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_work.lp_labels AS
+        SELECT 'crm:a' AS entity_key, 'crm:a' AS label
+        UNION ALL SELECT 'crm:b', 'crm:b'
+        UNION ALL SELECT 'crm:c', 'crm:b'
+        UNION ALL SELECT 'crm:d', 'crm:d'
+    """)
+    ctx = StageContext(
+        adapter=adapter,
+        run_id="r2",
+        dialect=get_dialect_config("duckdb"),
+        logger=logging.getLogger("test"),
+        warnings=[],
+    )
+    GraphStage(ctx)._stabilize_resolved_ids()
+
+    labels = {
+        r["entity_key"]: r["label"]
+        for r in adapter.query("SELECT entity_key, label FROM idr_work.lp_labels")
+    }
+    assert labels["crm:b"] == "crm:a"
+    assert labels["crm:c"] == "crm:a"
+    assert labels["crm:d"] == colliding_suffix
+    assert labels["crm:a"] not in ("crm:a", colliding_suffix)
+
+
+def test_build_edges_deduplicates_duplicate_member_rows(adapter):
+    """
+    Duplicate (entity_key, identifier_type, identifier_value_norm) rows in identifiers_all
+    (e.g., from multiple rules with differing max_group_size) must be deduplicated before
+    counting group_size and emitting edges, yielding strictly N - 1 edges.
+    """
+    import logging
+
+    from idr_core.adapters.base import get_dialect_config
+    from idr_core.stages.base import StageContext
+    from idr_core.stages.graph import GraphStage
+
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_work.identifiers_all AS
+        SELECT 'crm:1' AS entity_key, 'EMAIL' AS identifier_type, 'a@acmecorp.io' AS identifier_value_norm, FALSE AS is_hashed, 2 AS max_group_size
+        UNION ALL
+        SELECT 'crm:2', 'EMAIL', 'a@acmecorp.io', FALSE, 2
+        UNION ALL
+        SELECT 'crm:2', 'EMAIL', 'a@acmecorp.io', FALSE, 5
+    """)
+    ctx = StageContext(
+        adapter=adapter,
+        run_id="r_dedup",
+        dialect=get_dialect_config("duckdb"),
+        logger=logging.getLogger("test"),
+        warnings=[],
+    )
+    edge_cnt = GraphStage(ctx, config=RunConfig(run_mode="FULL")).build_edges()
+    assert edge_cnt == 1
+    edges = adapter.query("SELECT left_entity_key, right_entity_key FROM idr_work.edges_new")
+    assert edges == [{"left_entity_key": "crm:2", "right_entity_key": "crm:1"}]
+
+
+def test_blast_radius_veto_bypasses_restore_with_zero_writes(adapter, monkeypatch):
+    """
+    When the pre-write blast-radius gate raises, generate_output must abort before
+    mutating current output tables and must NOT invoke _restore_current_outputs.
+    """
+    import logging
+
+    from idr_core.adapters.base import get_dialect_config
+    from idr_core.stages.base import StageContext
+    from idr_core.stages.output import OutputStage
+
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id, updated_at, run_id)
+        VALUES ('crm:1', 'crm:1', CURRENT_TIMESTAMP, 'r1'),
+               ('crm:2', 'crm:1', CURRENT_TIMESTAMP, 'r1')
+    """)
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_work.lp_labels AS
+        SELECT 'crm:1' AS entity_key, 'crm:1' AS label
+        UNION ALL SELECT 'crm:2', 'crm:2'
+    """)
+
+    ctx = StageContext(
+        adapter=adapter,
+        run_id="r2",
+        dialect=get_dialect_config("duckdb"),
+        logger=logging.getLogger("test"),
+        warnings=[],
+    )
+    out = OutputStage(ctx, config=RunConfig(run_mode="FULL", max_moved_entities_pct=10.0))
+
+    restore_called = []
+    monkeypatch.setattr(out, "_restore_current_outputs", lambda s: restore_called.append(s))
+
+    with pytest.raises(RuntimeError, match="Blast-radius circuit breaker triggered"):
+        out.generate_output()
+
+    assert restore_called == []
+    m = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert m == {"crm:1": "crm:1", "crm:2": "crm:1"}
+
+
+
 
 
 

@@ -142,17 +142,28 @@ class GraphStage(BaseStage):
             else "COALESCE(MAX(max_group_size), 10000)"
         )
 
-        # This uses the N-1 edge approach (anchor-based) instead of N² fully connected
+        # This uses the N-1 edge approach (anchor-based) instead of N² fully connected.
+        # Deduplicate (entity_key, identifier_type, identifier_value_norm) first so multiple
+        # upstream mappings for the same member cannot emit duplicate edges or inflate counts.
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.edges_new AS
-            WITH identifier_groups AS (
+            WITH dedup_identifiers AS (
+                SELECT
+                    entity_key,
+                    identifier_type,
+                    identifier_value_norm,
+                    MAX(max_group_size) AS max_group_size
+                FROM idr_work.identifiers_all
+                GROUP BY entity_key, identifier_type, identifier_value_norm
+            ),
+            identifier_groups AS (
                 SELECT
                     identifier_type,
                     identifier_value_norm,
                     COUNT(*) as group_size,
                     MIN(entity_key) as anchor_key,
                     {max_allowed_expr} as max_allowed
-                FROM idr_work.identifiers_all
+                FROM dedup_identifiers
                 GROUP BY identifier_type, identifier_value_norm
                 HAVING COUNT(*) > 1
             ),
@@ -169,7 +180,7 @@ class GraphStage(BaseStage):
                 g.anchor_key AS right_entity_key,
                 i.identifier_type,
                 i.identifier_value_norm
-            FROM idr_work.identifiers_all i
+            FROM dedup_identifiers i
             JOIN valid_groups g
                 ON i.identifier_type = g.identifier_type
                 AND i.identifier_value_norm = g.identifier_value_norm
@@ -602,25 +613,76 @@ class GraphStage(BaseStage):
                     FROM claimed_prev
                     WHERE prev_claim_rn = 1
                 ),
-                claimed_ids AS (
-                    SELECT DISTINCT winning_resolved_id AS claimed_id
+                reserved_ids AS (
+                    SELECT DISTINCT winning_resolved_id AS reserved_id
                     FROM winning_cluster
                     WHERE win_rn = 1
+                    UNION
+                    SELECT DISTINCT resolved_id AS reserved_id
+                    FROM idr_out.identity_resolved_membership_current
                 )
                 SELECT
                     l.entity_key,
                     CASE
                         WHEN w.winning_resolved_id IS NOT NULL THEN w.winning_resolved_id
-                        WHEN ci.claimed_id IS NOT NULL THEN CONCAT(l.label, ':split:', SUBSTR({md5_expr}, 1, 8))
+                        WHEN ri.reserved_id IS NOT NULL THEN CONCAT(l.label, ':split:', SUBSTR({md5_expr}, 1, 8))
                         ELSE l.label
-                    END AS label
+                    END AS label,
+                    CASE WHEN w.winning_resolved_id IS NULL THEN TRUE ELSE FALSE END AS is_fallback
                 FROM idr_work.lp_labels l
                 LEFT JOIN winning_cluster w
                   ON l.label = w.raw_label AND w.win_rn = 1
-                LEFT JOIN claimed_ids ci
-                  ON w.winning_resolved_id IS NULL AND l.label = ci.claimed_id
+                LEFT JOIN reserved_ids ri
+                  ON w.winning_resolved_id IS NULL AND l.label = ri.reserved_id
             """)
-            self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_stabilized")
+            # Guard against the rare case where a fallback candidate (or its ':split:<hash>' suffix)
+            # collides with a winning_resolved_id, another component's label, or an untouched historical ID.
+            attempt = 0
+            while attempt < 5:
+                collisions = self.adapter.query("""
+                    SELECT DISTINCT s.label AS colliding_label
+                    FROM idr_work.lp_labels_stabilized s
+                    JOIN idr_work.lp_labels orig ON s.entity_key = orig.entity_key
+                    WHERE s.is_fallback = TRUE
+                      AND (
+                          EXISTS (
+                              SELECT 1 FROM idr_work.lp_labels_stabilized s2
+                              JOIN idr_work.lp_labels orig2 ON s2.entity_key = orig2.entity_key
+                              WHERE s2.label = s.label AND orig2.label != orig.label
+                          )
+                          OR s.label IN (
+                              SELECT DISTINCT resolved_id
+                              FROM idr_out.identity_resolved_membership_current
+                          )
+                      )
+                """)
+                if not collisions:
+                    break
+                attempt += 1
+                for crow in collisions:
+                    clabel = crow["colliding_label"]
+                    safe_clabel = clabel.replace("'", "''")
+                    new_md5 = self._dialect["md5"](f"CONCAT(orig.label, ':{self.run_id}:{attempt}')")
+                    self.adapter.execute(f"""
+                        CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized_next AS
+                        SELECT
+                            s.entity_key,
+                            CASE
+                                WHEN s.is_fallback = TRUE AND s.label = '{safe_clabel}'
+                                THEN CONCAT(orig.label, ':split:', SUBSTR({new_md5}, 1, 8))
+                                ELSE s.label
+                            END AS label,
+                            s.is_fallback
+                        FROM idr_work.lp_labels_stabilized s
+                        JOIN idr_work.lp_labels orig ON s.entity_key = orig.entity_key
+                    """)
+                    self._swap_tables("idr_work.lp_labels_stabilized", "idr_work.lp_labels_stabilized_next")
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized_final AS
+                SELECT entity_key, label FROM idr_work.lp_labels_stabilized
+            """)
+            self.adapter.execute("DROP TABLE IF EXISTS idr_work.lp_labels_stabilized")
+            self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_stabilized_final")
         except Exception as e:
             self.logger.warning(f"Failed to stabilize resolved_ids: {e}")
 
