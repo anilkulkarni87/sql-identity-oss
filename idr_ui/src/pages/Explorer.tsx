@@ -48,9 +48,16 @@ export default function Explorer() {
     const [rtbfLoading, setRtbfLoading] = useState<'preview' | 'purge' | null>(null)
     const rtbfInFlightRef = useRef(false)
 
+    const { data: setupStatus } = useQuery({
+        queryKey: ['setupStatus'],
+        queryFn: () => api.getSetupStatus(),
+    })
+    const isConnected = Boolean(setupStatus?.connected)
+
     const { data: lensesData } = useQuery({
         queryKey: ['lenses'],
         queryFn: () => api.listLenses(),
+        enabled: isConnected,
     })
     const availableLenses = lensesData?.lenses || []
 
@@ -66,7 +73,7 @@ export default function Explorer() {
             selectedLens
                 ? api.getLensClusters(selectedLens, debouncedSearchQuery)
                 : api.searchEntities(debouncedSearchQuery),
-        enabled: selectedLens ? true : debouncedSearchQuery.trim().length >= 3
+        enabled: isConnected && (selectedLens ? true : debouncedSearchQuery.trim().length >= 3)
     })
 
     const { data: clusterDetail } = useQuery({
@@ -462,7 +469,11 @@ export default function Explorer() {
                 <div className="bg-gray-800/95 backdrop-blur-sm rounded-xl p-4 border border-gray-700/80 shadow-xl space-y-2">
                     <div className="flex items-center justify-between text-xs text-gray-400 pb-2 border-b border-gray-700/60">
                         <span>
-                            {searching ? 'Querying identity index...' : `Found ${searchResults?.length || 0} matching clusters`}
+                            {setupStatus && !isConnected
+                                ? 'Warehouse disconnected — connect in Identity Studio to search.'
+                                : searching
+                                    ? 'Querying identity index...'
+                                    : `Found ${searchResults?.length || 0} matching clusters`}
                         </span>
                         {searchResults && searchResults.length > 0 && (
                             <span className="text-gray-500">Click a cluster to load the graph</span>
@@ -1052,7 +1063,7 @@ export default function Explorer() {
             {!selectedCluster && !selectedLens && searchQuery.trim().length < 3 && (
                 <div className="text-center py-24 text-gray-500 bg-gray-800/30 rounded-2xl border border-gray-800/60">
                     <Search className="w-14 h-14 mx-auto mb-3 opacity-40 text-blue-400" />
-                    <h3 className="text-base font-semibold text-gray-300">Search for any identity entity</h3>
+                    <h2 className="text-base font-semibold text-gray-300">Search for any identity entity</h2>
                     <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
                         Type an email address, phone number, loyalty ID, or customer key to inspect its cluster and connected graph.
                     </p>

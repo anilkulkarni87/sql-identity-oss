@@ -106,13 +106,15 @@ export default function Dashboard() {
                         <Network className="w-4 h-4 text-blue-400" />
                         Explore Graph
                     </button>
-                    <button
-                        onClick={() => navigate('/setup')}
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all shadow-md"
-                    >
-                        <Play className="w-4 h-4" />
-                        {isConfigured ? 'Run Pipeline' : 'Setup Pipeline'}
-                    </button>
+                    {isConfigured && (
+                        <button
+                            onClick={() => navigate('/setup')}
+                            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all shadow-md"
+                        >
+                            <Play className="w-4 h-4" />
+                            Run Pipeline
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -130,7 +132,7 @@ export default function Dashboard() {
                     </div>
                     <button
                         onClick={() => navigate('/setup')}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-lg transition-all flex-shrink-0"
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-lg transition-all flex-shrink-0"
                     >
                         Launch Setup Wizard
                         <ArrowRight className="w-3.5 h-3.5" />
@@ -178,7 +180,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Cluster Distribution */}
                 <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl">
-                    <h3 className="text-base font-semibold text-white mb-4">Cluster Size Distribution</h3>
+                    <h2 className="text-base font-semibold text-white mb-4">Cluster Size Distribution</h2>
                     <ResponsiveContainer width="100%" height={250}>
                         <BarChart data={distribution || []}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -206,7 +208,7 @@ export default function Dashboard() {
 
                 {/* Rule Breakdown */}
                 <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl">
-                    <h3 className="text-base font-semibold text-white mb-4">Match Rule Breakdown</h3>
+                    <h2 className="text-base font-semibold text-white mb-4">Match Rule Breakdown</h2>
                     <div className="flex flex-col sm:flex-row items-center gap-6">
                         <div className="w-full sm:w-48 h-[220px] shrink-0">
                             <ResponsiveContainer width="100%" height="100%">
@@ -257,10 +259,10 @@ export default function Dashboard() {
                 {/* Multi-Entity Confidence Tiers */}
                 <div className="bg-slate-900/90 rounded-xl p-6 border border-slate-800 shadow-xl">
                     <div className="flex items-center justify-between mb-1">
-                        <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                        <h2 className="text-base font-semibold text-white flex items-center gap-2">
                             <ShieldCheck className="w-4 h-4 text-emerald-400" />
                             Multi-Entity Confidence
-                        </h3>
+                        </h2>
                     </div>
                     <p className="text-xs text-slate-400 mb-4">
                         Excludes singletons so risky or over-merged clusters stand out.
@@ -292,10 +294,10 @@ export default function Dashboard() {
 
                 {/* Source System Contribution */}
                 <div className="bg-slate-900/90 rounded-xl p-6 border border-slate-800 shadow-xl">
-                    <h3 className="text-base font-semibold text-white flex items-center gap-2 mb-1">
+                    <h2 className="text-base font-semibold text-white flex items-center gap-2 mb-1">
                         <Layers className="w-4 h-4 text-blue-400" />
                         Source System Coverage
-                    </h3>
+                    </h2>
                     <p className="text-xs text-slate-400 mb-4">
                         Entities contributed by each connected source table.
                     </p>
@@ -318,10 +320,10 @@ export default function Dashboard() {
                 {/* Run Duration Trend */}
                 <div className="bg-slate-900/90 rounded-xl p-6 border border-slate-800 shadow-xl">
                     <div className="flex items-center justify-between mb-1">
-                        <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                        <h2 className="text-base font-semibold text-white flex items-center gap-2">
                             <Clock className="w-4 h-4 text-purple-400" />
                             Pipeline Latency Trend
-                        </h3>
+                        </h2>
                         <button
                             onClick={() => navigate('/runs')}
                             className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
@@ -367,7 +369,7 @@ export default function Dashboard() {
                 <div className="bg-amber-950/30 border border-amber-800/60 rounded-xl p-4 shadow-lg space-y-2">
                     <div className="flex items-center gap-2">
                         <AlertTriangle className="w-5 h-5 text-amber-400" />
-                        <h3 className="font-semibold text-amber-300 text-sm">System Alerts ({alerts.length})</h3>
+                        <h2 className="font-semibold text-amber-300 text-sm">System Alerts ({alerts.length})</h2>
                     </div>
                     <ul className="space-y-1.5 pl-2">
                         {alerts.map((alert, i) => (

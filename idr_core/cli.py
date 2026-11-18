@@ -105,7 +105,13 @@ Examples:
     run_parser.add_argument(
         "--lens",
         default=None,
-        help="Optional named lens ID from idr_meta.lens_definition to materialize",
+        help="Optional named lens ID from idr_meta.lens_definition to materialize (or 'none' to skip lenses)",
+    )
+    run_parser.add_argument(
+        "--skip-lenses",
+        action="store_true",
+        default=False,
+        help="Run only the primary pipeline and skip all configured lenses",
     )
 
     # === idr config ===
@@ -954,6 +960,7 @@ def handle_run(args) -> int:
             max_moved_entities_pct=getattr(args, "max_moved_pct", None),
             max_cluster_delta_pct=getattr(args, "max_cluster_delta_pct", None),
             lens=getattr(args, "lens", None),
+            skip_lenses=getattr(args, "skip_lenses", False),
         )
         result = runner.run(config)
 

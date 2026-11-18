@@ -1059,6 +1059,85 @@ def test_incr_dry_run_clusters_delta(adapter):
     assert summary["edges_delta"] == -1
 
 
+def test_stabilize_resolved_ids_prevents_fallback_collision(adapter):
+    """
+    When prior membership has {crm:b -> crm:a, crm:c -> crm:a} and a new singleton
+    {crm:a} appears while {crm:b, crm:c} inherits 'crm:a', the fallback singleton
+    must not collide with 'crm:a'.
+    """
+    import logging
+
+    from idr_core.adapters.base import get_dialect_config
+    from idr_core.stages.base import StageContext
+    from idr_core.stages.graph import GraphStage
+
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id, updated_at, run_id)
+        VALUES
+            ('crm:b', 'crm:a', TIMESTAMP '2026-10-01', 'r1'),
+            ('crm:c', 'crm:a', TIMESTAMP '2026-10-01', 'r1')
+    """)
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_work.lp_labels AS
+        SELECT 'crm:a' AS entity_key, 'crm:a' AS label
+        UNION ALL SELECT 'crm:b', 'crm:b'
+        UNION ALL SELECT 'crm:c', 'crm:b'
+    """)
+    ctx = StageContext(
+        adapter=adapter,
+        run_id="r2",
+        dialect=get_dialect_config("duckdb"),
+        logger=logging.getLogger("test"),
+        warnings=[],
+    )
+    gs = GraphStage(ctx)
+    gs._stabilize_resolved_ids()
+
+    labels = {
+        r["entity_key"]: r["label"]
+        for r in adapter.query("SELECT entity_key, label FROM idr_work.lp_labels")
+    }
+    assert labels["crm:b"] == "crm:a"
+    assert labels["crm:c"] == "crm:a"
+    assert labels["crm:a"] != "crm:a"
+    assert labels["crm:a"].startswith("crm:a:split:")
+
+
+def test_dry_run_corroboration_excludes_same_identifier_type(adapter):
+    """
+    Corroborating-edge shadow attribution must not report the same identifier_type
+    as the removed edge when only a surviving same-type edge remains.
+    """
+    from idr_core.config import compute_dry_run_summary
+
+    adapter.execute("""
+        INSERT INTO idr_out.identity_edges_current
+            (left_entity_key, right_entity_key, identifier_type, identifier_value_norm, first_seen_ts, run_id)
+        VALUES
+            ('crm:1', 'crm:2', 'EMAIL', 'x@acmecorp.io', CURRENT_TIMESTAMP, 'r1')
+    """)
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_work.edges_new AS
+        SELECT 'crm:1' AS left_entity_key, 'crm:3' AS right_entity_key,
+               'EMAIL' AS identifier_type, 'y@acmecorp.io' AS identifier_value_norm
+    """)
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_out.dry_run_results AS
+        SELECT 'crm:1' AS entity_key, 'crm:1' AS current_resolved_id,
+               'crm:1' AS new_resolved_id, 'UNCHANGED' AS change_type, 'dry_1' AS run_id
+    """)
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_out.dry_run_summary AS
+        SELECT 'dry_1' AS run_id, 0 AS new_entities, 0 AS moved_entities,
+               1 AS unchanged_entities, 1 AS total_entities, CURRENT_TIMESTAMP AS analyzed_at
+    """)
+
+    summary = compute_dry_run_summary(adapter, "dry_1", "FULL", edges_created=1, clusters_impacted=1)
+    assert summary["shadow_preserved_entities"] == 0
+    assert summary["corroborating_identifier_types"] == []
+
+
+
 
 
 

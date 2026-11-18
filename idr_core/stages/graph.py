@@ -546,7 +546,8 @@ class GraphStage(BaseStage):
             if prev_cnt == 0:
                 return
 
-            self.adapter.execute("""
+            md5_expr = self._dialect["md5"]("l.label")
+            self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized AS
                 WITH prev_cluster_stats AS (
                     SELECT
@@ -600,13 +601,24 @@ class GraphStage(BaseStage):
                         ) AS win_rn
                     FROM claimed_prev
                     WHERE prev_claim_rn = 1
+                ),
+                claimed_ids AS (
+                    SELECT DISTINCT winning_resolved_id AS claimed_id
+                    FROM winning_cluster
+                    WHERE win_rn = 1
                 )
                 SELECT
                     l.entity_key,
-                    COALESCE(w.winning_resolved_id, l.label) AS label
+                    CASE
+                        WHEN w.winning_resolved_id IS NOT NULL THEN w.winning_resolved_id
+                        WHEN ci.claimed_id IS NOT NULL THEN CONCAT(l.label, ':split:', SUBSTR({md5_expr}, 1, 8))
+                        ELSE l.label
+                    END AS label
                 FROM idr_work.lp_labels l
                 LEFT JOIN winning_cluster w
                   ON l.label = w.raw_label AND w.win_rn = 1
+                LEFT JOIN claimed_ids ci
+                  ON w.winning_resolved_id IS NULL AND l.label = ci.claimed_id
             """)
             self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_stabilized")
         except Exception as e:

@@ -67,6 +67,7 @@ class RunConfig:
     max_moved_entities_pct: Optional[float] = None
     max_cluster_delta_pct: Optional[float] = None
     lens: Optional[str] = None
+    skip_lenses: bool = False
 
     def __post_init__(self):
         mode = str(self.run_mode or "").upper()
@@ -385,6 +386,9 @@ class IDRRunner:
         self, config: RunConfig, graph: GraphStage, output: OutputStage
     ) -> None:
         """Resolve and materialize any active multi-lens definitions from idr_meta.lens_definition."""
+        target_lens = (config.lens or "").strip()
+        if config.skip_lenses or target_lens.lower() in ("__none__", "none"):
+            return
         if not self.adapter.table_exists("idr_meta.lens_definition"):
             return
         rows = self.adapter.query("""
@@ -395,7 +399,6 @@ class IDRRunner:
         """)
         if not rows:
             return
-        target_lens = (config.lens or "").strip()
         selected_rows = [
             row for row in rows
             if not target_lens or str(row["lens_id"]) == target_lens

@@ -130,7 +130,12 @@ export default function AICopilotDrawer({
     if (!open) return null
 
     return (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm">
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="IDR AI Copilot"
+            className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm"
+        >
             <div className="w-full max-w-lg bg-slate-900 border-l border-slate-800 h-full flex flex-col shadow-2xl">
                 {/* Header */}
                 <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
@@ -168,6 +173,7 @@ export default function AICopilotDrawer({
                     <button
                         type="button"
                         onClick={onClose}
+                        aria-label="Close AI Copilot"
                         className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
                     >
                         <X className="w-5 h-5" />
@@ -307,7 +313,7 @@ export default function AICopilotDrawer({
                                             type="button"
                                             disabled={executingActionIdx !== null}
                                             onClick={() => executeProposedRun(idx, m.proposed_action!, false)}
-                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-semibold text-white"
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-xs font-semibold text-white"
                                         >
                                             {executingActionIdx === idx ? (
                                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -358,7 +364,7 @@ export default function AICopilotDrawer({
                     <button
                         type="submit"
                         disabled={loading || !input.trim()}
-                        className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white"
+                        className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white"
                     >
                         <Send className="w-4 h-4" />
                     </button>

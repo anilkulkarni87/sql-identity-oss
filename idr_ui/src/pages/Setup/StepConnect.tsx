@@ -218,7 +218,7 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                                                     type="button"
                                                     disabled={loading}
                                                     onClick={() => handleSelectDiscovered(conn, true)}
-                                                    className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-medium rounded-md shadow-sm transition-all flex items-center gap-1.5"
+                                                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-md shadow-sm transition-all flex items-center gap-1.5"
                                                 >
                                                     {isConnectingThis ? (
                                                         <>
@@ -663,7 +663,7 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold text-sm shadow-lg shadow-blue-950/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm shadow-lg shadow-blue-950/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {loading ? (
                             <>

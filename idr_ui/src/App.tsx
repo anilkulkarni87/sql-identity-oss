@@ -103,6 +103,7 @@ export default function App() {
                             onClick={() => setCollapsed((c) => !c)}
                             className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                         >
                             {collapsed ? (
                                 <PanelLeftOpen className="w-4 h-4" />
@@ -113,6 +114,7 @@ export default function App() {
                         <button
                             onClick={() => setMobileOpen(false)}
                             className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white"
+                            aria-label="Close navigation"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -123,7 +125,7 @@ export default function App() {
                         {(['Observe', 'Configure'] as const).map((section) => (
                             <div key={section} className="space-y-1">
                                 {!collapsed && (
-                                    <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                                    <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                                         {section}
                                     </div>
                                 )}

@@ -3,13 +3,25 @@
 @tailwind utilities;
 
 :root {
+  --bg-canvas: #020617;
+  --bg-surface: #0f172a;
+  --bg-elevated: #1e293b;
+  --border-subtle: #1e293b;
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+  --accent-primary: #2563eb;
+  --accent-primary-hover: #1d4ed8;
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-error: #f43f5e;
+
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #111827;
+  color: var(--text-primary);
+  background-color: var(--bg-canvas);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -29,14 +41,14 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #1f2937;
+  background: var(--bg-surface);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4b5563;
+  background: #334155;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+  background: #475569;
 }

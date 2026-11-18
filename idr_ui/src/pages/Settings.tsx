@@ -99,7 +99,7 @@ export default function Settings() {
                         </button>
                         <button
                             onClick={() => navigate('/setup?step=connect')}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
                         >
                             <Wand2 className="w-3.5 h-3.5" />
                             Manage / Switch Connection
@@ -235,7 +235,7 @@ export default function Settings() {
                         </p>
                         <button
                             onClick={() => navigate('/setup')}
-                            className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-md transition-all inline-flex items-center gap-1.5"
+                            className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-md transition-all inline-flex items-center gap-1.5"
                         >
                             <Wand2 className="w-3.5 h-3.5" />
                             Start Setup Wizard
@@ -353,7 +353,7 @@ export default function Settings() {
 
                     <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
-                            <label className="text-gray-400 font-medium">Model</label>
+                            <label htmlFor="ai-model-input" className="text-gray-400 font-medium">Model</label>
                             {aiProvider === 'ollama' && (
                                 <button
                                     type="button"
@@ -387,6 +387,7 @@ export default function Settings() {
                             />
                         ) : (
                             <input
+                                id="ai-model-input"
                                 type="text"
                                 value={aiModel}
                                 onChange={(e) => setAiModel(e.target.value)}
@@ -398,8 +399,9 @@ export default function Settings() {
                     </div>
 
                     <div className="space-y-1.5">
-                        <label className="text-gray-400 font-medium block">Base URL</label>
+                        <label htmlFor="ai-base-url-input" className="text-gray-400 font-medium block">Base URL</label>
                         <input
+                            id="ai-base-url-input"
                             type="text"
                             value={aiBaseUrl}
                             onChange={(e) => setAiBaseUrl(e.target.value)}
@@ -410,10 +412,11 @@ export default function Settings() {
                     </div>
 
                     <div className="space-y-1.5">
-                        <label className="text-gray-400 font-medium block">
+                        <label htmlFor="ai-api-key-input" className="text-gray-400 font-medium block">
                             API Key {aiProvider === 'ollama' && <span className="text-gray-500">(optional for Ollama)</span>}
                         </label>
                         <input
+                            id="ai-api-key-input"
                             type="password"
                             value={aiApiKey}
                             onChange={(e) => setAiApiKey(e.target.value)}

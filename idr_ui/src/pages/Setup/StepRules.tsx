@@ -427,6 +427,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                     type="button"
                                     onClick={() => moveRule(idx, 'up')}
                                     disabled={idx === 0}
+                                    aria-label={`Move rule ${rule.priority} up`}
                                     className="p-1 hover:bg-slate-800 rounded text-slate-400 disabled:opacity-30"
                                 >
                                     <ArrowUp className="w-4 h-4" />
@@ -436,6 +437,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                     type="button"
                                     onClick={() => moveRule(idx, 'down')}
                                     disabled={idx === rules.length - 1}
+                                    aria-label={`Move rule ${rule.priority} down`}
                                     className="p-1 hover:bg-slate-800 rounded text-slate-400 disabled:opacity-30"
                                 >
                                     <ArrowDown className="w-4 h-4" />
@@ -588,6 +590,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                             <button
                                 type="button"
                                 onClick={() => deleteRule(idx)}
+                                aria-label={`Delete rule ${rule.priority}`}
                                 className="p-2 h-fit hover:bg-rose-950/40 text-slate-500 hover:text-rose-400 rounded-lg transition-colors"
                             >
                                 <Trash2 className="w-4 h-4" />
@@ -708,6 +711,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                     <button
                                         type="button"
                                         onClick={() => removeExclusion(i)}
+                                        aria-label={`Remove exclusion ${ex.value}`}
                                         className="text-slate-500 hover:text-rose-400 ml-0.5"
                                     >
                                         ×
@@ -788,6 +792,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                     <button
                                         type="button"
                                         onClick={() => removeOverride(i)}
+                                        aria-label={`Remove override ${ov.entity_key_a || i + 1}`}
                                         className="text-slate-500 hover:text-rose-400 ml-0.5"
                                     >
                                         ×
@@ -989,7 +994,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                         <button
                             type="button"
                             onClick={addLens}
-                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium whitespace-nowrap"
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium whitespace-nowrap"
                         >
                             + Add Lens
                         </button>
@@ -1043,7 +1048,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                 <button
                     type="button"
                     onClick={handleNext}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition-colors"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors"
                 >
                     Continue to Survivorship →
                 </button>

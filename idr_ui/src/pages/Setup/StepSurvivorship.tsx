@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Layers, ArrowUp, ArrowDown, Zap, Clock, Hash } from "lucide-react";
+import { Layers, ArrowUp, ArrowDown, Zap, Clock, Hash, Search } from "lucide-react";
 import { IDRConfig, SurvivorshipRule, TableColumn } from '../../types';
 import { CustomSelect } from '../../components/CustomSelect';
 import { api } from '../../api/client';
@@ -28,6 +28,8 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
     const [sourcesByAttr, setSourcesByAttr] = useState<Record<string, string[]>>({});
     const [typeByAttr, setTypeByAttr] = useState<Record<string, string>>({});
     const [rules, setRules] = useState<Record<string, SurvivorshipRule>>({});
+    const [attrSearch, setAttrSearch] = useState('');
+    const [conflictsOnly, setConflictsOnly] = useState(false);
 
     const latestConfigRef = useRef(config);
     latestConfigRef.current = config;
@@ -238,6 +240,31 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                 )}
             </div>
 
+            {attributes.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/50 border border-slate-800 rounded-xl px-3.5 py-2.5">
+                    <div className="relative flex-1 max-w-sm">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                            type="text"
+                            value={attrSearch}
+                            onChange={(e) => setAttrSearch(e.target.value)}
+                            placeholder="Filter attributes..."
+                            aria-label="Filter survivorship attributes"
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                        />
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            checked={conflictsOnly}
+                            onChange={(e) => setConflictsOnly(e.target.checked)}
+                            className="rounded border-slate-600 bg-slate-950 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>Multi-source conflicts only</span>
+                    </label>
+                </div>
+            )}
+
             <div className="space-y-3">
                 {attributes.length === 0 && (
                     <div className="text-center p-10 text-xs text-slate-500 border border-dashed border-slate-700 rounded-xl">
@@ -245,7 +272,17 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                     </div>
                 )}
 
-                {attributes.map(attr => {
+                {attributes
+                    .filter(attr => {
+                        if (attrSearch.trim() && !attr.toLowerCase().includes(attrSearch.trim().toLowerCase())) {
+                            return false;
+                        }
+                        if (conflictsOnly && (sourcesByAttr[attr]?.length || 0) <= 1) {
+                            return false;
+                        }
+                        return true;
+                    })
+                    .map(attr => {
                     const rule = rules[attr] || {};
                     const currentStrategy = rule.strategy || 'RECENCY';
                     const validSources = sourcesByAttr[attr] || [];
@@ -288,6 +325,7 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                                     value={currentStrategy}
                                     onChange={(val) => updateRule(attr, 'strategy', val)}
                                     options={applicableStrategies.map(s => ({ value: s.id, label: s.label }))}
+                                    ariaLabel={`Survivorship strategy for ${attr}`}
                                     buttonClassName="text-xs py-1.5 min-w-[240px] bg-slate-950"
                                 />
                             </div>
@@ -333,8 +371,8 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                                 </div>
                             )}
 
-                            {currentStrategy === 'RECENCY' && (
-                                <div className="text-xs text-slate-500">
+                            {currentStrategy === 'RECENCY' && validSources.length > 1 && (
+                                <div className="text-xs text-slate-400">
                                     Resolves conflicting values using each source table&apos;s configured <strong>Watermark Column</strong>.
                                 </div>
                             )}
@@ -356,7 +394,7 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                 <button
                     type="button"
                     onClick={handleNext}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition-colors"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors"
                 >
                     Continue to Run &amp; Verify →
                 </button>

@@ -364,6 +364,7 @@ export const api = {
         max_moved_entities_pct?: number
         max_cluster_delta_pct?: number
         lens?: string
+        skip_lenses?: boolean
         config?: unknown
     }) => fetchJson<Record<string, unknown>>('/setup/run', {
         method: 'POST',
