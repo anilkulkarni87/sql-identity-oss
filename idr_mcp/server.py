@@ -1281,6 +1281,39 @@ def diff_lenses_summary(lens_a: str, lens_b: str, limit: int = 10) -> Dict[str, 
         return {"error": str(e)}
 
 
+@mcp.tool()
+def validate_unified_profile(resolved_id: str = None) -> Dict[str, Any]:
+    """
+    Query a real unified profile cluster (or sample a multi-entity cluster) and
+    cross-check its linked entity keys and identifiers directly against raw source tables.
+    """
+    from idr_core.ai_assistant import get_configured_pii_keys
+    from idr_core.ai_assistant import validate_unified_profile as _validate
+    from idr_core.llm import mask_pii_payload
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    res = _validate(adapter, resolved_id=resolved_id)
+    if should_mask_pii():
+        res = mask_pii_payload(res, extra_sensitive_keys=get_configured_pii_keys(adapter))
+    return res
+
+
+@mcp.tool()
+def generate_profile_verification_sql(resolved_id: str = None) -> Dict[str, Any]:
+    """
+    Generate deterministic warehouse SQL queries for a resolved_id (or sampled multi-entity cluster)
+    to inspect cluster merge edges and verify raw source rows and identifiers.
+    """
+    from idr_core.ai_assistant import generate_profile_verification_sql as _gen_sql
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    return _gen_sql(adapter, resolved_id=resolved_id)
+
+
 # --- MCP Resources & Prompts (Self-Documenting Specs for Agents) ---
 
 

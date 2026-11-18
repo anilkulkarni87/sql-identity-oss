@@ -12,10 +12,27 @@ Provides:
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
+
+
+def _sanitize_json(obj: Any) -> Any:
+    """Recursively replace NaN/Inf floats (e.g. from BigQuery/pandas) with None for strict JSON."""
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json(v) for v in obj]
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if hasattr(obj, "isoformat"):
+        try:
+            return obj.isoformat()
+        except Exception:
+            return str(obj)
+    return obj
 
 from .llm import LLMClient, mask_pii_payload
 
@@ -733,8 +750,303 @@ def draft_lens_from_goal(
     }
 
 
+def _resolve_target_cluster_id(adapter: Any, resolved_id: Optional[str] = None) -> Optional[str]:
+    """Return the given resolved_id, or sample a multi-entity cluster if available."""
+    target_rid = (resolved_id or "").strip()
+    if target_rid:
+        return target_rid
+    rows = adapter.query(
+        """
+        SELECT resolved_id, cluster_size, confidence_score
+        FROM idr_out.identity_clusters_current
+        WHERE cluster_size BETWEEN 2 AND 10
+        ORDER BY cluster_size DESC, resolved_id ASC
+        LIMIT 1
+        """
+    )
+    if not rows:
+        rows = adapter.query(
+            """
+            SELECT resolved_id, cluster_size, confidence_score
+            FROM idr_out.identity_clusters_current
+            WHERE cluster_size > 1
+            ORDER BY cluster_size ASC, resolved_id ASC
+            LIMIT 1
+            """
+        )
+    if not rows:
+        rows = adapter.query(
+            "SELECT resolved_id, cluster_size, confidence_score FROM idr_out.identity_clusters_current LIMIT 1"
+        )
+    return str(rows[0]["resolved_id"]) if rows else None
+
+
+def _sql_quote(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def generate_profile_verification_sql(
+    adapter: Any,
+    resolved_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build deterministic warehouse SQL queries to verify a unified profile against source tables."""
+    from .config import sql_to_config
+
+    target_rid = _resolve_target_cluster_id(adapter, resolved_id)
+    if not target_rid:
+        return {
+            "status": "NO_CLUSTERS",
+            "summary": "No clusters found in idr_out.identity_clusters_current.",
+            "queries": [],
+        }
+
+    members = adapter.query(
+        "SELECT entity_key FROM idr_out.identity_resolved_membership_current WHERE resolved_id = ? ORDER BY entity_key ASC LIMIT 50",
+        params=[target_rid],
+    )
+    edges = adapter.query(
+        """
+        SELECT e.left_entity_key, e.right_entity_key, e.identifier_type, e.identifier_value_norm
+        FROM idr_out.identity_edges_current e
+        JOIN idr_out.identity_resolved_membership_current m ON e.left_entity_key = m.entity_key
+        WHERE m.resolved_id = ?
+        LIMIT 50
+        """,
+        params=[target_rid],
+    )
+
+    dialect = str(getattr(adapter, "dialect", "") or "").lower()
+    cast_type = "STRING" if dialect == "bigquery" else "VARCHAR"
+    rid_lit = _sql_quote(target_rid)
+
+    queries: List[Dict[str, str]] = [
+        {
+            "title": "Cluster membership & merge edges",
+            "sql": (
+                "SELECT m.resolved_id, m.entity_key, e.identifier_type, e.identifier_value_norm\n"
+                "FROM idr_out.identity_resolved_membership_current m\n"
+                "LEFT JOIN idr_out.identity_edges_current e\n"
+                "  ON m.entity_key IN (e.left_entity_key, e.right_entity_key)\n"
+                f"WHERE m.resolved_id = {rid_lit}\n"
+                "ORDER BY m.entity_key, e.identifier_type;"
+            ),
+        }
+    ]
+
+    cfg = sql_to_config(adapter)
+    src_by_id = {s["id"]: s for s in (cfg.get("sources") or []) if s.get("id")}
+    keys_by_source: Dict[str, List[str]] = {}
+    for m in members:
+        ek = str(m["entity_key"])
+        if ":" not in ek:
+            continue
+        sid, raw_key = ek.split(":", 1)
+        keys_by_source.setdefault(sid, []).append(raw_key)
+
+    union_branches: List[str] = []
+    for sid, raw_keys in keys_by_source.items():
+        src = src_by_id.get(sid)
+        if not src:
+            continue
+        fqn = src["table"]
+        key_expr = src["entity_key"]
+        sid_prefix = _sql_quote(f"{sid}:")
+        sid_lit = _sql_quote(sid)
+        for ident in src.get("identifiers") or []:
+            id_type = ident.get("type")
+            id_expr = ident.get("expr") or ident.get("column")
+            if not id_type or not id_expr:
+                continue
+            union_branches.append(
+                f"SELECT\n"
+                f"  {sid_lit} AS source_id,\n"
+                f"  CONCAT({sid_prefix}, CAST(({key_expr}) AS {cast_type})) AS entity_key,\n"
+                f"  {_sql_quote(id_type)} AS identifier_type,\n"
+                f"  CAST(({id_expr}) AS {cast_type}) AS identifier_value\n"
+                f"FROM {fqn}\n"
+                f"WHERE CONCAT({sid_prefix}, CAST(({key_expr}) AS {cast_type})) IN (SELECT entity_key FROM members)"
+            )
+
+        id_cols = [
+            i.get("expr") or i.get("column")
+            for i in (src.get("identifiers") or [])
+            if i.get("expr") or i.get("column")
+        ]
+        select_cols = ", ".join(dict.fromkeys(id_cols))
+        proj = f", {select_cols}" if select_cols else ""
+        in_list = ", ".join(_sql_quote(k) for k in raw_keys[:25])
+        queries.append(
+            {
+                "title": f"Source verification: {sid} ({fqn})",
+                "sql": (
+                    f"SELECT CAST(({key_expr}) AS {cast_type}) AS entity_id{proj}\n"
+                    f"FROM {fqn}\n"
+                    f"WHERE CAST(({key_expr}) AS {cast_type}) IN ({in_list});"
+                ),
+            }
+        )
+
+    if union_branches:
+        queries.insert(
+            1,
+            {
+                "title": "All identifier values across all sources (UNION ALL)",
+                "sql": (
+                    "WITH members AS (\n"
+                    "  SELECT entity_key\n"
+                    "  FROM idr_out.identity_resolved_membership_current\n"
+                    f"  WHERE resolved_id = {rid_lit}\n"
+                    ")\n"
+                    + "\nUNION ALL\n".join(union_branches)
+                    + "\nORDER BY identifier_type, source_id, entity_key;"
+                ),
+            },
+        )
+
+    try:
+        if adapter.table_exists("idr_out.golden_profiles"):
+            queries.append(
+                {
+                    "title": "Unified golden profile",
+                    "sql": f"SELECT * FROM idr_out.golden_profiles WHERE resolved_id = {rid_lit};",
+                }
+            )
+    except Exception:
+        pass
+
+    merge_types = sorted({str(e["identifier_type"]) for e in edges if e.get("identifier_type")})
+    return _sanitize_json(
+        {
+            "status": "OK" if members else "NOT_FOUND",
+            "resolved_id": target_rid,
+            "dialect": dialect or "sql",
+            "member_count": len(members),
+            "edge_count": len(edges),
+            "merge_identifier_types": merge_types,
+            "sources_matched": list(keys_by_source.keys()),
+            "queries": queries,
+        }
+    )
+
+
+def validate_unified_profile(
+    adapter: Any,
+    resolved_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Sample a real multi-entity unified profile and cross-check its edges against raw source tables."""
+    from .config import sql_to_config
+
+    target_rid = _resolve_target_cluster_id(adapter, resolved_id)
+    if not target_rid:
+        return {"status": "NO_CLUSTERS", "summary": "No clusters found in idr_out.identity_clusters_current."}
+
+    members = adapter.query(
+        "SELECT entity_key FROM idr_out.identity_resolved_membership_current WHERE resolved_id = ? ORDER BY entity_key ASC LIMIT 15",
+        params=[target_rid],
+    )
+    edges = adapter.query(
+        """
+        SELECT e.left_entity_key, e.right_entity_key, e.identifier_type, e.identifier_value_norm
+        FROM idr_out.identity_edges_current e
+        JOIN idr_out.identity_resolved_membership_current m ON e.left_entity_key = m.entity_key
+        WHERE m.resolved_id = ?
+        LIMIT 25
+        """,
+        params=[target_rid],
+    )
+
+    golden_profile: Optional[Dict[str, Any]] = None
+    try:
+        if adapter.table_exists("idr_out.golden_profiles"):
+            gp_rows = adapter.query(
+                "SELECT * FROM idr_out.golden_profiles WHERE resolved_id = ? LIMIT 1",
+                params=[target_rid],
+            )
+            if gp_rows:
+                golden_profile = gp_rows[0]
+    except Exception:
+        golden_profile = None
+
+    # Cross-check member keys against actual configured source tables
+    cfg = sql_to_config(adapter)
+    src_by_id = {s["id"]: s for s in (cfg.get("sources") or []) if s.get("id")}
+    source_checks: List[Dict[str, Any]] = []
+    source_rows_found = 0
+    for m in members[:6]:
+        ek = str(m["entity_key"])
+        if ":" not in ek:
+            continue
+        sid, raw_key = ek.split(":", 1)
+        src = src_by_id.get(sid)
+        if not src:
+            continue
+        fqn = src["table"]
+        key_expr = src["entity_key"]
+        id_cols = [i.get("expr") or i.get("column") for i in (src.get("identifiers") or []) if i.get("expr") or i.get("column")]
+        select_cols = ", ".join(dict.fromkeys(id_cols[:4]))
+        proj = f", {select_cols}" if select_cols else ""
+        try:
+            srows = adapter.query(
+                f"SELECT CAST(({key_expr}) AS VARCHAR) AS src_key{proj} FROM {fqn} WHERE CAST(({key_expr}) AS VARCHAR) = ? LIMIT 1",
+                params=[raw_key],
+            )
+        except Exception:
+            try:
+                srows = adapter.query(
+                    f"SELECT CAST(({key_expr}) AS STRING) AS src_key{proj} FROM {fqn} WHERE CAST(({key_expr}) AS STRING) = ? LIMIT 1",
+                    params=[raw_key],
+                )
+            except Exception:
+                srows = []
+        found = bool(srows)
+        if found:
+            source_rows_found += 1
+        source_checks.append(
+            {
+                "entity_key": ek,
+                "source_table": fqn,
+                "found_in_source": found,
+                "source_identifiers": srows[0] if srows else None,
+            }
+        )
+
+    status = "VERIFIED" if members and source_rows_found == len(source_checks) and len(source_checks) > 0 else "PARTIAL"
+    return _sanitize_json(
+        {
+            "status": status,
+            "resolved_id": target_rid,
+            "member_count": len(members),
+            "edge_count": len(edges),
+            "has_golden_profile": golden_profile is not None,
+            "source_rows_checked": len(source_checks),
+            "source_rows_matched": source_rows_found,
+            "edges": edges[:10],
+            "source_checks": source_checks,
+            "golden_profile": golden_profile,
+        }
+    )
+
+
+def _extract_explicit_resolved_id(message: str, candidate: Any = None) -> Optional[str]:
+    """Return a clean resolved_id if explicitly provided, ignoring hallucinated English phrases."""
+    if isinstance(candidate, str):
+        c = candidate.strip().strip("`'\"")
+        if c and " " not in c and c.lower() not in {"null", "none", "unified_profile", "profile"}:
+            return c
+    m = re.search(r"\b([A-Za-z0-9_]+:[A-Za-z0-9_.-]+)\b", message or "")
+    return m.group(1) if m else None
+
+
 def _fallback_classify_copilot_intent(message: str) -> Dict[str, Any]:
     msg = (message or "").lower()
+    wants_sql = bool(re.search(r"\b(sql|query|queries)\b", msg))
+    about_profile = any(k in msg for k in ("validate", "verify", "unified profile", "resolved", "merge", "source data", "source table"))
+    if wants_sql and about_profile:
+        return {"intent": "profile_verification_sql", "resolved_id": _extract_explicit_resolved_id(message)}
+    if wants_sql or any(k in msg for k in ("how to ", "how do i ")):
+        return {"intent": "general_qa"}
+    if any(k in msg for k in ("validate", "verify", "check profile", "unified profile", "source data")):
+        return {"intent": "validate_profile", "resolved_id": _extract_explicit_resolved_id(message)}
     if any(k in msg for k in ("anomal", "drift", "toxic", "hub", "skipped", "why slow", "regression")):
         return {"intent": "diagnose_anomalies"}
     if any(k in msg for k in ("draft lens", "create lens", "new lens", "author lens")):
@@ -763,13 +1075,15 @@ def copilot_chat(
     router_prompt = (
         "Classify the user's SQL Identity Resolution request into JSON.\n"
         "Allowed intents:\n"
-        '1. {"intent": "diagnose_anomalies"}\n'
-        '2. {"intent": "draft_lens", "goal": string}\n'
-        '3. {"intent": "propose_run", "mode": "INCR"|"FULL", "dry_run": true|false, "lens": string|null}\n'
-        '4. {"intent": "get_runtime_trend"}\n'
-        '5. {"intent": "diff_lenses", "lens_a": string|null, "lens_b": string|null}\n'
-        '6. {"intent": "run_doctor"}\n'
-        '7. {"intent": "general_qa"}\n'
+        '1. {"intent": "validate_profile", "resolved_id": string|null}  -- Run a live validation check on a profile. Set resolved_id ONLY if an explicit ID (like src:123) is given; otherwise null.\n'
+        '2. {"intent": "profile_verification_sql", "resolved_id": string|null}  -- User asks for SQL queries to verify/validate a unified profile or resolved_id against source tables.\n'
+        '3. {"intent": "diagnose_anomalies"}\n'
+        '4. {"intent": "draft_lens", "goal": string}\n'
+        '5. {"intent": "propose_run", "mode": "INCR"|"FULL", "dry_run": true|false, "lens": string|null}\n'
+        '6. {"intent": "get_runtime_trend"}\n'
+        '7. {"intent": "diff_lenses", "lens_a": string|null, "lens_b": string|null}\n'
+        '8. {"intent": "run_doctor"}\n'
+        '9. {"intent": "general_qa"}\n'
         f"User message: {message}"
     )
     parsed_intent: Dict[str, Any] = {}
@@ -792,6 +1106,61 @@ def copilot_chat(
         parsed_intent = _fallback_classify_copilot_intent(message)
 
     intent = str(parsed_intent.get("intent") or "general_qa")
+
+    if intent == "validate_profile" and re.search(r"\b(sql|query|queries)\b", message, re.I):
+        intent = "profile_verification_sql"
+
+    if intent == "profile_verification_sql":
+        rid = _extract_explicit_resolved_id(message, parsed_intent.get("resolved_id"))
+        res = generate_profile_verification_sql(adapter, resolved_id=rid)
+        if res.get("status") == "NO_CLUSTERS":
+            ans = res.get("summary", "No clusters available to generate verification SQL.")
+        elif res.get("status") == "NOT_FOUND":
+            ans = f"No membership rows found for `{res['resolved_id']}`. Check that the `resolved_id` exists in `idr_out.identity_resolved_membership_current`."
+        else:
+            merge_via = ", ".join(res.get("merge_identifier_types") or []) or "N/A"
+            blocks = [f"**{q['title']}**\n```sql\n{q['sql']}\n```" for q in (res.get("queries") or [])]
+            ans = (
+                f"Verification SQL for `{res['resolved_id']}` "
+                f"({res['member_count']} linked entities, {res['edge_count']} edges; merged via `{merge_via}`):\n\n"
+                + "\n\n".join(blocks)
+            )
+        return _sanitize_json(
+            {
+                "intent": "profile_verification_sql",
+                "answer": ans,
+                "proposed_action": None,
+                "metrics": res,
+                "pii_masked": client.config.effective_mask_pii,
+                "provider": client.config.provider,
+                "model": client.config.resolved_model(),
+            }
+        )
+
+    if intent == "validate_profile":
+        rid = _extract_explicit_resolved_id(message, parsed_intent.get("resolved_id"))
+        res = validate_unified_profile(adapter, resolved_id=rid)
+        safe_res = _apply_pii_mask(adapter, res, client)
+        if safe_res.get("status") == "NO_CLUSTERS":
+            ans = safe_res.get("summary", "No clusters available to validate.")
+        else:
+            ans = (
+                f"**{safe_res['status']}** unified profile `{safe_res['resolved_id']}`: "
+                f"{safe_res['member_count']} linked entities, {safe_res['edge_count']} edges, "
+                f"{safe_res['source_rows_matched']}/{safe_res['source_rows_checked']} source rows verified in warehouse tables"
+                + (" (golden profile present)." if safe_res.get("has_golden_profile") else " (no golden profile row).")
+            )
+        return _sanitize_json(
+            {
+                "intent": "validate_profile",
+                "answer": ans,
+                "proposed_action": None,
+                "metrics": safe_res,
+                "pii_masked": client.config.effective_mask_pii,
+                "provider": client.config.provider,
+                "model": client.config.resolved_model(),
+            }
+        )
 
     if intent == "diagnose_anomalies":
         report = diagnose_run_anomalies(adapter)

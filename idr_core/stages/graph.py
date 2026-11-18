@@ -80,21 +80,23 @@ class GraphStage(BaseStage):
                     WHERE (left_entity_key = '{a}' AND right_entity_key = '{b}')
                        OR (left_entity_key = '{b}' AND right_entity_key = '{a}')
                 """)
-                # Detach high_key from any anchor group that also contains low_key
+                # Detach high_key from the true anchor of any shared identifier group containing both low_key and high_key
                 low_key = min(a, b)
                 self.adapter.execute(f"""
                     DELETE FROM idr_work.edges_new
                     WHERE left_entity_key = '{high_key}'
                       AND right_entity_key IN (
-                          SELECT right_entity_key FROM idr_work.identifiers_all i
+                          SELECT MIN(i.entity_key)
+                          FROM idr_work.identifiers_all i
                           JOIN (
-                              SELECT identifier_type, identifier_value_norm, MIN(entity_key) AS right_entity_key
+                              SELECT identifier_type, identifier_value_norm
                               FROM idr_work.identifiers_all
                               WHERE entity_key IN ('{low_key}', '{high_key}')
                               GROUP BY identifier_type, identifier_value_norm
                               HAVING COUNT(DISTINCT entity_key) = 2
                           ) shared ON i.identifier_type = shared.identifier_type
                                   AND i.identifier_value_norm = shared.identifier_value_norm
+                          GROUP BY i.identifier_type, i.identifier_value_norm
                       )
                 """)
 
@@ -426,6 +428,11 @@ class GraphStage(BaseStage):
             )
         """)
 
+        # Post-propagation multi-hop DO_NOT_LINK conflict resolution:
+        # If a blocked pair (a, b) still shares a label via a multi-identifier transitive path,
+        # sever edges incident to high_key = max(a, b) and re-converge so DO_NOT_LINK holds.
+        iterations += self._resolve_transitive_do_not_link_conflicts(max_iters)
+
         # Preserve existing cluster resolved_ids across runs (Largest cluster wins on merge)
         self._stabilize_resolved_ids()
 
@@ -433,6 +440,93 @@ class GraphStage(BaseStage):
         clusters = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
 
         return iterations, clusters or 0
+
+    def _resolve_transitive_do_not_link_conflicts(self, max_iters: int) -> int:
+        """Sever multi-hop transitive bridges for any DO_NOT_LINK pair sharing a converged label."""
+        try:
+            if not self.adapter.table_exists("idr_meta.identity_override"):
+                return 0
+            conflicts = self.adapter.query("""
+                SELECT o.entity_key_a, o.entity_key_b
+                FROM idr_meta.identity_override o
+                JOIN idr_work.lp_labels la ON la.entity_key = o.entity_key_a
+                JOIN idr_work.lp_labels lb ON lb.entity_key = o.entity_key_b
+                WHERE o.is_active = TRUE
+                  AND UPPER(o.override_type) = 'DO_NOT_LINK'
+                  AND la.label = lb.label
+            """)
+            if not conflicts:
+                return 0
+
+            for row in conflicts:
+                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
+                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
+                high_key = max(a, b)
+                self.adapter.execute(f"""
+                    DELETE FROM idr_work.lp_edges
+                    WHERE src = '{high_key}' OR dst = '{high_key}'
+                """)
+                if self.adapter.table_exists("idr_work.edges_new"):
+                    self.adapter.execute(f"""
+                        DELETE FROM idr_work.edges_new
+                        WHERE left_entity_key = '{high_key}' OR right_entity_key = '{high_key}'
+                    """)
+
+            # Re-initialize and re-converge on remaining lp_edges
+            edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.lp_edges") or 0
+            extra_iters = 0
+            if edge_cnt > 0:
+                self.adapter.execute("""
+                    CREATE OR REPLACE TABLE idr_work.lp_labels AS
+                    SELECT DISTINCT src AS entity_key, src AS label
+                    FROM idr_work.lp_edges
+                """)
+                for _ in range(max_iters):
+                    extra_iters += 1
+                    self.adapter.execute("""
+                        CREATE OR REPLACE TABLE idr_work.lp_labels_new AS
+                        WITH candidate_labels AS (
+                            SELECT l.entity_key, l.label AS candidate_label
+                            FROM idr_work.lp_labels l
+                            UNION ALL
+                            SELECT e.src AS entity_key, l2.label AS candidate_label
+                            FROM idr_work.lp_edges e
+                            JOIN idr_work.lp_labels l2 ON e.dst = l2.entity_key
+                        )
+                        SELECT entity_key, MIN(candidate_label) AS label
+                        FROM candidate_labels
+                        GROUP BY entity_key
+                    """)
+                    changes = self.adapter.query_one("""
+                        SELECT COUNT(*) FROM idr_work.lp_labels prev
+                        JOIN idr_work.lp_labels_new curr ON prev.entity_key = curr.entity_key
+                        WHERE prev.label != curr.label
+                    """) or 0
+                    self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_new")
+                    if changes == 0:
+                        break
+            else:
+                str_type = self._dialect["string_type"]
+                self.adapter.execute(f"""
+                    CREATE OR REPLACE TABLE idr_work.lp_labels (entity_key {str_type}, label {str_type})
+                """)
+
+            self.adapter.execute(f"""
+                INSERT INTO idr_work.lp_labels (entity_key, label)
+                SELECT ed.entity_key, ed.entity_key AS label
+                FROM (
+                    SELECT DISTINCT entity_key
+                    FROM idr_work.entities_delta
+                    WHERE run_id = '{self.run_id}'
+                ) ed
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM idr_work.lp_labels l WHERE l.entity_key = ed.entity_key
+                )
+            """)
+            return extra_iters
+        except Exception as e:
+            self.logger.warning(f"Failed to resolve transitive DO_NOT_LINK conflicts: {e}")
+            return 0
 
     def _stabilize_resolved_ids(self) -> None:
         """

@@ -851,4 +851,214 @@ def test_incremental_no_changes_and_watermark_preservation(adapter):
     assert a2_cluster == a1_cluster
 
 
+def test_do_not_link_third_party_anchor(adapter):
+    """
+    When 3+ entities share an identifier with anchor e1, DO_NOT_LINK(e2, e3) must
+    detach high_key (e3) from the true group anchor e1 while keeping e1 and e2 linked.
+    """
+    adapter.execute("""
+        CREATE TABLE dnl_users (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        INSERT INTO dnl_users VALUES
+            ('1', 'shared@acmecorp.io', CURRENT_TIMESTAMP),
+            ('2', 'shared@acmecorp.io', CURRENT_TIMESTAMP),
+            ('3', 'shared@acmecorp.io', CURRENT_TIMESTAMP);
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "dnl_users",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "email", "expr": "email"}],
+            }
+        ],
+        "rules": [{"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"}],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    adapter.execute("""
+        INSERT INTO idr_meta.identity_override (override_type, entity_key_a, entity_key_b, reason, is_active)
+        VALUES ('DO_NOT_LINK', 'crm:2', 'crm:3', 'Separate household members', TRUE)
+    """)
+    IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+
+    m = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert m["crm:1"] == "crm:1"
+    assert m["crm:2"] == "crm:1"
+    assert m["crm:3"] == "crm:3"
+    assert m["crm:2"] != m["crm:3"]
+
+
+def test_incremental_split_and_merge_bijective_crosswalk(adapter):
+    """
+    Verify simultaneous INCR un-watermarked update + retroactive DO_NOT_LINK split:
+    - Run 1 (FULL): {crm:101, orders:202, pos:303} -> crm:101; {loyalty:505, web:404} -> loyalty:505.
+    - Mutation: un-watermarked loyalty:505 gains phone=5550199 (bridging to orders:202),
+      and steward adds DO_NOT_LINK(orders:202, pos:303).
+    - Run 2 (INCR): {crm:101, orders:202, loyalty:505, web:404} -> crm:101; pos:303 splits to pos:303;
+      crosswalk records both MERGED and SPLIT.
+    """
+    adapter.execute("""
+        CREATE TABLE crm_t (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        CREATE TABLE orders_t (id VARCHAR, email VARCHAR, phone VARCHAR, updated_at TIMESTAMP);
+        CREATE TABLE pos_t (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        CREATE TABLE web_t (id VARCHAR, loyalty VARCHAR, updated_at TIMESTAMP);
+        CREATE TABLE loyalty_t (id VARCHAR, loyalty VARCHAR, phone VARCHAR);
+        INSERT INTO crm_t VALUES ('101', 'alice@acmecorp.io', TIMESTAMP '2026-10-01');
+        INSERT INTO orders_t VALUES ('202', 'alice@acmecorp.io', '5550199', TIMESTAMP '2026-10-01');
+        INSERT INTO pos_t VALUES ('303', 'alice@acmecorp.io', TIMESTAMP '2026-10-01');
+        INSERT INTO web_t VALUES ('404', 'L99', TIMESTAMP '2026-10-05');
+        INSERT INTO loyalty_t VALUES ('505', 'L99', NULL);
+    """)
+    cfg = {
+        "sources": [
+            {"id": "crm", "table": "crm_t", "entity_key": "id", "watermark_column": "updated_at",
+             "identifiers": [{"type": "email", "expr": "email"}]},
+            {"id": "orders", "table": "orders_t", "entity_key": "id", "watermark_column": "updated_at",
+             "identifiers": [{"type": "email", "expr": "email"}, {"type": "phone", "expr": "phone"}]},
+            {"id": "pos", "table": "pos_t", "entity_key": "id", "watermark_column": "updated_at",
+             "identifiers": [{"type": "email", "expr": "email"}]},
+            {"id": "web", "table": "web_t", "entity_key": "id", "watermark_column": "updated_at",
+             "identifiers": [{"type": "loyalty", "expr": "loyalty"}]},
+            {"id": "loyalty", "table": "loyalty_t", "entity_key": "id",
+             "identifiers": [{"type": "loyalty", "expr": "loyalty"}, {"type": "phone", "expr": "phone"}]},
+        ],
+        "rules": [
+            {"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"},
+            {"id": "r_phone", "match_keys": ["phone"]},
+            {"id": "r_loyalty", "match_keys": ["loyalty"]},
+        ],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+
+    adapter.execute("UPDATE loyalty_t SET phone = '5550199' WHERE id = '505'")
+    adapter.execute("""
+        INSERT INTO idr_meta.identity_override (override_type, entity_key_a, entity_key_b, reason, is_active)
+        VALUES ('DO_NOT_LINK', 'orders:202', 'pos:303', 'Steward split', TRUE)
+    """)
+    IDRRunner(adapter).run(RunConfig(run_mode="INCR"))
+
+    m = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert m == {
+        "crm:101": "crm:101",
+        "orders:202": "crm:101",
+        "loyalty:505": "crm:101",
+        "web:404": "crm:101",
+        "pos:303": "pos:303",
+    }
+
+    cw = {
+        (r["previous_resolved_id"], r["current_resolved_id"]): r["change_type"]
+        for r in adapter.query("SELECT previous_resolved_id, current_resolved_id, change_type FROM idr_out.resolved_id_crosswalk")
+    }
+    assert cw[("crm:101", "pos:303")] == "SPLIT"
+    assert cw[("loyalty:505", "crm:101")] == "MERGED"
+
+
+def test_do_not_link_multi_identifier_transitive_bridge(adapter):
+    """
+    When crm:1 shares email with crm:2, and crm:2 shares phone with crm:3,
+    DO_NOT_LINK(crm:1, crm:3) must sever the multi-hop transitive bridge so crm:1 != crm:3.
+    """
+    adapter.execute("""
+        CREATE TABLE bridge_users (id VARCHAR, email VARCHAR, phone VARCHAR, updated_at TIMESTAMP);
+        INSERT INTO bridge_users VALUES
+            ('1', 'x@acmecorp.io', NULL, CURRENT_TIMESTAMP),
+            ('2', 'x@acmecorp.io', '5551234', CURRENT_TIMESTAMP),
+            ('3', NULL, '5551234', CURRENT_TIMESTAMP);
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "bridge_users",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [
+                    {"type": "email", "expr": "email"},
+                    {"type": "phone", "expr": "phone"},
+                ],
+            }
+        ],
+        "rules": [
+            {"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"},
+            {"id": "r_phone", "match_keys": ["phone"]},
+        ],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    adapter.execute("""
+        INSERT INTO idr_meta.identity_override (override_type, entity_key_a, entity_key_b, reason, is_active)
+        VALUES ('DO_NOT_LINK', 'crm:1', 'crm:3', 'Multi-hop bridge separation', TRUE)
+    """)
+    IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+
+    m = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert m["crm:1"] == "crm:1"
+    assert m["crm:2"] == "crm:1"
+    assert m["crm:3"] == "crm:3"
+    assert m["crm:1"] != m["crm:3"]
+
+
+def test_incr_dry_run_clusters_delta(adapter):
+    """Verify compute_dry_run_summary reports non-zero clusters_delta in INCR mode when a cluster splits."""
+    from idr_core.config import compute_dry_run_summary
+
+    adapter.execute("""
+        CREATE TABLE dr_users (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        INSERT INTO dr_users VALUES
+            ('1', 'fam@acmecorp.io', TIMESTAMP '2026-10-01'),
+            ('2', 'fam@acmecorp.io', TIMESTAMP '2026-10-01');
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "dr_users",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "email", "expr": "email"}],
+            }
+        ],
+        "rules": [{"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"}],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+    IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+
+    # Simulate a DO_NOT_LINK split in INCR dry-run mode
+    adapter.execute("""
+        INSERT INTO idr_meta.identity_override (override_type, entity_key_a, entity_key_b, reason, is_active)
+        VALUES ('DO_NOT_LINK', 'crm:1', 'crm:2', 'Split test', TRUE)
+    """)
+    res = IDRRunner(adapter).run(RunConfig(run_mode="INCR", dry_run=True))
+    assert res.status == "DRY_RUN_COMPLETE"
+    summary = compute_dry_run_summary(
+        adapter,
+        res.run_id,
+        "INCR",
+        edges_created=res.edges_created,
+        clusters_impacted=res.clusters_impacted,
+    )
+    assert summary["clusters_delta"] == 1
+    assert summary["edges_delta"] == -1
+
+
+
+
 

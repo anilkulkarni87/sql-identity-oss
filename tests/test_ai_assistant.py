@@ -471,3 +471,119 @@ def test_forensics_bridge_anomalies_draft_lens_and_mcp(tmp_path):
             assert len(mcp_diag["skipped_hubs"]) == 1
     finally:
         adapter.close()
+
+
+def test_validate_unified_profile_against_source_data(tmp_path):
+    from idr_core.ai_assistant import copilot_chat, validate_unified_profile
+    from idr_core.config import apply_config_to_warehouse
+    from idr_core.runner import IDRRunner, RunConfig
+
+    db_file = str(tmp_path / "validate_prof.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    try:
+        SchemaManager(adapter).initialize(reset=True)
+        adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+        adapter.execute("""
+            CREATE TABLE raw.crm (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+            CREATE TABLE raw.pos (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+            INSERT INTO raw.crm VALUES ('c1', 'alice@example.com', TIMESTAMP '2026-01-01 00:00:00');
+            INSERT INTO raw.pos VALUES ('p1', 'alice@example.com', TIMESTAMP '2026-01-01 00:00:00');
+        """)
+        apply_config_to_warehouse(
+            adapter,
+            {
+                "sources": [
+                    {
+                        "id": "crm",
+                        "table": "raw.crm",
+                        "entity_key": "id",
+                        "watermark_column": "updated_at",
+                        "identifiers": [{"type": "email", "expr": "email"}],
+                    },
+                    {
+                        "id": "pos",
+                        "table": "raw.pos",
+                        "entity_key": "id",
+                        "watermark_column": "updated_at",
+                        "identifiers": [{"type": "email", "expr": "email"}],
+                    },
+                ],
+                "rules": [
+                    {"id": "104", "type": "EXACT", "match_keys": ["email"], "priority": 1, "canonicalize": "EMAIL_STANDARD"}
+                ],
+            },
+        )
+        res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+        assert res.status == "SUCCESS"
+
+        v = validate_unified_profile(adapter)
+        assert v["status"] == "VERIFIED"
+        assert v["member_count"] == 2
+        assert v["source_rows_matched"] == 2
+
+        client = LLMClient(LLMConfig(provider="ollama", model="llama3.2"))
+        with patch.object(
+            client,
+            "chat",
+            return_value=json.dumps({"intent": "validate_profile", "resolved_id": None}),
+        ):
+            chat_res = copilot_chat(adapter, "Can you validate a unified profile against source data?", client=client)
+        assert chat_res["intent"] == "validate_profile"
+        assert "VERIFIED" in chat_res["answer"]
+        assert "2/2 source rows verified" in chat_res["answer"]
+        from idr_core.ai_assistant import _sanitize_json
+        sanitized = _sanitize_json({"nan_val": float("nan"), "inf_val": float("inf"), "nested": [{"x": float("-inf")}]})
+        assert sanitized == {"nan_val": None, "inf_val": None, "nested": [{"x": None}]}
+        json.dumps(chat_res, allow_nan=False)
+
+        # Asking for SQL should route to profile_verification_sql even if the router returns validate_profile
+        with patch.object(
+            client,
+            "chat",
+            return_value=json.dumps({"intent": "validate_profile", "resolved_id": "unified profile against source data"}),
+        ):
+            sql_res = copilot_chat(
+                adapter,
+                "can you give me the sql for validate a unified profile against source data",
+                client=client,
+            )
+        assert sql_res["intent"] == "profile_verification_sql"
+        assert "idr_out.identity_resolved_membership_current" in sql_res["answer"]
+        assert "raw.crm" in sql_res["answer"]
+        assert "raw.pos" in sql_res["answer"]
+        assert "email" in sql_res["metrics"]["merge_identifier_types"]
+
+        # Explicit resolved_id in message should be extracted and used in generated SQL
+        with patch.object(
+            client,
+            "chat",
+            return_value=json.dumps({"intent": "profile_verification_sql", "resolved_id": None}),
+        ):
+            explicit_sql_res = copilot_chat(
+                adapter,
+                f"generate verification sql for {chat_res['metrics']['resolved_id']}",
+                client=client,
+            )
+        assert explicit_sql_res["intent"] == "profile_verification_sql"
+        assert explicit_sql_res["metrics"]["resolved_id"] == chat_res["metrics"]["resolved_id"]
+        assert len(explicit_sql_res["metrics"]["queries"]) >= 4
+        union_q = next(
+            q for q in explicit_sql_res["metrics"]["queries"] if "UNION ALL" in q["title"]
+        )
+        union_rows = adapter.query(union_q["sql"].rstrip(";"))
+        assert len(union_rows) == 2
+        assert {r["source_id"] for r in union_rows} == {"crm", "pos"}
+        assert {r["identifier_value"] for r in union_rows} == {"alice@example.com"}
+
+        # Hallucinated phrase in resolved_id should be ignored and fall back to sampling a real cluster
+        with patch.object(
+            client,
+            "chat",
+            return_value=json.dumps({"intent": "validate_profile", "resolved_id": "unified profile against source data"}),
+        ):
+            clean_res = copilot_chat(adapter, "validate unified profile against source data", client=client)
+        assert clean_res["intent"] == "validate_profile"
+        assert clean_res["metrics"]["status"] == "VERIFIED"
+        assert clean_res["metrics"]["resolved_id"] == chat_res["metrics"]["resolved_id"]
+    finally:
+        adapter.close()

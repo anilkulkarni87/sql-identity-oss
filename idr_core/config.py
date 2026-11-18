@@ -1810,11 +1810,24 @@ def compute_dry_run_summary(
         if current_edges is not None:
             edges_delta = proposed_edges - current_edges
 
-    if normalized_mode == "FULL" and adapter.table_exists("idr_out.identity_clusters_current"):
-        current_clusters = int(
-            adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current") or 0
-        )
-        clusters_delta = proposed_clusters - current_clusters
+    if adapter.table_exists("idr_out.identity_clusters_current"):
+        if normalized_mode == "FULL":
+            current_clusters = int(
+                adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current") or 0
+            )
+            clusters_delta = proposed_clusters - current_clusters
+        elif adapter.table_exists("idr_work.lp_labels") and adapter.table_exists(
+            "idr_out.identity_resolved_membership_current"
+        ):
+            current_clusters = int(
+                adapter.query_one(
+                    "SELECT COUNT(DISTINCT m.resolved_id) "
+                    "FROM idr_out.identity_resolved_membership_current m "
+                    "JOIN idr_work.lp_labels lp ON lp.entity_key = m.entity_key"
+                )
+                or 0
+            )
+            clusters_delta = proposed_clusters - current_clusters
 
     edges_delta_by_type: Dict[str, int] = {}
     shadow_preserved_entities = 0
