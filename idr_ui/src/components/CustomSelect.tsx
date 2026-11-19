@@ -14,6 +14,7 @@ interface CustomSelectProps {
     buttonClassName?: string;
     menuClassName?: string;
     placeholder?: string;
+    ariaLabel?: string;
 }
 
 export function CustomSelect({
@@ -24,6 +25,7 @@ export function CustomSelect({
     buttonClassName = '',
     menuClassName = '',
     placeholder = 'Select...',
+    ariaLabel,
 }: CustomSelectProps) {
     const [open, setOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -57,9 +59,10 @@ export function CustomSelect({
                     setOpen((prev) => !prev);
                 }}
                 aria-expanded={open}
+                aria-label={ariaLabel}
                 className={`w-full flex items-center justify-between gap-2 bg-slate-900/95 hover:bg-slate-800/90 border ${
                     open ? 'border-blue-500 ring-1 ring-blue-500/40' : 'border-slate-700'
-                } rounded-lg px-3 py-1.5 text-left text-slate-200 transition-colors focus:outline-none ${buttonClassName}`}
+                } rounded-lg px-3 py-1.5 text-left text-slate-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${buttonClassName}`}
             >
                 <span className="truncate">{selected ? selected.label : placeholder}</span>
                 <ChevronDown

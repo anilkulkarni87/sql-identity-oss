@@ -80,21 +80,23 @@ class GraphStage(BaseStage):
                     WHERE (left_entity_key = '{a}' AND right_entity_key = '{b}')
                        OR (left_entity_key = '{b}' AND right_entity_key = '{a}')
                 """)
-                # Detach high_key from any anchor group that also contains low_key
+                # Detach high_key from the true anchor of any shared identifier group containing both low_key and high_key
                 low_key = min(a, b)
                 self.adapter.execute(f"""
                     DELETE FROM idr_work.edges_new
                     WHERE left_entity_key = '{high_key}'
                       AND right_entity_key IN (
-                          SELECT right_entity_key FROM idr_work.identifiers_all i
+                          SELECT MIN(i.entity_key)
+                          FROM idr_work.identifiers_all i
                           JOIN (
-                              SELECT identifier_type, identifier_value_norm, MIN(entity_key) AS right_entity_key
+                              SELECT identifier_type, identifier_value_norm
                               FROM idr_work.identifiers_all
                               WHERE entity_key IN ('{low_key}', '{high_key}')
                               GROUP BY identifier_type, identifier_value_norm
                               HAVING COUNT(DISTINCT entity_key) = 2
                           ) shared ON i.identifier_type = shared.identifier_type
                                   AND i.identifier_value_norm = shared.identifier_value_norm
+                          GROUP BY i.identifier_type, i.identifier_value_norm
                       )
                 """)
 
@@ -140,17 +142,28 @@ class GraphStage(BaseStage):
             else "COALESCE(MAX(max_group_size), 10000)"
         )
 
-        # This uses the N-1 edge approach (anchor-based) instead of N² fully connected
+        # This uses the N-1 edge approach (anchor-based) instead of N² fully connected.
+        # Deduplicate (entity_key, identifier_type, identifier_value_norm) first so multiple
+        # upstream mappings for the same member cannot emit duplicate edges or inflate counts.
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.edges_new AS
-            WITH identifier_groups AS (
+            WITH dedup_identifiers AS (
+                SELECT
+                    entity_key,
+                    identifier_type,
+                    identifier_value_norm,
+                    MAX(max_group_size) AS max_group_size
+                FROM idr_work.identifiers_all
+                GROUP BY entity_key, identifier_type, identifier_value_norm
+            ),
+            identifier_groups AS (
                 SELECT
                     identifier_type,
                     identifier_value_norm,
                     COUNT(*) as group_size,
                     MIN(entity_key) as anchor_key,
                     {max_allowed_expr} as max_allowed
-                FROM idr_work.identifiers_all
+                FROM dedup_identifiers
                 GROUP BY identifier_type, identifier_value_norm
                 HAVING COUNT(*) > 1
             ),
@@ -167,7 +180,7 @@ class GraphStage(BaseStage):
                 g.anchor_key AS right_entity_key,
                 i.identifier_type,
                 i.identifier_value_norm
-            FROM idr_work.identifiers_all i
+            FROM dedup_identifiers i
             JOIN valid_groups g
                 ON i.identifier_type = g.identifier_type
                 AND i.identifier_value_norm = g.identifier_value_norm
@@ -426,6 +439,11 @@ class GraphStage(BaseStage):
             )
         """)
 
+        # Post-propagation multi-hop DO_NOT_LINK conflict resolution:
+        # If a blocked pair (a, b) still shares a label via a multi-identifier transitive path,
+        # sever edges incident to high_key = max(a, b) and re-converge so DO_NOT_LINK holds.
+        iterations += self._resolve_transitive_do_not_link_conflicts(max_iters)
+
         # Preserve existing cluster resolved_ids across runs (Largest cluster wins on merge)
         self._stabilize_resolved_ids()
 
@@ -433,6 +451,93 @@ class GraphStage(BaseStage):
         clusters = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
 
         return iterations, clusters or 0
+
+    def _resolve_transitive_do_not_link_conflicts(self, max_iters: int) -> int:
+        """Sever multi-hop transitive bridges for any DO_NOT_LINK pair sharing a converged label."""
+        try:
+            if not self.adapter.table_exists("idr_meta.identity_override"):
+                return 0
+            conflicts = self.adapter.query("""
+                SELECT o.entity_key_a, o.entity_key_b
+                FROM idr_meta.identity_override o
+                JOIN idr_work.lp_labels la ON la.entity_key = o.entity_key_a
+                JOIN idr_work.lp_labels lb ON lb.entity_key = o.entity_key_b
+                WHERE o.is_active = TRUE
+                  AND UPPER(o.override_type) = 'DO_NOT_LINK'
+                  AND la.label = lb.label
+            """)
+            if not conflicts:
+                return 0
+
+            for row in conflicts:
+                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
+                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
+                high_key = max(a, b)
+                self.adapter.execute(f"""
+                    DELETE FROM idr_work.lp_edges
+                    WHERE src = '{high_key}' OR dst = '{high_key}'
+                """)
+                if self.adapter.table_exists("idr_work.edges_new"):
+                    self.adapter.execute(f"""
+                        DELETE FROM idr_work.edges_new
+                        WHERE left_entity_key = '{high_key}' OR right_entity_key = '{high_key}'
+                    """)
+
+            # Re-initialize and re-converge on remaining lp_edges
+            edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.lp_edges") or 0
+            extra_iters = 0
+            if edge_cnt > 0:
+                self.adapter.execute("""
+                    CREATE OR REPLACE TABLE idr_work.lp_labels AS
+                    SELECT DISTINCT src AS entity_key, src AS label
+                    FROM idr_work.lp_edges
+                """)
+                for _ in range(max_iters):
+                    extra_iters += 1
+                    self.adapter.execute("""
+                        CREATE OR REPLACE TABLE idr_work.lp_labels_new AS
+                        WITH candidate_labels AS (
+                            SELECT l.entity_key, l.label AS candidate_label
+                            FROM idr_work.lp_labels l
+                            UNION ALL
+                            SELECT e.src AS entity_key, l2.label AS candidate_label
+                            FROM idr_work.lp_edges e
+                            JOIN idr_work.lp_labels l2 ON e.dst = l2.entity_key
+                        )
+                        SELECT entity_key, MIN(candidate_label) AS label
+                        FROM candidate_labels
+                        GROUP BY entity_key
+                    """)
+                    changes = self.adapter.query_one("""
+                        SELECT COUNT(*) FROM idr_work.lp_labels prev
+                        JOIN idr_work.lp_labels_new curr ON prev.entity_key = curr.entity_key
+                        WHERE prev.label != curr.label
+                    """) or 0
+                    self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_new")
+                    if changes == 0:
+                        break
+            else:
+                str_type = self._dialect["string_type"]
+                self.adapter.execute(f"""
+                    CREATE OR REPLACE TABLE idr_work.lp_labels (entity_key {str_type}, label {str_type})
+                """)
+
+            self.adapter.execute(f"""
+                INSERT INTO idr_work.lp_labels (entity_key, label)
+                SELECT ed.entity_key, ed.entity_key AS label
+                FROM (
+                    SELECT DISTINCT entity_key
+                    FROM idr_work.entities_delta
+                    WHERE run_id = '{self.run_id}'
+                ) ed
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM idr_work.lp_labels l WHERE l.entity_key = ed.entity_key
+                )
+            """)
+            return extra_iters
+        except Exception as e:
+            self.logger.warning(f"Failed to resolve transitive DO_NOT_LINK conflicts: {e}")
+            return 0
 
     def _stabilize_resolved_ids(self) -> None:
         """
@@ -452,7 +557,8 @@ class GraphStage(BaseStage):
             if prev_cnt == 0:
                 return
 
-            self.adapter.execute("""
+            md5_expr = self._dialect["md5"]("l.label")
+            self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized AS
                 WITH prev_cluster_stats AS (
                     SELECT
@@ -506,17 +612,88 @@ class GraphStage(BaseStage):
                         ) AS win_rn
                     FROM claimed_prev
                     WHERE prev_claim_rn = 1
+                ),
+                reserved_ids AS (
+                    SELECT DISTINCT winning_resolved_id AS reserved_id
+                    FROM winning_cluster
+                    WHERE win_rn = 1
+                    UNION DISTINCT
+                    SELECT DISTINCT resolved_id AS reserved_id
+                    FROM idr_out.identity_resolved_membership_current
                 )
                 SELECT
                     l.entity_key,
-                    COALESCE(w.winning_resolved_id, l.label) AS label
+                    CASE
+                        WHEN w.winning_resolved_id IS NOT NULL THEN w.winning_resolved_id
+                        WHEN ri.reserved_id IS NOT NULL THEN CONCAT(l.label, ':split:', SUBSTR({md5_expr}, 1, 8))
+                        ELSE l.label
+                    END AS label,
+                    CASE WHEN w.winning_resolved_id IS NULL THEN TRUE ELSE FALSE END AS is_fallback
                 FROM idr_work.lp_labels l
                 LEFT JOIN winning_cluster w
                   ON l.label = w.raw_label AND w.win_rn = 1
+                LEFT JOIN reserved_ids ri
+                  ON w.winning_resolved_id IS NULL AND l.label = ri.reserved_id
             """)
-            self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_stabilized")
+            # Guard against the rare case where a fallback candidate (or its ':split:<hash>' suffix)
+            # collides with a winning_resolved_id, another component's label, or an untouched historical ID.
+            max_retries = 5
+            attempt = 0
+            while True:
+                collisions = self.adapter.query("""
+                    SELECT DISTINCT s.label AS colliding_label
+                    FROM idr_work.lp_labels_stabilized s
+                    JOIN idr_work.lp_labels orig ON s.entity_key = orig.entity_key
+                    WHERE s.is_fallback = TRUE
+                      AND (
+                          EXISTS (
+                              SELECT 1 FROM idr_work.lp_labels_stabilized s2
+                              JOIN idr_work.lp_labels orig2 ON s2.entity_key = orig2.entity_key
+                              WHERE s2.label = s.label AND orig2.label != orig.label
+                          )
+                          OR s.label IN (
+                              SELECT DISTINCT resolved_id
+                              FROM idr_out.identity_resolved_membership_current
+                          )
+                      )
+                """)
+                if not collisions:
+                    break
+                if attempt >= max_retries:
+                    colliding_list = ", ".join(str(c["colliding_label"]) for c in collisions)
+                    raise RuntimeError(
+                        f"Fallback cluster ID collision unresolved after {max_retries} retries: {colliding_list}"
+                    )
+                attempt += 1
+                for crow in collisions:
+                    clabel = crow["colliding_label"]
+                    safe_clabel = clabel.replace("'", "''")
+                    new_md5 = self._dialect["md5"](f"CONCAT(orig.label, ':{self.run_id}:{attempt}')")
+                    self.adapter.execute(f"""
+                        CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized_next AS
+                        SELECT
+                            s.entity_key,
+                            CASE
+                                WHEN s.is_fallback = TRUE AND s.label = '{safe_clabel}'
+                                THEN CONCAT(orig.label, ':split:', SUBSTR({new_md5}, 1, 8))
+                                ELSE s.label
+                            END AS label,
+                            s.is_fallback
+                        FROM idr_work.lp_labels_stabilized s
+                        JOIN idr_work.lp_labels orig ON s.entity_key = orig.entity_key
+                    """)
+                    self._swap_tables("idr_work.lp_labels_stabilized", "idr_work.lp_labels_stabilized_next")
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized_final AS
+                SELECT entity_key, label FROM idr_work.lp_labels_stabilized
+            """)
+            self.adapter.execute("DROP TABLE IF EXISTS idr_work.lp_labels_stabilized")
+            self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_stabilized_final")
+        except RuntimeError:
+            raise
         except Exception as e:
-            self.logger.warning(f"Failed to stabilize resolved_ids: {e}")
+            self.logger.error(f"Failed to stabilize resolved_ids: {e}")
+            raise RuntimeError(f"Failed to stabilize resolved_ids: {e}") from e
 
     def run_fuzzy_matching(self, max_iters: int) -> int:
         """
@@ -610,7 +787,7 @@ class GraphStage(BaseStage):
         if attr_parts:
             self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.cluster_attributes AS
-                {" UNION ".join(attr_parts)}
+                {" UNION DISTINCT ".join(attr_parts)}
             """)
         else:
             self.adapter.execute(f"""
@@ -769,7 +946,7 @@ class GraphStage(BaseStage):
         self.adapter.execute("""
             CREATE OR REPLACE TABLE idr_work.lp_fuzzy_labels AS
             SELECT DISTINCT left_id AS entity_key, left_id AS label FROM idr_work.fuzzy_edges
-            UNION
+            UNION DISTINCT
             SELECT DISTINCT right_id AS entity_key, right_id AS label FROM idr_work.fuzzy_edges
         """)
 
@@ -1021,9 +1198,87 @@ class GraphStage(BaseStage):
                 )
             """)
 
+        iterations += self._resolve_lens_do_not_link_conflicts(max_iters)
         self._stabilize_lens_resolved_ids(lens_id)
         clusters = int(self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels_lens") or 0)
         return {"lens_id": lens_id, "iterations": iterations, "clusters": clusters}
+
+    def _resolve_lens_do_not_link_conflicts(self, max_iters: int) -> int:
+        """Sever remaining DO_NOT_LINK bridges (star-hub or multi-hop) in idr_work.lp_edges_lens."""
+        try:
+            if not self.adapter.table_exists("idr_meta.identity_override"):
+                return 0
+            conflicts = self.adapter.query("""
+                SELECT o.entity_key_a, o.entity_key_b
+                FROM idr_meta.identity_override o
+                JOIN idr_work.lp_labels_lens la ON la.entity_key = o.entity_key_a
+                JOIN idr_work.lp_labels_lens lb ON lb.entity_key = o.entity_key_b
+                WHERE o.is_active = TRUE
+                  AND UPPER(o.override_type) = 'DO_NOT_LINK'
+                  AND la.label = lb.label
+            """)
+            if not conflicts:
+                return 0
+
+            for row in conflicts:
+                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
+                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
+                high_key = max(a, b)
+                self.adapter.execute(f"""
+                    DELETE FROM idr_work.lp_edges_lens
+                    WHERE src = '{high_key}' OR dst = '{high_key}'
+                """)
+
+            edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.lp_edges_lens") or 0
+            extra_iters = 0
+            if edge_cnt > 0:
+                self.adapter.execute("""
+                    CREATE OR REPLACE TABLE idr_work.lp_labels_lens AS
+                    SELECT DISTINCT src AS entity_key, src AS label
+                    FROM idr_work.lp_edges_lens
+                """)
+                for _ in range(max_iters):
+                    extra_iters += 1
+                    self.adapter.execute("""
+                        CREATE OR REPLACE TABLE idr_work.lp_labels_lens_new AS
+                        WITH candidate_labels AS (
+                            SELECT l.entity_key, l.label AS candidate_label
+                            FROM idr_work.lp_labels_lens l
+                            UNION ALL
+                            SELECT e.src AS entity_key, l2.label AS candidate_label
+                            FROM idr_work.lp_edges_lens e
+                            JOIN idr_work.lp_labels_lens l2 ON e.dst = l2.entity_key
+                        )
+                        SELECT entity_key, MIN(candidate_label) AS label
+                        FROM candidate_labels
+                        GROUP BY entity_key
+                    """)
+                    changes = self.adapter.query_one("""
+                        SELECT COUNT(*) FROM idr_work.lp_labels_lens prev
+                        JOIN idr_work.lp_labels_lens_new curr ON prev.entity_key = curr.entity_key
+                        WHERE prev.label != curr.label
+                    """) or 0
+                    self._swap_tables("idr_work.lp_labels_lens", "idr_work.lp_labels_lens_new")
+                    if changes == 0:
+                        break
+            else:
+                str_type = self._dialect["string_type"]
+                self.adapter.execute(f"""
+                    CREATE OR REPLACE TABLE idr_work.lp_labels_lens (entity_key {str_type}, label {str_type})
+                """)
+
+            self.adapter.execute("""
+                INSERT INTO idr_work.lp_labels_lens (entity_key, label)
+                SELECT el.entity_key, el.entity_key AS label
+                FROM idr_work.entities_lens el
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM idr_work.lp_labels_lens l WHERE l.entity_key = el.entity_key
+                )
+            """)
+            return extra_iters
+        except Exception as e:
+            self.logger.warning(f"Failed to resolve lens DO_NOT_LINK conflicts: {e}")
+            return 0
 
     def _stabilize_lens_resolved_ids(self, lens_id: str) -> None:
         """Stabilize resolved_id values for a specific lens against its own historical membership."""
@@ -1036,6 +1291,7 @@ class GraphStage(BaseStage):
             if prev_cnt == 0:
                 return
 
+            md5_expr = self._dialect["md5"]("l.label")
             self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.lp_labels_lens_stabilized AS
                 WITH prev_lens_mem AS (
@@ -1083,13 +1339,84 @@ class GraphStage(BaseStage):
                         ) AS win_rn
                     FROM claimed_prev
                     WHERE prev_claim_rn = 1
+                ),
+                reserved_ids AS (
+                    SELECT DISTINCT winning_resolved_id AS reserved_id
+                    FROM winning_cluster
+                    WHERE win_rn = 1
+                    UNION DISTINCT
+                    SELECT DISTINCT resolved_id AS reserved_id
+                    FROM prev_lens_mem
                 )
                 SELECT
                     l.entity_key,
-                    COALESCE(w.winning_resolved_id, l.label) AS label
+                    CASE
+                        WHEN w.winning_resolved_id IS NOT NULL THEN w.winning_resolved_id
+                        WHEN ri.reserved_id IS NOT NULL THEN CONCAT(l.label, ':split:', SUBSTR({md5_expr}, 1, 8))
+                        ELSE l.label
+                    END AS label,
+                    CASE WHEN w.winning_resolved_id IS NULL THEN TRUE ELSE FALSE END AS is_fallback
                 FROM idr_work.lp_labels_lens l
                 LEFT JOIN winning_cluster w ON l.label = w.raw_label AND w.win_rn = 1
+                LEFT JOIN reserved_ids ri ON w.winning_resolved_id IS NULL AND l.label = ri.reserved_id
             """)
-            self._swap_tables("idr_work.lp_labels_lens", "idr_work.lp_labels_lens_stabilized")
+
+            max_retries = 5
+            attempt = 0
+            while True:
+                collisions = self.adapter.query(f"""
+                    SELECT DISTINCT s.label AS colliding_label
+                    FROM idr_work.lp_labels_lens_stabilized s
+                    JOIN idr_work.lp_labels_lens orig ON s.entity_key = orig.entity_key
+                    WHERE s.is_fallback = TRUE
+                      AND (
+                          EXISTS (
+                              SELECT 1 FROM idr_work.lp_labels_lens_stabilized s2
+                              JOIN idr_work.lp_labels_lens orig2 ON s2.entity_key = orig2.entity_key
+                              WHERE s2.label = s.label AND orig2.label != orig.label
+                          )
+                          OR s.label IN (
+                              SELECT DISTINCT resolved_id
+                              FROM idr_out.identity_lens_membership_current
+                              WHERE lens_id = '{lens_id}'
+                          )
+                      )
+                """)
+                if not collisions:
+                    break
+                if attempt >= max_retries:
+                    colliding_list = ", ".join(str(c["colliding_label"]) for c in collisions)
+                    raise RuntimeError(
+                        f"Lens '{lens_id}' fallback cluster ID collision unresolved after {max_retries} retries: {colliding_list}"
+                    )
+                attempt += 1
+                for crow in collisions:
+                    clabel = crow["colliding_label"]
+                    safe_clabel = clabel.replace("'", "''")
+                    new_md5 = self._dialect["md5"](f"CONCAT(orig.label, ':{self.run_id}:{lens_id}:{attempt}')")
+                    self.adapter.execute(f"""
+                        CREATE OR REPLACE TABLE idr_work.lp_labels_lens_stabilized_next AS
+                        SELECT
+                            s.entity_key,
+                            CASE
+                                WHEN s.is_fallback = TRUE AND s.label = '{safe_clabel}'
+                                THEN CONCAT(orig.label, ':split:', SUBSTR({new_md5}, 1, 8))
+                                ELSE s.label
+                            END AS label,
+                            s.is_fallback
+                        FROM idr_work.lp_labels_lens_stabilized s
+                        JOIN idr_work.lp_labels_lens orig ON s.entity_key = orig.entity_key
+                    """)
+                    self._swap_tables("idr_work.lp_labels_lens_stabilized", "idr_work.lp_labels_lens_stabilized_next")
+
+            self.adapter.execute("""
+                CREATE OR REPLACE TABLE idr_work.lp_labels_lens_stabilized_final AS
+                SELECT entity_key, label FROM idr_work.lp_labels_lens_stabilized
+            """)
+            self.adapter.execute("DROP TABLE IF EXISTS idr_work.lp_labels_lens_stabilized")
+            self._swap_tables("idr_work.lp_labels_lens", "idr_work.lp_labels_lens_stabilized_final")
+        except RuntimeError:
+            raise
         except Exception as e:
-            self.logger.warning(f"Failed to stabilize lens '{lens_id}' resolved_ids: {e}")
+            self.logger.error(f"Failed to stabilize lens '{lens_id}' resolved_ids: {e}")
+            raise RuntimeError(f"Failed to stabilize lens '{lens_id}' resolved_ids: {e}") from e

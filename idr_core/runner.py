@@ -67,6 +67,9 @@ class RunConfig:
     max_moved_entities_pct: Optional[float] = None
     max_cluster_delta_pct: Optional[float] = None
     lens: Optional[str] = None
+    skip_lenses: bool = False
+    lock_ttl_seconds: int = 3600
+    force_unlock: bool = False
 
     def __post_init__(self):
         mode = str(self.run_mode or "").upper()
@@ -232,17 +235,23 @@ class IDRRunner:
         graph = GraphStage(ctx, config=config)
         output = OutputStage(ctx, config=config)
 
+        lock_acquired = False
         try:
-            # 1. Preflight validation (before recording run to avoid self-detection)
+            # 1. Preflight validation (before recording run or locking)
             self._start_stage("preflight")
             preflight.run()
             self._end_stage("preflight")
+
+            # Acquire advisory run lock in idr_meta.run_state so concurrent runs / dry runs
+            # do not overwrite shared idr_work staging tables or idr_meta config tables.
+            self._acquire_run_lock(config)
+            lock_acquired = True
 
             # Check for optional evidence generation after preflight schema checks
             self._generate_evidence = preflight.load_evidence_flag()
             ctx.generate_evidence = self._generate_evidence
 
-            # Record run start (after preflight passes)
+            # Record run start (after preflight and lock acquisition)
             self._record_run_start(config)
 
             # 2. Entity extraction
@@ -254,7 +263,7 @@ class IDRRunner:
             entities = extraction.extract_entities(config.run_mode)
             self._end_stage("entity_extraction", entities)
 
-            if entities == 0:
+            if entities == 0 and not getattr(extraction, "_has_no_wm_deletes", False):
                 return self._complete_run(
                     start_time, config, entities=0, edges=0, clusters=0, status="SUCCESS_NO_CHANGES"
                 )
@@ -271,8 +280,10 @@ class IDRRunner:
             # In INCR mode, state-diffing prunes unchanged rows from no-watermark tables.
             # Refresh delta entities count (excluding candidate-expanded historical rows where watermark_value IS NULL)
             # and short-circuit immediately if no delta entities remain (unless retroactive governance changes apply).
-            if config.run_mode == "INCR" and not getattr(
-                extraction, "_has_retroactive_governance_changes", False
+            if (
+                config.run_mode == "INCR"
+                and not getattr(extraction, "_has_retroactive_governance_changes", False)
+                and not getattr(extraction, "_has_no_wm_deletes", False)
             ):
                 entities = (
                     self.adapter.query_one(
@@ -380,11 +391,111 @@ class IDRRunner:
                 extra={"run_id": self.run_id, "event": "run_failed"},
             )
             return self._complete_run(start_time, config, status="FAILED", error=str(e))
+        finally:
+            if lock_acquired:
+                self._release_run_lock()
+
+    @staticmethod
+    def check_no_active_run_lock(adapter, lock_ttl_seconds: int = 3600) -> None:
+        """Raise RuntimeError if an active (non-stale) advisory run lock is held in idr_meta.run_state."""
+        if not adapter.table_exists("idr_meta.run_state"):
+            return
+        rows = adapter.query(
+            "SELECT last_run_id, updated_at FROM idr_meta.run_state WHERE table_id = '__idr_run_lock__'"
+        )
+        if not rows or not rows[0].get("last_run_id"):
+            return
+        active_run_id = str(rows[0]["last_run_id"])
+        locked_at = rows[0].get("updated_at")
+        is_stale = False
+        if locked_at is not None:
+            if isinstance(locked_at, str):
+                try:
+                    locked_dt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
+                except ValueError:
+                    locked_dt = None
+            else:
+                locked_dt = locked_at
+            if locked_dt is not None:
+                now_utc = datetime.now(timezone.utc)
+                if locked_dt.tzinfo is None:
+                    locked_dt = locked_dt.replace(tzinfo=timezone.utc)
+                age_seconds = (now_utc - locked_dt).total_seconds()
+                is_stale = age_seconds > max(0, int(lock_ttl_seconds))
+        if not is_stale:
+            raise RuntimeError(
+                f"Concurrent IDR run in progress (run_id={active_run_id}, started_at={locked_at}). "
+                f"Wait for completion or pass force_unlock=True."
+            )
+
+    def _acquire_run_lock(self, config: RunConfig) -> None:
+        """Acquire an advisory run lock in idr_meta.run_state to serialize concurrent runs."""
+        if not self.adapter.table_exists("idr_meta.run_state"):
+            return
+        lock_key = "__idr_run_lock__"
+        rows = self.adapter.query(
+            f"SELECT last_run_id, updated_at FROM idr_meta.run_state WHERE table_id = '{lock_key}'"
+        )
+        if rows and rows[0].get("last_run_id") and not config.force_unlock:
+            active_run_id = str(rows[0]["last_run_id"])
+            locked_at = rows[0].get("updated_at")
+            is_stale = False
+            if locked_at is not None:
+                if isinstance(locked_at, str):
+                    try:
+                        locked_dt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
+                    except ValueError:
+                        locked_dt = None
+                else:
+                    locked_dt = locked_at
+                if locked_dt is not None:
+                    now_utc = datetime.now(timezone.utc)
+                    if locked_dt.tzinfo is None:
+                        locked_dt = locked_dt.replace(tzinfo=timezone.utc)
+                    age_seconds = (now_utc - locked_dt).total_seconds()
+                    is_stale = age_seconds > max(0, int(config.lock_ttl_seconds))
+            if not is_stale:
+                raise RuntimeError(
+                    f"Concurrent IDR run in progress (run_id={active_run_id}, started_at={locked_at}). "
+                    f"Wait for completion or pass force_unlock=True."
+                )
+            self.logger.warning(
+                f"Reclaiming stale advisory run lock from {active_run_id} (started_at={locked_at})",
+                extra={"run_id": self.run_id},
+            )
+
+        utc_now_lit = f"TIMESTAMP '{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}'"
+        if rows:
+            self.adapter.execute(f"""
+                UPDATE idr_meta.run_state
+                SET last_run_id = '{self.run_id}', updated_at = {utc_now_lit}
+                WHERE table_id = '{lock_key}'
+            """)
+        else:
+            self.adapter.execute(f"""
+                INSERT INTO idr_meta.run_state (table_id, last_watermark_value, last_run_id, updated_at)
+                VALUES ('{lock_key}', NULL, '{self.run_id}', {utc_now_lit})
+            """)
+
+    def _release_run_lock(self) -> None:
+        """Release the advisory run lock if still held by this run_id."""
+        try:
+            if not self.adapter.table_exists("idr_meta.run_state"):
+                return
+            self.adapter.execute(f"""
+                DELETE FROM idr_meta.run_state
+                WHERE table_id = '__idr_run_lock__' AND last_run_id = '{self.run_id}'
+            """)
+        except Exception as e:
+            self.logger.warning(f"Failed to release advisory run lock: {e}")
 
     def _run_configured_lenses(
         self, config: RunConfig, graph: GraphStage, output: OutputStage
     ) -> None:
         """Resolve and materialize any active multi-lens definitions from idr_meta.lens_definition."""
+        target_lens = (config.lens or "").strip()
+        if config.skip_lenses or target_lens.lower() in ("__none__", "none"):
+            return
         if not self.adapter.table_exists("idr_meta.lens_definition"):
             return
         rows = self.adapter.query("""
@@ -395,7 +506,6 @@ class IDRRunner:
         """)
         if not rows:
             return
-        target_lens = (config.lens or "").strip()
         selected_rows = [
             row for row in rows
             if not target_lens or str(row["lens_id"]) == target_lens

@@ -41,6 +41,7 @@ classifiers = [
 
 dependencies = [
     "pyyaml>=6.0",
+    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +58,9 @@ all = [
     "google-cloud-bigquery>=3.0.0",
     "pandas>=1.5.0",
     "db-dtypes>=1.0.0",
+    "snowflake-snowpark-python>=1.0.0",
+    "snowflake-connector-python>=3.0.0",
+    "databricks-sql-connector>=3.0.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "prometheus-client>=0.20.0",
@@ -79,10 +83,10 @@ idr = "idr_core.cli:main"
 idr-mcp = "idr_mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/anilkulkarni87/sql-identity-resolution"
-Documentation = "https://anilkulkarni87.github.io/sql-identity-resolution/"
-Repository = "https://github.com/anilkulkarni87/sql-identity-resolution"
-Changelog = "https://github.com/anilkulkarni87/sql-identity-resolution/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/anilkulkarni87/sql-identity-oss"
+Documentation = "https://anilkulkarni87.github.io/sql-identity-oss/"
+Repository = "https://github.com/anilkulkarni87/sql-identity-oss"
+Changelog = "https://github.com/anilkulkarni87/sql-identity-oss/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["idr_core*", "idr_api*", "idr_mcp*", "idr_enterprise*"]

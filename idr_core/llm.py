@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 _EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-])([A-Za-z0-9._%+-]*)(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
 _PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})(?!\d)")
@@ -38,6 +38,12 @@ _SENSITIVE_KEY_TOKENS = (
     "full_name",
     "identifier_value",
     "raw_value",
+    "dob",
+    "date_of_birth",
+    "birth_date",
+    "ip_address",
+    "zip_code",
+    "postal_code",
 )
 
 
@@ -70,20 +76,36 @@ def mask_pii_text(text: str) -> str:
     return masked
 
 
-def mask_pii_payload(obj: Any, parent_key: str = "") -> Any:
+def mask_pii_payload(
+    obj: Any,
+    parent_key: str = "",
+    extra_sensitive_keys: Optional[Iterable[str]] = None,
+) -> Any:
     """Recursively mask PII fields in dicts/lists before sending to a remote LLM."""
-    if isinstance(obj, dict):
-        return {k: mask_pii_payload(v, parent_key=str(k).lower()) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [mask_pii_payload(item, parent_key=parent_key) for item in obj]
-    if isinstance(obj, str):
-        masked = mask_pii_text(obj)
-        if masked == obj and any(tok in parent_key for tok in _SENSITIVE_KEY_TOKENS):
-            if len(obj) <= 2:
-                return "***"
-            return f"{obj[0]}***{obj[-1]}"
-        return masked
-    return obj
+    extra_set = (
+        {str(k).strip().lower() for k in extra_sensitive_keys if str(k).strip()}
+        if extra_sensitive_keys
+        else set()
+    )
+
+    def _walk(val: Any, key: str) -> Any:
+        if isinstance(val, dict):
+            return {k: _walk(v, str(k).lower()) for k, v in val.items()}
+        if isinstance(val, list):
+            return [_walk(item, key) for item in val]
+        if isinstance(val, str):
+            masked = mask_pii_text(val)
+            is_sensitive = any(tok in key for tok in _SENSITIVE_KEY_TOKENS) or (
+                key in extra_set
+            )
+            if masked == val and is_sensitive:
+                if len(val) <= 2:
+                    return "***"
+                return f"{val[0]}***{val[-1]}"
+            return masked
+        return val
+
+    return _walk(obj, parent_key.lower())
 
 
 def _ollama_root_url(base_url: Optional[str]) -> str:
@@ -112,7 +134,7 @@ class LLMConfig:
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     mask_pii: Optional[bool] = None
-    timeout: float = 45.0
+    timeout: float = 90.0
 
     @property
     def is_enabled(self) -> bool:
@@ -321,4 +343,162 @@ class LLMClient:
             raise RuntimeError(f"Empty candidates in Gemini response: {data}")
         parts = candidates[0].get("content", {}).get("parts", [])
         return "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+
+    @staticmethod
+    def _extract_json_object(raw: str) -> Dict[str, Any]:
+        """Extract a JSON object from raw text, handling markdown fences or wrapper prose."""
+        text = (raw or "").strip()
+        if not text:
+            raise ValueError("LLM returned empty response")
+        # Direct parse
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        # Strip ```json ... ``` fences
+        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+        if fence_match:
+            parsed = json.loads(fence_match.group(1))
+            if isinstance(parsed, dict):
+                return parsed
+        # Balanced brace extraction from first '{' to last '}'
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            parsed = json.loads(text[start : end + 1])
+            if isinstance(parsed, dict):
+                return parsed
+        raise ValueError(f"Could not parse JSON object from LLM response: {text[:300]}")
+
+    def chat_structured(
+        self,
+        messages: List[Dict[str, str]],
+        json_schema: Dict[str, Any],
+        schema_name: str = "structured_output",
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+    ) -> Dict[str, Any]:
+        """
+        Invoke the configured LLM with provider-native structured JSON Schema enforcement.
+
+        - Ollama: native `/api/chat` with `format: <json_schema>` (grammar-constrained decoding)
+        - OpenAI / vLLM / OpenAI-compatible: `response_format: {type: json_schema, ...}` with
+          graceful fallback to `json_object`
+        - Anthropic: forced `tool_use` with `input_schema: <json_schema>`
+        - Gemini: `responseMimeType: application/json`
+        """
+        if not self.config.is_enabled:
+            raise RuntimeError(
+                "AI assistant is disabled. Set IDR_LLM_PROVIDER (e.g. 'ollama') or configure in UI Settings."
+            )
+
+        prov = self.config.provider.strip().lower()
+        model = self.config.resolved_model()
+        base_url = self.config.resolved_base_url()
+
+        safe_messages = messages
+        if self.config.effective_mask_pii:
+            safe_messages = [
+                {"role": m["role"], "content": mask_pii_text(m["content"])} for m in messages
+            ]
+
+        if prov == "ollama":
+            num_ctx = int(os.environ.get("IDR_OLLAMA_NUM_CTX", "16384") or "16384")
+            root = _ollama_root_url(base_url)
+            body = {
+                "model": model,
+                "messages": safe_messages,
+                "stream": False,
+                "format": json_schema,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": min(int(max_tokens), 3072),
+                    "num_ctx": num_ctx,
+                },
+            }
+            try:
+                data = self._post_json(f"{root}/api/chat", body, {"Content-Type": "application/json"})
+                raw = (data.get("message") or {}).get("content", "")
+                return self._extract_json_object(raw)
+            except RuntimeError as exc:
+                # Only fall back to OpenAI-compatible endpoint if server rejects /api/chat schema (not on timeouts)
+                err_str = str(exc)
+                if any(code in err_str for code in ("HTTP 400", "HTTP 404", "HTTP 405", "HTTP 422")):
+                    raw = self._call_openai_compatible(base_url, model, safe_messages, temperature, json_mode=True)
+                    return self._extract_json_object(raw)
+                raise
+
+        if prov in ("openai", "openai_compatible"):
+            url = f"{base_url}/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if self.config.api_key:
+                headers["Authorization"] = f"Bearer {self.config.api_key}"
+            body = {
+                "model": model,
+                "messages": safe_messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema_name,
+                        "schema": json_schema,
+                        "strict": False,
+                    },
+                },
+            }
+            try:
+                data = self._post_json(url, body, headers)
+                choices = data.get("choices") or []
+                raw = choices[0].get("message", {}).get("content", "") if choices else ""
+                return self._extract_json_object(raw)
+            except RuntimeError as exc:
+                # Some OpenAI-compatible servers only support json_object
+                if "HTTP 400" in str(exc) or "HTTP 422" in str(exc):
+                    raw = self._call_openai_compatible(base_url, model, safe_messages, temperature, json_mode=True)
+                    return self._extract_json_object(raw)
+                raise
+
+        if prov == "anthropic":
+            if not self.config.api_key:
+                raise RuntimeError("Anthropic provider requires an API key.")
+            system_parts = [m["content"] for m in safe_messages if m["role"] == "system"]
+            chat_msgs = [m for m in safe_messages if m["role"] != "system"]
+            body = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": chat_msgs,
+                "tools": [
+                    {
+                        "name": schema_name,
+                        "description": "Return the structured JSON output matching the schema.",
+                        "input_schema": json_schema,
+                    }
+                ],
+                "tool_choice": {"type": "tool", "name": schema_name},
+            }
+            if system_parts:
+                body["system"] = "\n".join(system_parts)
+            headers = {
+                "Content-Type": "application/json",
+                "x-api-key": self.config.api_key,
+                "anthropic-version": "2023-06-01",
+            }
+            data = self._post_json(f"{base_url}/messages", body, headers)
+            for block in data.get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "tool_use" and isinstance(block.get("input"), dict):
+                    return block["input"]
+            raw = "".join(
+                block.get("text", "") for block in (data.get("content") or []) if isinstance(block, dict)
+            )
+            return self._extract_json_object(raw)
+
+        if prov == "gemini":
+            raw = self._call_gemini(base_url, model, safe_messages, temperature, json_mode=True)
+            return self._extract_json_object(raw)
+
+        raise ValueError(f"Unsupported LLM provider: '{self.config.provider}'")
 

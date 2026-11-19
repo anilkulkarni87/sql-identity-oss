@@ -235,3 +235,56 @@ LEFT JOIN raw.orders_online o
 GROUP BY 1, 2, 3, 4, 5, 6;
 ```
 
+---
+
+## One-Command Local Demo (`idr demo` & `uvx` / `pipx`)
+
+For personal exploration without creating a virtualenv or writing YAML:
+
+```bash
+# Run directly with uvx (zero install)
+uvx --from "sql-identity-resolution[duckdb,api]" idr demo
+
+# Or install globally with pipx
+pipx install "sql-identity-resolution[duckdb,api,mcp]"
+idr demo --rows 10000 --port 8000
+```
+
+`idr demo` generates a synthetic DuckDB dataset, runs the full identity resolution pipeline, and launches the bundled Explorer UI + `/mcp` server at `http://127.0.0.1:8000`.
+
+---
+
+## Docker & Self-Hosted Deployment
+
+| File | Mode | What's Included |
+| :--- | :--- | :--- |
+| [`Dockerfile`](https://github.com/anilkulkarni87/sql-identity-oss/blob/main/Dockerfile) | **All-in-One** | Single container with React UI, FastAPI, `/mcp`, and all 4 warehouse drivers (`DuckDB`, `Snowflake`, `BigQuery`, `Databricks`). |
+| [`docker-compose.yml`](https://github.com/anilkulkarni87/sql-identity-oss/blob/main/docker-compose.yml) | **Local Split Dev** | Separate `api` (`:8000`) and Nginx `ui` (`:3000`) containers with dev auth enabled. |
+| [`docker-compose.prod.yml`](https://github.com/anilkulkarni87/sql-identity-oss/blob/main/docker-compose.prod.yml) | **Production (GHCR)** | Prebuilt `idr-api` and `idr-ui` images with OIDC auth enforced (`IDR_ALLOW_INSECURE_DEV_AUTH=false`). |
+| [`docker-compose.enterprise.yml`](https://github.com/anilkulkarni87/sql-identity-oss/blob/main/docker-compose.enterprise.yml) | **Enterprise Stack** | `api`, `ui`, `keycloak` (`:8080` OIDC), `redis` (`:6379` session store), `prometheus` (`:9090`), and `grafana` (`:3001`). |
+
+### All-in-One Quickstart
+
+```bash
+docker build -t sql-identity-oss .
+docker run -p 8000:8000 \
+  -e IDR_ALLOW_INSECURE_DEV_AUTH=true \
+  -v $(pwd)/data:/data \
+  sql-identity-oss
+```
+
+### Split Dev / Enterprise Stacks
+
+```bash
+# Local dev (all 4 warehouse connectors)
+IDR_PIP_EXTRAS=all docker compose up --build
+
+# Production GHCR images (with OIDC)
+IDR_AUTH_ISSUER=https://your-idp/realms/idr \
+IDR_AUTH_JWKS_URL=https://your-idp/realms/idr/protocol/openid-connect/certs \
+docker compose -f docker-compose.prod.yml up -d
+
+# Enterprise SSO + Redis + Prometheus + Grafana
+IDR_PIP_EXTRAS=all docker compose -f docker-compose.enterprise.yml up --build
+```
+

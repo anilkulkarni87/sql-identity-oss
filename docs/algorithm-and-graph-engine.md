@@ -82,7 +82,7 @@ $$
 A single frequent identifier with 10,000 records will generate **50 million rows** in an edge table, causing query planner OOMs, disk spillage, and massive warehouse credit burns.
 
 ### The Anchor Reduction Theorem
-`sql-identity-resolution` solves this by designating a single deterministic **Anchor Node** for every identifier group:
+`sql-identity-resolution` solves this by first deduplicating `(entity_key, identifier_type, identifier_value_norm)` pairs so multiple upstream mappings for the same entity cannot inflate group sizes or emit duplicate edges, and then designating a single deterministic **Anchor Node** for every identifier group:
 
 $$
 a(i) = \min \{e \in E \mid (e, i) \in E_B\}
@@ -311,22 +311,11 @@ $$
 2. **Longevity Priority (Tie-Break 1)**: If sizes are equal, the oldest cluster (earliest timestamp $t_{\text{created}}(C_j)$) wins.
 3. **Lexicographical Tie-Break (Tie-Break 2)**: Deterministic string comparison on $\text{id}_{\text{resolved}}(C_j)$ guarantees zero non-deterministic randomness.
 
-#### Invariant 3: Split Determinism
-When an override (`DO_NOT_LINK` or `ISOLATE`) severs an existing cluster into two pieces, the sub-component that contains the historical anchor preserves the original `resolved_id`. The separated sub-component is designated as a split cluster and receives a fresh canonical ID.
+#### Invariant 3: Split Determinism & Collision-Checked Fallback
+When an override (`DO_NOT_LINK` or `ISOLATE`) or identifier update severs an existing cluster into multiple pieces, at most one sub-component (preferring the component preserving `raw_label = prev_resolved_id` or the historical anchor) retains the original `resolved_id`. Separated sub-components fall back to their `raw_label`, or—if `raw_label` collides with any claimed or untouched historical `resolved_id` in `idr_out.identity_resolved_membership_current`—receive a deterministic collision-checked `:split:<8-hex-md5>` suffix (retried up to 5 times; if a collision or SQL failure persists, Stage 6 aborts with `RuntimeError` before Stage 8 mutates production outputs or advances watermarks).
 
-#### Invariant 4: Complete Cryptographic Crosswalk
-Every single transition is recorded into `idr_out.resolved_id_crosswalk`:
-```sql
-CREATE TABLE idr_out.resolved_id_crosswalk (
-    run_id VARCHAR,
-    old_resolved_id VARCHAR,
-    new_resolved_id VARCHAR,
-    entity_key VARCHAR,
-    change_type VARCHAR,  -- 'MERGE', 'SPLIT', 'NEW'
-    changed_at TIMESTAMP
-);
-```
-Downstream consumers can query this crosswalk as an **immutable SCD Type 2 mapping table** to remap legacy foreign keys without data loss.
+#### Invariant 4: Crosswalk Audit Trail
+Every cluster ID transition (`m.resolved_id != l.label`) is upserted into `idr_out.resolved_id_crosswalk` keyed by `(previous_resolved_id, current_resolved_id)` with `change_type` classified as `'SPLIT'` (when a previous cluster maps to multiple destinations) or `'MERGED'` (when it maps to one), along with `entities_moved`, `run_id`, and `updated_at`. Downstream consumers can query this crosswalk to remap legacy foreign keys without data loss.
 
 ---
 

@@ -30,6 +30,26 @@ except ImportError:
     yaml = None  # type: ignore
 
 
+def _safe_exists(path: Optional[Path]) -> bool:
+    """Return True if path exists, safely returning False on permission/OS errors."""
+    if not path:
+        return False
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _safe_is_file(path: Optional[Path]) -> bool:
+    """Return True if path is an accessible file, safely returning False on OS errors."""
+    if not path:
+        return False
+    try:
+        return path.exists() and path.is_file()
+    except OSError:
+        return False
+
+
 def _mask(val: Optional[str], show_last: int = 4) -> str:
     if not val:
         return ""
@@ -191,7 +211,7 @@ def discover_from_databrickscfg(config_path: Optional[Path] = None) -> List[Dict
     """Discover credentials from ~/.databrickscfg with support for headless INI, profiles, and tokens."""
     results: List[Dict[str, Any]] = []
     cfg_file = config_path or (Path.home() / ".databrickscfg")
-    if not cfg_file.exists():
+    if not _safe_exists(cfg_file):
         return results
 
     try:
@@ -284,7 +304,7 @@ def discover_from_snowflake_config(config_dir: Optional[Path] = None) -> List[Di
     candidates = [base_dir / "connections.toml", base_dir / "config.toml"]
 
     for candidate in candidates:
-        if not candidate.exists():
+        if not _safe_exists(candidate):
             continue
         try:
             data = tomllib.loads(candidate.read_text())
@@ -332,7 +352,12 @@ def discover_from_dbt_profiles(profiles_path: Optional[Path] = None) -> List[Dic
     seen_ids = set()
 
     for candidate in candidates:
-        if not candidate or not candidate.exists():
+        if not candidate:
+            continue
+        try:
+            if not candidate.exists():
+                continue
+        except OSError:
             continue
         try:
             data = yaml.safe_load(candidate.read_text())
@@ -444,7 +469,7 @@ def discover_from_gcloud_adc(adc_path: Optional[Path] = None) -> List[Dict[str, 
     """Discover Google Cloud Application Default Credentials."""
     results: List[Dict[str, Any]] = []
     candidate = adc_path or (Path.home() / ".config" / "gcloud" / "application_default_credentials.json")
-    if not candidate.exists():
+    if not _safe_exists(candidate):
         return results
 
     try:
@@ -482,7 +507,7 @@ def discover_local_duckdb_files(search_dir: Optional[Path] = None) -> List[Dict[
     ]
 
     for c in candidates:
-        if c.exists() and c.is_file():
+        if _safe_is_file(c):
             results.append({
                 "id": f"local_duckdb_{c.stem}",
                 "source": "local_file",

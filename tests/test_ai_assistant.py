@@ -267,3 +267,323 @@ def test_profile_builder_skips_unmapped_sources_and_pushes_prefix():
     assert "raw.crm" in sql
     assert "m.entity_key LIKE 'crm:%'" in sql
     assert "raw.clickstream" not in sql
+
+
+def test_schema_aware_pii_masking_and_copilot(tmp_path, monkeypatch):
+    import idr_api.dependencies as deps
+    from idr_core.ai_assistant import (
+        copilot_chat,
+        get_configured_pii_keys,
+        get_run_runtime_trend,
+    )
+    from idr_core.llm import mask_pii_payload
+
+    # 1. Dynamic + expanded PII key masking
+    masked = mask_pii_payload(
+        {"dob": "1990-04-12", "cust_nick": "Ali", "safe_metric": "42"},
+        extra_sensitive_keys=["cust_nick"],
+    )
+    assert masked["dob"] == "1***2"
+    assert masked["cust_nick"] == "A***i"
+    assert masked["safe_metric"] == "42"
+
+    # 2. Seed DuckDB with metadata + run_history + stage_metrics
+    db_file = str(tmp_path / "copilot.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    SchemaManager(adapter).initialize(reset=True)
+    adapter.execute("""
+        INSERT INTO idr_meta.entity_attribute_mapping (table_id, attribute_name, attribute_expr)
+        VALUES ('crm', 'cust_nick', 'nickname_col')
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.run_history
+            (run_id, run_mode, status, started_at, duration_seconds, entities_processed, edges_created, clusters_impacted)
+        VALUES
+            ('run_1', 'INCR', 'SUCCESS', CURRENT_TIMESTAMP, 42, 1000, 800, 400),
+            ('run_2', 'FULL', 'SUCCESS', CURRENT_TIMESTAMP - INTERVAL '1' DAY, 84, 2000, 1600, 750)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.stage_metrics (run_id, stage_name, stage_order, duration_seconds, rows_out)
+        VALUES ('run_1', 'label_propagation', 6, 20.0, 400)
+    """)
+
+    assert "cust_nick" in get_configured_pii_keys(adapter)
+    trend = get_run_runtime_trend(adapter)
+    assert trend["total_runs_checked"] == 2
+    assert trend["latest_run"]["run_id"] == "run_1"
+    assert trend["avg_duration_seconds"] == 63.0
+
+    # 3. Copilot propose_run (INCR & FULL) never auto-executes
+    fake_client_run = LLMClient(LLMConfig(provider="ollama", model="llama3.2"))
+    with patch.object(
+        fake_client_run,
+        "chat",
+        return_value=json.dumps({"intent": "propose_run", "mode": "INCR", "dry_run": False, "lens": None}),
+    ):
+        res_incr = copilot_chat(adapter, "Please run IDR incremental", client=fake_client_run)
+        assert res_incr["intent"] == "propose_run"
+        assert res_incr["proposed_action"]["mode"] == "INCR"
+        assert res_incr["pii_masked"] is False
+
+    # 4. Copilot runtime trend via /api/ai/copilot with BYOK (pii_masked=True)
+    adapter.close()
+    monkeypatch.setattr(deps, "OIDC_ISSUER", "")
+    monkeypatch.setattr(deps, "ALLOW_INSECURE_DEV_AUTH", True)
+    tc = TestClient(app)
+    assert tc.post("/api/connect", json={"platform": "duckdb", "database": db_file}).status_code == 200
+    assert (
+        tc.post(
+            "/api/ai/config",
+            json={"provider": "openai", "model": "gpt-4o-mini", "api_key": "sk-test"},
+        ).status_code
+        == 200
+    )
+    with patch(
+        "idr_core.llm.LLMClient.chat",
+        side_effect=[
+            json.dumps({"intent": "get_runtime_trend"}),
+            "Latest INCR run took 42.5s vs 63.75s average.",
+        ],
+    ):
+        resp = tc.post("/api/ai/copilot", json={"message": "What was IDR runtime today?"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["intent"] == "get_runtime_trend"
+        assert body["pii_masked"] is True
+        assert body["metrics"]["latest_run"]["duration_seconds"] == 42
+    tc.post("/api/disconnect")
+
+
+def test_ask_identity_graph_includes_active_config_summary(tmp_path):
+    from idr_core.ai_assistant import ask_identity_graph
+    from idr_core.config import apply_config_to_warehouse
+
+    db_file = str(tmp_path / "qa_cfg.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    try:
+        SchemaManager(adapter).initialize(reset=True)
+        apply_config_to_warehouse(
+            adapter,
+            {
+                "sources": [
+                    {
+                        "id": "crm",
+                        "table": "raw.crm",
+                        "entity_key": "id",
+                        "identifiers": [{"type": "email", "expr": "email"}],
+                    }
+                ],
+                "rules": [
+                    {"id": "104", "type": "EXACT", "match_keys": ["email"], "priority": 1, "canonicalize": "EMAIL_STANDARD"}
+                ],
+                "lenses": [{"id": "strict_person", "include_types": ["EMAIL"]}],
+            },
+        )
+        captured_messages = {}
+        client = LLMClient(LLMConfig(provider="ollama", model="llama3.2"))
+
+        def fake_chat(messages, **_kwargs):
+            captured_messages["messages"] = messages
+            return "Active rule 104 matches on email; lens strict_person uses EMAIL."
+
+        with patch.object(client, "chat", side_effect=fake_chat):
+            res = ask_identity_graph(adapter, "What rules and lenses are active?", client=client)
+
+        assert "strict_person" in res["answer"]
+        prompt_text = captured_messages["messages"][1]["content"]
+        assert "active_config" in prompt_text
+        assert "strict_person" in prompt_text
+        assert "EMAIL_STANDARD" in prompt_text
+    finally:
+        adapter.close()
+
+
+def test_forensics_bridge_anomalies_draft_lens_and_mcp(tmp_path):
+    from idr_core.ai_assistant import (
+        diagnose_run_anomalies,
+        draft_lens_from_goal,
+        find_cluster_bridge,
+    )
+    from idr_core.config import apply_config_to_warehouse
+    import idr_mcp.server as mcp_srv
+
+    db_file = str(tmp_path / "forensics.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    try:
+        SchemaManager(adapter).initialize(reset=True)
+        apply_config_to_warehouse(
+            adapter,
+            {
+                "sources": [
+                    {"id": "crm", "table": "raw.crm", "entity_key": "id", "identifiers": [{"type": "email", "expr": "email"}]},
+                ],
+                "rules": [
+                    {"id": "104", "type": "EXACT", "match_keys": ["email"], "priority": 1, "canonicalize": "EMAIL_STANDARD"},
+                    {"id": "105", "type": "EXACT", "match_keys": ["phone"], "priority": 2, "canonicalize": "PHONE_DIGITS"},
+                ],
+            },
+        )
+        # Seed a 3-hop cluster: crm:1 -> web:2 -> pos:9
+        adapter.execute("""
+            INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id)
+            VALUES ('crm:1', 'res_1'), ('web:2', 'res_1'), ('pos:9', 'res_1')
+        """)
+        adapter.execute("""
+            INSERT INTO idr_out.identity_edges_current (left_entity_key, right_entity_key, identifier_type, identifier_value_norm)
+            VALUES
+                ('crm:1', 'web:2', 'EMAIL', 'alice@example.com'),
+                ('web:2', 'pos:9', 'PHONE', '5550199')
+        """)
+        adapter.execute("""
+            INSERT INTO idr_out.run_history (run_id, run_mode, status, started_at, duration_seconds, entities_processed, edges_created, clusters_impacted)
+            VALUES ('run_fast', 'INCR', 'SUCCESS', CURRENT_TIMESTAMP - INTERVAL '1' DAY, 20, 100, 50, 40),
+                   ('run_slow', 'INCR', 'SUCCESS', CURRENT_TIMESTAMP, 100, 100, 50, 40)
+        """)
+        adapter.execute("""
+            INSERT INTO idr_out.stage_metrics (run_id, stage_name, stage_order, duration_seconds, rows_out)
+            VALUES ('run_slow', 'label_propagation', 6, 80.0, 40)
+        """)
+        adapter.execute("""
+            INSERT INTO idr_out.skipped_identifier_groups (run_id, identifier_type, identifier_value_norm, group_size, max_allowed)
+            VALUES ('run_slow', 'PHONE', '0000000000', 500, 100)
+        """)
+
+        bridge = find_cluster_bridge(adapter, "crm:1", "pos:9")
+        assert bridge["connected"] is True
+        assert bridge["hops"] == 2
+        assert bridge["recommended_override"]["override_type"] == "DO_NOT_LINK"
+        assert bridge["recommended_exclusion"]["identifier_value_pattern"] == "5550199"
+
+        diag = diagnose_run_anomalies(adapter)
+        assert diag["runtime_delta_pct"] > 25.0
+        assert diag["slowest_stage"]["stage_name"] == "label_propagation"
+        assert len(diag["skipped_hubs"]) == 1
+
+        lens_res = draft_lens_from_goal(adapter, "Create a strict login lens")
+        assert lens_res["lens"]["id"] == "strict_person"
+        assert "EMAIL" in lens_res["lens"]["include_types"]
+
+        # Compact MCP tools
+        with patch.object(mcp_srv, "get_adapter", return_value=adapter), patch.object(mcp_srv, "should_mask_pii", return_value=False):
+            mcp_bridge = mcp_srv.explain_cluster_bridge("crm:1", "pos:9")
+            assert mcp_bridge["hops"] == 2
+            mcp_diag = mcp_srv.diagnose_run_anomalies()
+            assert len(mcp_diag["skipped_hubs"]) == 1
+    finally:
+        adapter.close()
+
+
+def test_validate_unified_profile_against_source_data(tmp_path):
+    from idr_core.ai_assistant import copilot_chat, validate_unified_profile
+    from idr_core.config import apply_config_to_warehouse
+    from idr_core.runner import IDRRunner, RunConfig
+
+    db_file = str(tmp_path / "validate_prof.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    try:
+        SchemaManager(adapter).initialize(reset=True)
+        adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+        adapter.execute("""
+            CREATE TABLE raw.crm (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+            CREATE TABLE raw.pos (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+            INSERT INTO raw.crm VALUES ('c1', 'alice@example.com', TIMESTAMP '2026-01-01 00:00:00');
+            INSERT INTO raw.pos VALUES ('p1', 'alice@example.com', TIMESTAMP '2026-01-01 00:00:00');
+        """)
+        apply_config_to_warehouse(
+            adapter,
+            {
+                "sources": [
+                    {
+                        "id": "crm",
+                        "table": "raw.crm",
+                        "entity_key": "id",
+                        "watermark_column": "updated_at",
+                        "identifiers": [{"type": "email", "expr": "email"}],
+                    },
+                    {
+                        "id": "pos",
+                        "table": "raw.pos",
+                        "entity_key": "id",
+                        "watermark_column": "updated_at",
+                        "identifiers": [{"type": "email", "expr": "email"}],
+                    },
+                ],
+                "rules": [
+                    {"id": "104", "type": "EXACT", "match_keys": ["email"], "priority": 1, "canonicalize": "EMAIL_STANDARD"}
+                ],
+            },
+        )
+        res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+        assert res.status == "SUCCESS"
+
+        v = validate_unified_profile(adapter)
+        assert v["status"] == "VERIFIED"
+        assert v["member_count"] == 2
+        assert v["source_rows_matched"] == 2
+
+        client = LLMClient(LLMConfig(provider="ollama", model="llama3.2"))
+        with patch.object(
+            client,
+            "chat",
+            return_value=json.dumps({"intent": "validate_profile", "resolved_id": None}),
+        ):
+            chat_res = copilot_chat(adapter, "Can you validate a unified profile against source data?", client=client)
+        assert chat_res["intent"] == "validate_profile"
+        assert "VERIFIED" in chat_res["answer"]
+        assert "2/2 source rows verified" in chat_res["answer"]
+        from idr_core.ai_assistant import _sanitize_json
+        sanitized = _sanitize_json({"nan_val": float("nan"), "inf_val": float("inf"), "nested": [{"x": float("-inf")}]})
+        assert sanitized == {"nan_val": None, "inf_val": None, "nested": [{"x": None}]}
+        json.dumps(chat_res, allow_nan=False)
+
+        # Asking for SQL should route to profile_verification_sql even if the router returns validate_profile
+        with patch.object(
+            client,
+            "chat",
+            return_value=json.dumps({"intent": "validate_profile", "resolved_id": "unified profile against source data"}),
+        ):
+            sql_res = copilot_chat(
+                adapter,
+                "can you give me the sql for validate a unified profile against source data",
+                client=client,
+            )
+        assert sql_res["intent"] == "profile_verification_sql"
+        assert "idr_out.identity_resolved_membership_current" in sql_res["answer"]
+        assert "raw.crm" in sql_res["answer"]
+        assert "raw.pos" in sql_res["answer"]
+        assert "email" in sql_res["metrics"]["merge_identifier_types"]
+
+        # Explicit resolved_id in message should be extracted and used in generated SQL
+        with patch.object(
+            client,
+            "chat",
+            return_value=json.dumps({"intent": "profile_verification_sql", "resolved_id": None}),
+        ):
+            explicit_sql_res = copilot_chat(
+                adapter,
+                f"generate verification sql for {chat_res['metrics']['resolved_id']}",
+                client=client,
+            )
+        assert explicit_sql_res["intent"] == "profile_verification_sql"
+        assert explicit_sql_res["metrics"]["resolved_id"] == chat_res["metrics"]["resolved_id"]
+        assert len(explicit_sql_res["metrics"]["queries"]) >= 4
+        union_q = next(
+            q for q in explicit_sql_res["metrics"]["queries"] if "UNION ALL" in q["title"]
+        )
+        union_rows = adapter.query(union_q["sql"].rstrip(";"))
+        assert len(union_rows) == 2
+        assert {r["source_id"] for r in union_rows} == {"crm", "pos"}
+        assert {r["identifier_value"] for r in union_rows} == {"alice@example.com"}
+
+        # Hallucinated phrase in resolved_id should be ignored and fall back to sampling a real cluster
+        with patch.object(
+            client,
+            "chat",
+            return_value=json.dumps({"intent": "validate_profile", "resolved_id": "unified profile against source data"}),
+        ):
+            clean_res = copilot_chat(adapter, "validate unified profile against source data", client=client)
+        assert clean_res["intent"] == "validate_profile"
+        assert clean_res["metrics"]["status"] == "VERIFIED"
+        assert clean_res["metrics"]["resolved_id"] == chat_res["metrics"]["resolved_id"]
+    finally:
+        adapter.close()

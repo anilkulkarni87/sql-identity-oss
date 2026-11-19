@@ -105,7 +105,13 @@ Examples:
     run_parser.add_argument(
         "--lens",
         default=None,
-        help="Optional named lens ID from idr_meta.lens_definition to materialize",
+        help="Optional named lens ID from idr_meta.lens_definition to materialize (or 'none' to skip lenses)",
+    )
+    run_parser.add_argument(
+        "--skip-lenses",
+        action="store_true",
+        default=False,
+        help="Run only the primary pipeline and skip all configured lenses",
     )
 
     # === idr config ===
@@ -307,6 +313,27 @@ Examples:
     )
     qs_parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
+    # === idr demo ===
+    demo_parser = subparsers.add_parser(
+        "demo",
+        help="Generate demo data, run IDR, and launch the Explorer UI + /mcp in one command",
+    )
+    demo_parser.add_argument(
+        "--rows", type=int, default=10000, help="Number of demo records (default: 10000)"
+    )
+    demo_parser.add_argument(
+        "--output", "-o", default="quickstart_demo.duckdb", help="Output DuckDB path"
+    )
+    demo_parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    demo_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    demo_parser.add_argument("--port", type=int, default=8000, help="Port to bind to (default: 8000)")
+    demo_parser.add_argument(
+        "--no-browser", action="store_true", help="Do not automatically open the browser"
+    )
+    demo_parser.add_argument(
+        "--quiet", action="store_true", help="Hide per-request HTTP access logs"
+    )
+
     # === idr bootstrap ===
     bootstrap_parser = subparsers.add_parser(
         "bootstrap",
@@ -404,10 +431,11 @@ Examples:
         ("test", "Test connection to configured AI model (defaults to local Ollama)"),
         ("models", "List locally available Ollama models"),
         ("ask", "Ask a natural-language question about the identity graph"),
+        ("generate-config", "Profile warehouse tables (zero-PII) and generate a validated IDR config with AI reasoning"),
     ]:
         p = ai_subparsers.add_parser(sub_name, help=sub_help)
         p.add_argument("--provider", help="ollama | openai | anthropic | gemini | openai_compatible")
-        p.add_argument("--model", help="Model name (e.g. llama3.2, gpt-4o-mini)")
+        p.add_argument("--model", help="Model name (e.g. llama3.2, qwen2.5:14b, gpt-4o-mini)")
         p.add_argument("--base-url", help="Custom base URL (e.g. http://localhost:11434/v1)")
         p.add_argument("--api-key", help="API key (or set IDR_LLM_API_KEY)")
         mask_grp = p.add_mutually_exclusive_group()
@@ -418,6 +446,39 @@ Examples:
             p.add_argument("--platform", "-p", choices=["duckdb", "bigquery", "snowflake", "databricks"])
             p.add_argument("--db", help="DuckDB database path")
             p.add_argument("--project", help="GCP project ID (BigQuery)")
+        elif sub_name == "generate-config":
+            _add_connection_args(p)
+            p.add_argument(
+                "--tables",
+                help="Comma-separated table FQNs to include (if omitted, auto-discovers non-system tables)",
+            )
+            p.add_argument("--schema", help="Optional schema/dataset filter when auto-discovering tables")
+            p.add_argument(
+                "--goal",
+                default="Unify customer records accurately across sources with safe supernode guardrails and practical golden-profile survivorship.",
+                help="Business goal or domain guidance for the AI architect",
+            )
+            p.add_argument(
+                "--output",
+                "-o",
+                default="idr_config.yaml",
+                help="Output YAML file path (default: idr_config.yaml)",
+            )
+            p.add_argument(
+                "--reasoning-out",
+                help="Optional path to write full JSON reasoning & validation report",
+            )
+            p.add_argument(
+                "--sample-size",
+                type=int,
+                default=2000,
+                help="Sample size per table for statistical profiling (default: 2000)",
+            )
+            p.add_argument(
+                "--no-verify-sql",
+                action="store_true",
+                help="Skip live warehouse SQL dry-parse verification",
+            )
 
     # === idr explain ===
     explain_parser = subparsers.add_parser("explain", help="Explain why an identity cluster merged using AI")
@@ -498,6 +559,9 @@ Examples:
 
     if parsed_args.command == "quickstart":
         return handle_quickstart(parsed_args)
+
+    if parsed_args.command == "demo":
+        return handle_demo(parsed_args)
 
     if parsed_args.command == "bootstrap":
         return handle_bootstrap(parsed_args)
@@ -915,6 +979,7 @@ def handle_run(args) -> int:
         if args.config:
             config_data = load_config(args.config)
             if args.dry_run:
+                IDRRunner.check_no_active_run_lock(adapter)
                 ephemeral_dry_run = True
                 meta_snapshots = snapshot_meta_tables(adapter)
                 apply_config_to_warehouse(adapter, config_data, record_snapshot=False)
@@ -930,6 +995,7 @@ def handle_run(args) -> int:
             max_moved_entities_pct=getattr(args, "max_moved_pct", None),
             max_cluster_delta_pct=getattr(args, "max_cluster_delta_pct", None),
             lens=getattr(args, "lens", None),
+            skip_lenses=getattr(args, "skip_lenses", False),
         )
         result = runner.run(config)
 
@@ -1085,6 +1151,34 @@ def handle_quickstart(args) -> int:
         rows=args.rows,
         seed=args.seed,
     )
+
+
+def handle_demo(args) -> int:
+    """Generate demo DuckDB dataset, run IDR, and launch the bundled Explorer UI + /mcp."""
+    from idr_core.quickstart import run_quickstart
+
+    rc = run_quickstart(
+        output=args.output,
+        rows=args.rows,
+        seed=args.seed,
+    )
+    if rc != 0:
+        return rc
+
+    args.platform = "duckdb"
+    args.db = args.output
+    args.project = None
+    args.location = "US"
+    args.account = None
+    args.user = None
+    args.password = None
+    args.warehouse = None
+    args.database = None
+    args.schema = "PUBLIC"
+    args.role = None
+    args.reload = False
+    args.open = not getattr(args, "no_browser", False)
+    return handle_serve(args)
 
 
 def handle_doctor(args) -> int:
@@ -1308,6 +1402,79 @@ def handle_ai(args) -> int:
         print(f"[{res['provider']}:{res['model']} | pii_masked={res['pii_masked']}]\n")
         print(res["answer"])
         return 0
+
+    if args.ai_cmd == "generate-config":
+        import json
+
+        from idr_core.bootstrap import AutoBootstrapper
+        from idr_core.rule_generator import AIRuleGenerator, render_config_yaml_with_reasoning
+
+        adapter = get_adapter(args)
+        tables_arg = getattr(args, "tables", None)
+        if tables_arg:
+            tables = [t.strip() for t in tables_arg.split(",") if t.strip()]
+        else:
+            tables = AutoBootstrapper(adapter)._discover_tables(getattr(args, "schema", None))
+
+        if not tables:
+            print("❌ No candidate tables found. Pass --tables schema.table1,schema.table2 explicitly.")
+            return 1
+
+        print("=" * 72)
+        print("⚡ SQL Identity Resolution — AI Rule & Config Generator (Zero-PII)")
+        print("=" * 72)
+        print(f"Tables ({len(tables)}): {', '.join(tables)}")
+        print(f"Model:  {client.config.provider}:{client.config.resolved_model()}")
+        print("Profiling & synthesizing validated IDR configuration...")
+
+        plan = AIRuleGenerator(adapter, client=client).generate(
+            tables=tables,
+            goal=getattr(args, "goal", ""),
+            sample_size=getattr(args, "sample_size", 2000),
+            verify_sql=not getattr(args, "no_verify_sql", False),
+        )
+
+        yaml_text = render_config_yaml_with_reasoning(plan)
+        out_path = getattr(args, "output", "idr_config.yaml")
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+
+        reasoning_out = getattr(args, "reasoning_out", None)
+        if reasoning_out:
+            with open(reasoning_out, "w", encoding="utf-8") as f:
+                json.dump(plan.model_dump(), f, indent=2, default=str)
+
+        cfg = plan.suggested_config or {}
+        print(f"\n✓ Mode: {plan.generation_mode} | Validated: {plan.validation_report.valid} | SQL Verified: {plan.validation_report.sql_verified}")
+        print(f"✓ Sources: {len(cfg.get('sources') or [])} | Rules: {len(cfg.get('rules') or [])} | Survivorship: {len(cfg.get('survivorship') or [])} | Lenses: {len(cfg.get('lenses') or [])}")
+
+        overlaps = (plan.profile_summary or {}).get("cross_table_overlaps") or []
+        if overlaps:
+            print("\nCross-Table Key Overlaps Detected:")
+            for ov in overlaps[:8]:
+                print(
+                    f"  • {ov['table_a']}.{ov['column_a']} ↔ {ov['table_b']}.{ov['column_b']} "
+                    f"[{ov['identifier_type']}]: {ov['overlap_a_in_b']:.0%} / {ov['overlap_b_in_a']:.0%}"
+                )
+
+        if plan.explanations.rules:
+            print("\nProposed Rules & Reasoning:")
+            for item in plan.explanations.rules:
+                flag = " ⚠ NEEDS REVIEW" if item.needs_review else ""
+                print(f"  • {item.target} ({item.confidence}{flag}): {item.summary}")
+                for r in item.risks:
+                    print(f"      Risk: {r}")
+
+        if plan.validation_report.warnings:
+            print("\nWarnings:")
+            for w in plan.validation_report.warnings:
+                print(f"  ! {w}")
+
+        print(f"\n📁 Config written to: {out_path}")
+        if reasoning_out:
+            print(f"📄 Reasoning report written to: {reasoning_out}")
+        print(f"💡 Next step: Review {out_path}, then run `idr config apply --config {out_path}`.")
+        return 0 if plan.validation_report.valid else 1
 
     return 0
 

@@ -1227,6 +1227,93 @@ def submit_evaluation_label(
         return {"status": "ERROR", "error": f"Failed to submit evaluation label: {str(e)}"}
 
 
+@mcp.tool()
+def explain_cluster_bridge(entity_key_a: str, entity_key_b: str) -> Dict[str, Any]:
+    """
+    Token-efficient multi-hop forensics: return ONLY the shortest edge bridge path
+    connecting two entity keys and the recommended DO_NOT_LINK/exclusion fix.
+    """
+    from idr_core.ai_assistant import find_cluster_bridge, get_configured_pii_keys
+    from idr_core.llm import mask_pii_payload
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    res = find_cluster_bridge(adapter, entity_key_a, entity_key_b)
+    if should_mask_pii():
+        res = mask_pii_payload(res, extra_sensitive_keys=get_configured_pii_keys(adapter))
+    return res
+
+
+@mcp.tool()
+def diagnose_run_anomalies() -> Dict[str, Any]:
+    """
+    Token-efficient drift & regression triage: compare latest run vs recent baseline
+    and return only runtime regressions, slowest stage, and top skipped hubs.
+    """
+    from idr_core.ai_assistant import diagnose_run_anomalies as _diagnose
+    from idr_core.ai_assistant import get_configured_pii_keys
+    from idr_core.llm import mask_pii_payload
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    res = _diagnose(adapter)
+    if should_mask_pii():
+        res = mask_pii_payload(res, extra_sensitive_keys=get_configured_pii_keys(adapter))
+    return res
+
+
+@mcp.tool()
+def diff_lenses_summary(lens_a: str, lens_b: str, limit: int = 10) -> Dict[str, Any]:
+    """
+    Token-efficient cross-lens diff: compare clusterings between two lenses
+    (e.g. strict_person vs household) with compact sample rows.
+    """
+    from idr_core.config import compute_lens_diff
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    try:
+        return compute_lens_diff(adapter, lens_a, lens_b, limit=limit)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def validate_unified_profile(resolved_id: str = None) -> Dict[str, Any]:
+    """
+    Query a real unified profile cluster (or sample a multi-entity cluster) and
+    cross-check its linked entity keys and identifiers directly against raw source tables.
+    """
+    from idr_core.ai_assistant import get_configured_pii_keys
+    from idr_core.ai_assistant import validate_unified_profile as _validate
+    from idr_core.llm import mask_pii_payload
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    res = _validate(adapter, resolved_id=resolved_id)
+    if should_mask_pii():
+        res = mask_pii_payload(res, extra_sensitive_keys=get_configured_pii_keys(adapter))
+    return res
+
+
+@mcp.tool()
+def generate_profile_verification_sql(resolved_id: str = None) -> Dict[str, Any]:
+    """
+    Generate deterministic warehouse SQL queries for a resolved_id (or sampled multi-entity cluster)
+    to inspect cluster merge edges and verify raw source rows and identifiers.
+    """
+    from idr_core.ai_assistant import generate_profile_verification_sql as _gen_sql
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    return _gen_sql(adapter, resolved_id=resolved_id)
+
+
 # --- MCP Resources & Prompts (Self-Documenting Specs for Agents) ---
 
 
@@ -1396,6 +1483,34 @@ def connect_from_env():
 
     except Exception as e:
         print(f"⚠ Failed to connect to {platform}: {e}", file=sys.stderr)
+
+
+@mcp.tool()
+def generate_idr_rules(
+    tables: Optional[list[str]] = None,
+    goal: str = "Unify customer records accurately across sources with safe supernode guardrails and practical golden-profile survivorship.",
+    sample_size: int = 2000,
+    verify_sql: bool = True,
+) -> Dict[str, Any]:
+    """
+    Profile warehouse tables (strictly zero-PII) and synthesize a validated IDR
+    configuration with human-readable reasoning for each table, rule, survivorship,
+    and lens decision. Read-only: never mutates idr_meta tables.
+    """
+    from idr_core.profiler import is_system_table
+    from idr_core.rule_generator import AIRuleGenerator
+
+    adapter = get_adapter()
+    target_tables = [t for t in (tables or []) if t and not is_system_table(t)]
+    if not target_tables and hasattr(adapter, "list_tables"):
+        target_tables = [t for t in adapter.list_tables() if not is_system_table(t)][:15]
+    plan = AIRuleGenerator(adapter).generate(
+        tables=target_tables,
+        goal=goal,
+        sample_size=sample_size,
+        verify_sql=verify_sql,
+    )
+    return plan.model_dump()
 
 
 def main():

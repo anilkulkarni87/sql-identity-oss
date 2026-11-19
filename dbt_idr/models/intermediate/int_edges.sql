@@ -39,16 +39,26 @@ filtered_identifiers as (
       )
 ),
 
+dedup_identifiers as (
+    select
+        entity_key,
+        identifier_type,
+        identifier_value_norm,
+        max(max_group_size) as max_group_size
+    from filtered_identifiers
+    group by entity_key, identifier_type, identifier_value_norm
+),
+
 identifier_groups as (
-    -- Count entities per identifier value
+    -- Count distinct entities per identifier value
     select
         identifier_type,
         identifier_value_norm,
-        max_group_size,
+        max(max_group_size) as max_group_size,
         count(*) as group_size,
         min(entity_key) as anchor_entity_key
-    from filtered_identifiers
-    group by identifier_type, identifier_value_norm, max_group_size
+    from dedup_identifiers
+    group by identifier_type, identifier_value_norm
 ),
 
 valid_groups as (
@@ -70,7 +80,7 @@ raw_edges as (
         vg.identifier_value_norm,
         current_timestamp as created_at
     from valid_groups vg
-    inner join filtered_identifiers i
+    inner join dedup_identifiers i
         on i.identifier_type = vg.identifier_type
         and i.identifier_value_norm = vg.identifier_value_norm
     where i.entity_key != vg.anchor_entity_key

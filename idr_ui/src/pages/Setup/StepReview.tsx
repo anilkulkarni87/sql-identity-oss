@@ -301,7 +301,11 @@ export default function StepReview({
                 max_group_size: maxGroupSize,
                 ...(parsedMovedPct && parsedMovedPct > 0 ? { max_moved_entities_pct: parsedMovedPct } : {}),
                 ...(parsedClusterPct && parsedClusterPct > 0 ? { max_cluster_delta_pct: parsedClusterPct } : {}),
-                ...(selectedLens ? { lens: selectedLens } : {}),
+                ...(selectedLens === '__none__'
+                    ? { skip_lenses: true }
+                    : selectedLens
+                        ? { lens: selectedLens }
+                        : {}),
                 dry_run: effectiveDryRun,
                 ...(effectiveDryRun ? { config: cleanConfig } : {}),
             });
@@ -826,8 +830,10 @@ export default function StepReview({
                                 }}
                                 options={[
                                     { value: '', label: `All Lenses (${(config.lenses || []).length}) + Primary` },
+                                    { value: '__none__', label: 'Primary Only (Skip Lenses)' },
                                     ...(config.lenses || []).map((l) => ({ value: l.id, label: l.id })),
                                 ]}
+                                ariaLabel="Target Lens"
                                 className="w-full"
                                 buttonClassName="text-sm py-2 bg-gray-900"
                                 menuClassName="left-0 right-0"

@@ -299,6 +299,68 @@ def print_results(conn, result, duration):
         pass
 
 
+def _print_sample_cluster_and_dry_run_demo(conn, adapter) -> None:
+    """Display one multi-source cluster and a non-mutating DO_NOT_LINK dry-run split preview."""
+    from idr_core.config import compute_dry_run_summary, restore_meta_tables, snapshot_meta_tables
+    from idr_core.runner import IDRRunner, RunConfig
+
+    try:
+        sample = conn.execute("""
+            SELECT resolved_id, COUNT(*) AS sz
+            FROM idr_out.identity_resolved_membership_current
+            GROUP BY resolved_id
+            HAVING COUNT(*) >= 2
+            ORDER BY COUNT(*) DESC, resolved_id ASC
+            LIMIT 1
+        """).fetchone()
+        if not sample:
+            return
+        res_id, sz = sample[0], sample[1]
+        members = [
+            r[0]
+            for r in conn.execute(
+                "SELECT entity_key FROM idr_out.identity_resolved_membership_current "
+                "WHERE resolved_id = ? ORDER BY entity_key LIMIT 5",
+                [res_id],
+            ).fetchall()
+        ]
+        print(f"  Sample Resolved Cluster ({res_id}, {sz} records):")
+        print("  ─────────────────────────────────────────────")
+        for ek in members:
+            print(f"    • {ek}")
+        print()
+
+        if len(members) >= 2:
+            a, b = members[0], members[1]
+            meta_snaps = snapshot_meta_tables(adapter)
+            try:
+                adapter.execute(f"""
+                    INSERT INTO idr_meta.identity_override
+                        (override_type, entity_key_a, entity_key_b, reason, is_active)
+                    VALUES ('DO_NOT_LINK', '{a}', '{b}', 'Quickstart dry-run preview', TRUE)
+                """)
+                dry_res = IDRRunner(adapter).run(RunConfig(run_mode="INCR", dry_run=True))
+                if dry_res.status == "DRY_RUN_COMPLETE":
+                    summary = compute_dry_run_summary(
+                        adapter,
+                        dry_res.run_id,
+                        "INCR",
+                        edges_created=dry_res.edges_created,
+                        clusters_impacted=dry_res.clusters_impacted,
+                    )
+                    print(f"  Governance Dry-Run Preview (DO_NOT_LINK {a} vs {b}):")
+                    print("  ─────────────────────────────────────────────")
+                    print(f"    Moved Entities:  {summary.get('moved_entities', 0):,}")
+                    print(f"    Edges Delta:     {summary.get('edges_delta', 0):+d}")
+                    print(f"    Clusters Delta:  {summary.get('clusters_delta', 0):+d}")
+                    print("    (Live tables & metadata unchanged)")
+                    print()
+            finally:
+                restore_meta_tables(adapter, meta_snaps)
+    except Exception:
+        pass
+
+
 def run_quickstart(
     output: str = "quickstart_demo.duckdb",
     rows: int = 10000,
@@ -365,6 +427,7 @@ def run_quickstart(
     if "SUCCESS" in result.status:
         print(f"    ✓ Completed in {duration:.1f}s")
         print_results(conn, result, duration)
+        _print_sample_cluster_and_dry_run_demo(conn, adapter)
     else:
         print(f"    ❌ Run failed: {result.status}")
         if result.error:

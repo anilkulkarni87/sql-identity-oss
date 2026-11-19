@@ -1,18 +1,28 @@
-# IDR dbt Package
+# IDR dbt Package (`dbt_idr`)
 
-This dbt package implements the core identity resolution logic in SQL, allowing you to run the IDR pipeline directly within your dbt project.
+`dbt_idr` is the **lightweight, batch-oriented dbt package** for SQL Identity Resolution. It runs deterministic anchor-star identity stitching, stewardship overrides (`FORCE_LINK`, `DO_NOT_LINK`, `ISOLATE`), cluster confidence scoring, and golden profile survivorship directly inside a dbt project.
 
-## Feature Parity
+> **Batch Starter vs. Full Engine**: Use `dbt_idr` for full-refresh / batch dbt DAGs. For **incremental cluster splits** (retroactive governance seeding, un-watermarked `NOT EXISTS` diffing, `reextracted_entities` invalidation), **cross-run `resolved_id` stabilization & crosswalk**, **pre-write blast-radius gates**, and **advisory run locks**, use the core Python runner (`idr run` via `idr_core`)—which shares the exact same metadata model (`idr dbt export`).
 
-| Feature | Core Runner (Python) | dbt Package | Notes |
-|---------|----------------------|-------------|-------|
-| Identity Resolution | ✅ | ✅ | Recursive CTEs used for all platforms. |
-| Fuzzy Matching | ✅ | ❌ | dbt package currently supports deterministic resolution only. |
-| Config Snapshots | ✅ | ❌ | |
-| Edge Evidence | ✅ | ❌ | |
-| Golden Profiles | ✅ | ✅ | Full parity: `RECENCY`, `PRIORITY`, and `FREQUENCY` (mode with recency tie-breaker). |
-| Confidence Scoring | ✅ | ✅ | Grounded Spanning Tree Connectivity & Identifier Fidelity scoring. |
-| Strict Mode | ✅ | N/A | dbt package is effectively "strict mode" (deterministic only). |
+## Feature Parity (`idr_core` vs. `dbt_idr`)
+
+| Feature | Core Runner (`idr_core`) | dbt Package (`dbt_idr`) | Notes |
+|---------|--------------------------|-------------------------|-------|
+| Anchor-Star $N-1$ Edges & `max_group_size` | ✅ | ✅ | Bounded star reduction + `skipped_identifier_groups` telemetry. |
+| Stewardship Overrides (`FORCE_LINK`, `DO_NOT_LINK`, `ISOLATE`) | ✅ (+ multi-hop bridge repair) | ✅ (edge-level) | `dbt_idr` detaches `max(a, b)` from shared anchor groups in `int_edges.sql`. |
+| Golden Profiles (`RECENCY`, `PRIORITY`, `FREQUENCY`) | ✅ | ✅ | Full parity in `golden_profiles.sql`. |
+| Confidence Scoring & Dry-Run Summary | ✅ | ✅ | `identity_clusters.sql`, `dry_run_results.sql`, `dry_run_summary.sql`. |
+| Incremental Cluster Splits & Governance Seeding | ✅ | ❌ | `idr_core` only (`gov_affected_entities`, `reextracted_entities`). |
+| Cross-Run `resolved_id` Stabilization & Crosswalk | ✅ | ❌ | `idr_core` only (dual-window `ROW_NUMBER()` + collision-checked fallback). |
+| Pre-Write Blast-Radius Gate & Compensating Recovery | ✅ | ❌ | `idr_core` only (`_backup_*` snapshots + advisory run lock). |
+| Fuzzy Matching, Config Snapshots & Edge Evidence | ✅ | ❌ | `dbt_idr` is deterministic-only. |
+
+## How `dbt_idr` Differs from Other dbt Identity Packages
+
+Unlike ID-stitching-only dbt packages (such as `rudderlabs/id_stitching` or `tasman_identity_graph`), `dbt_idr` provides:
+- **Supernode protection out of the box**: `max_group_size` bounds anchor-star edge generation and logs skipped poison-pill groups (`skipped_identifier_groups.sql`).
+- **Stewardship overrides in SQL**: `FORCE_LINK`, `DO_NOT_LINK` (with higher-key shared-anchor detachment), and `ISOLATE` are first-class models.
+- **Survivorship & explainability**: Built-in `golden_profiles.sql`, `identity_clusters.sql` confidence metrics, and `rule_match_audit.sql`—all sharing a metadata contract with `idr_core` so you can graduate to `idr run` without redesigning your rules.
 
 ## Usage
 

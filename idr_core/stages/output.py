@@ -409,8 +409,15 @@ class OutputStage(BaseStage):
         current_ts = self._dialect["current_timestamp"]
         snapshots = self._snapshot_current_outputs()
 
+        # Pre-write blast-radius veto runs BEFORE any current-output mutation and
+        # bypasses _restore_current_outputs so vetoed runs perform zero current-table writes.
         try:
             self._enforce_blast_radius_gate(snapshots)
+        except Exception:
+            self._cleanup_output_snapshots(snapshots)
+            raise
+
+        try:
 
             # 1. Identify impacted clusters for confidence scoring
             self.adapter.execute("""
@@ -422,7 +429,21 @@ class OutputStage(BaseStage):
             # 1b. Record resolved_id crosswalk for any clusters that merged or split
             self._record_resolved_id_crosswalk()
 
-            # 2. Update membership table
+            # 2. Update membership table (and remove hard-deleted no-watermark entities in INCR mode)
+            if (
+                self.config
+                and self.config.run_mode == "INCR"
+                and self.adapter.table_exists("idr_work.deleted_no_wm_entities")
+            ):
+                self.adapter.execute("""
+                    DELETE FROM idr_work.lp_labels
+                    WHERE entity_key IN (SELECT entity_key FROM idr_work.deleted_no_wm_entities)
+                """)
+                self.adapter.execute("""
+                    DELETE FROM idr_out.identity_resolved_membership_current
+                    WHERE entity_key IN (SELECT entity_key FROM idr_work.deleted_no_wm_entities)
+                """)
+
             self.upsert(
                 target_table="idr_out.identity_resolved_membership_current",
                 source_query=f"""

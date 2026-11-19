@@ -857,18 +857,138 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                         """)
                 raise e
 
-        # 1. Sources
-        sources_rows = _query_active_sources(adapter)
+        def _query_ids():
+            return adapter.query("""
+                SELECT table_id, identifier_type, identifier_value_expr
+                FROM idr_meta.identifier_mapping
+            """)
 
-        # Fetch identifiers
-        ids_rows = adapter.query("""
-            SELECT table_id, identifier_type, identifier_value_expr
-            FROM idr_meta.identifier_mapping
-        """)
+        def _query_attrs():
+            return adapter.query("""
+                SELECT table_id, attribute_name, attribute_expr
+                FROM idr_meta.entity_attribute_mapping
+            """)
+
+        def _query_active_rules():
+            try:
+                return adapter.query("""
+                    SELECT rule_id, identifier_type, max_group_size, priority, canonicalize
+                    FROM idr_meta.rule
+                    WHERE is_active = TRUE
+                    ORDER BY priority ASC
+                """)
+            except Exception as e:
+                if (
+                    "no such column" in str(e).lower()
+                    or "unrecognized name" in str(e).lower()
+                    or "invalid identifier" in str(e).lower()
+                ):
+                    print("Warning: 'is_active' column missing in rule, assuming all active.")
+                    return adapter.query("""
+                        SELECT rule_id, identifier_type, max_group_size, priority, canonicalize
+                        FROM idr_meta.rule
+                        ORDER BY priority ASC
+                    """)
+                raise e
+
+        def _query_active_survivorship():
+            try:
+                return adapter.query("""
+                    SELECT attribute_name, strategy, source_priority_list, recency_field
+                    FROM idr_meta.survivorship_rule
+                    WHERE is_active = TRUE
+                """)
+            except Exception as e:
+                if (
+                    "no such column" in str(e).lower()
+                    or "unrecognized name" in str(e).lower()
+                    or "invalid identifier" in str(e).lower()
+                ):
+                    print(
+                        "Warning: 'is_active' column missing in survivorship_rule, assuming all active."
+                    )
+                    return adapter.query("""
+                        SELECT attribute_name, strategy, source_priority_list, recency_field
+                        FROM idr_meta.survivorship_rule
+                    """)
+                raise e
+
+        def _query_active_fuzzy():
+            try:
+                return adapter.query("""
+                    SELECT rule_id, blocking_key_expr, score_expr, threshold, priority
+                    FROM idr_meta.fuzzy_rule
+                    WHERE is_active = TRUE
+                    ORDER BY priority ASC
+                """)
+            except Exception:
+                return []
+
+        def _query_exclusions():
+            try:
+                return adapter.query("""
+                    SELECT identifier_type, identifier_value_pattern, match_type, reason
+                    FROM idr_meta.identifier_exclusion
+                """)
+            except Exception:
+                return []
+
+        def _query_overrides():
+            try:
+                return adapter.query("""
+                    SELECT override_id, override_type, entity_key_a, entity_key_b, reason, created_by
+                    FROM idr_meta.identity_override
+                    WHERE is_active = TRUE
+                """)
+            except Exception:
+                return []
+
+        def _query_lenses():
+            try:
+                return adapter.query("""
+                    SELECT lens_id, include_types_json, exclude_types_json, source_filter_json, max_group_size
+                    FROM idr_meta.lens_definition
+                    WHERE is_active = TRUE
+                    ORDER BY lens_id ASC
+                """)
+            except Exception:
+                return []
+
+        tasks = {
+            "sources": lambda: _query_active_sources(adapter),
+            "ids": _query_ids,
+            "attrs": _query_attrs,
+            "rules": _query_active_rules,
+            "survivorship": _query_active_survivorship,
+            "fuzzy": _query_active_fuzzy,
+            "exclusions": _query_exclusions,
+            "overrides": _query_overrides,
+            "lenses": _query_lenses,
+        }
+
+        dialect = str(getattr(adapter, "dialect", "") or "").lower()
+        if dialect != "duckdb":
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                futures = {k: pool.submit(fn) for k, fn in tasks.items()}
+                results = {k: fut.result() for k, fut in futures.items()}
+        else:
+            results = {k: fn() for k, fn in tasks.items()}
+
+        sources_rows = results["sources"]
+        ids_rows = results["ids"]
+        attrs_rows = results["attrs"]
+        rules_rows = results["rules"]
+        srv_rows = results["survivorship"]
+        fuzzy_rows = results["fuzzy"]
+        excl_rows = results["exclusions"]
+        ov_rows = results["overrides"]
+        lens_rows = results["lenses"]
+
+        # 1. Sources
         ids_map = {}
         for row in ids_rows:
-            # Handle both dictionary and object access depending on adapter return
-            # DuckDB adapter returns dict-like objects usually
             tid = row["table_id"]
             if tid not in ids_map:
                 ids_map[tid] = []
@@ -880,11 +1000,6 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 }
             )
 
-        # Fetch attributes
-        attrs_rows = adapter.query("""
-            SELECT table_id, attribute_name, attribute_expr
-            FROM idr_meta.entity_attribute_mapping
-        """)
         attrs_map = {}
         for row in attrs_rows:
             tid = row["table_id"]
@@ -898,7 +1013,6 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 }
             )
 
-        # Assemble sources
         for src_row in sources_rows:
             tid = src_row["table_id"]
             raw_wm = src_row.get("watermark_column")
@@ -923,78 +1037,18 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             config["sources"].append(source)
 
         # 2. Matching Rules
-        def _query_active_rules(adapter):
-            try:
-                return adapter.query("""
-                    SELECT rule_id, identifier_type, max_group_size, priority, canonicalize
-                    FROM idr_meta.rule
-                    WHERE is_active = TRUE
-                    ORDER BY priority ASC
-                """)
-            except Exception as e:
-                if (
-                    "no such column" in str(e).lower()
-                    or "unrecognized name" in str(e).lower()
-                    or "invalid identifier" in str(e).lower()
-                ):
-                    print("Warning: 'is_active' column missing in rule, assuming all active.")
-                    return adapter.query("""
-                        SELECT rule_id, identifier_type, max_group_size, priority, canonicalize
-                        FROM idr_meta.rule
-                        ORDER BY priority ASC
-                    """)
-                raise e
-
-        rules_rows = _query_active_rules(adapter)
-
         for rule_row in rules_rows:
-            # Reverse engineer 'exact' rule format
-            # In our schema, we only support single identifier_type strict match per rule row mostly?
-            # Actually schema has identifier_type.
-            # If we used multi-key match, we likely stored it as a complex rule or split logic?
-            # Looking at schema_defs, `rule` table has `identifier_type`.
-            # So currently strictly supports 1-key match?
-            # Wait, `generate_upsert` logic for rules:
-            # "match_keys": [rule["identifier_type"]]
-            # So we can reconstruct it.
-
             rule = {
                 "id": rule_row["rule_id"],
                 "type": "EXACT",
                 "match_keys": [rule_row["identifier_type"]],
                 "priority": rule_row["priority"],
-                "canonicalize": rule_row.get("canonicalize", "LOWERCASE"),  # Safe get
+                "canonicalize": rule_row.get("canonicalize", "LOWERCASE"),
             }
             config["rules"].append(rule)
 
         # 3. Survivorship Rules
-        def _query_active_survivorship(adapter):
-            try:
-                return adapter.query("""
-                    SELECT attribute_name, strategy, source_priority_list, recency_field
-                    FROM idr_meta.survivorship_rule
-                    WHERE is_active = TRUE
-                """)
-            except Exception as e:
-                # Fallback
-                if (
-                    "no such column" in str(e).lower()
-                    or "unrecognized name" in str(e).lower()
-                    or "invalid identifier" in str(e).lower()
-                ):
-                    print(
-                        "Warning: 'is_active' column missing in survivorship_rule, assuming all active."
-                    )
-                    return adapter.query("""
-                        SELECT attribute_name, strategy, source_priority_list, recency_field
-                        FROM idr_meta.survivorship_rule
-                    """)
-                raise e
-
-        srv_rows = _query_active_survivorship(adapter)
-
         for srv_row in srv_rows:
-            # Parse source_priority_list string back to list
             p_list = []
             raw_plist = srv_row["source_priority_list"]
             if raw_plist:
@@ -1003,7 +1057,6 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 try:
                     p_list = ast.literal_eval(raw_plist)
                 except Exception:
-                    # Fallback if simple string or comma sep
                     p_list = [
                         s.strip()
                         for s in raw_plist.replace("[", "").replace("]", "").split(",")
@@ -1021,22 +1074,8 @@ def sql_to_config(adapter) -> Dict[str, Any]:
 
             config["survivorship"].append(rule)
 
-        # 4. Fuzzy Rules (New)
-        def _query_active_fuzzy(adapter):
-            try:
-                return adapter.query("""
-                    SELECT rule_id, blocking_key_expr, score_expr, threshold, priority
-                    FROM idr_meta.fuzzy_rule
-                    WHERE is_active = TRUE
-                    ORDER BY priority ASC
-                """)
-            except Exception:
-                # Table might not exist yet in older schemas
-                return []
-
-        fuzzy_rows = _query_active_fuzzy(adapter)
+        # 4. Fuzzy Rules
         config["fuzzy_rules"] = []
-
         for row in fuzzy_rows:
             rule = {
                 "id": row["rule_id"],
@@ -1049,16 +1088,6 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             config["fuzzy_rules"].append(rule)
 
         # 5. Identifier Exclusions
-        def _query_exclusions(adapter):
-            try:
-                return adapter.query("""
-                    SELECT identifier_type, identifier_value_pattern, match_type, reason
-                    FROM idr_meta.identifier_exclusion
-                """)
-            except Exception:
-                return []
-
-        excl_rows = _query_exclusions(adapter)
         config["exclusions"] = [
             {
                 "type": row["identifier_type"],
@@ -1070,17 +1099,6 @@ def sql_to_config(adapter) -> Dict[str, Any]:
         ]
 
         # 6. Manual Stewardship Overrides
-        def _query_overrides(adapter):
-            try:
-                return adapter.query("""
-                    SELECT override_id, override_type, entity_key_a, entity_key_b, reason, created_by
-                    FROM idr_meta.identity_override
-                    WHERE is_active = TRUE
-                """)
-            except Exception:
-                return []
-
-        ov_rows = _query_overrides(adapter)
         if ov_rows:
             config["overrides"] = [
                 {
@@ -1095,27 +1113,18 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             ]
 
         # 7. Multi-Lens Definitions
-        try:
-            lens_rows = adapter.query("""
-                SELECT lens_id, include_types_json, exclude_types_json, source_filter_json, max_group_size
-                FROM idr_meta.lens_definition
-                WHERE is_active = TRUE
-                ORDER BY lens_id ASC
-            """)
-            if lens_rows:
-                config["lenses"] = []
-                for lrow in lens_rows:
-                    ldef: Dict[str, Any] = {
-                        "id": lrow["lens_id"],
-                        "include_types": json.loads(lrow["include_types_json"]) if lrow.get("include_types_json") else [],
-                        "exclude_types": json.loads(lrow["exclude_types_json"]) if lrow.get("exclude_types_json") else [],
-                        "source_filter": json.loads(lrow["source_filter_json"]) if lrow.get("source_filter_json") else [],
-                    }
-                    if lrow.get("max_group_size") is not None:
-                        ldef["max_group_size"] = int(lrow["max_group_size"])
-                    config["lenses"].append(ldef)
-        except Exception:
-            pass
+        if lens_rows:
+            config["lenses"] = []
+            for lrow in lens_rows:
+                ldef: Dict[str, Any] = {
+                    "id": lrow["lens_id"],
+                    "include_types": json.loads(lrow["include_types_json"]) if lrow.get("include_types_json") else [],
+                    "exclude_types": json.loads(lrow["exclude_types_json"]) if lrow.get("exclude_types_json") else [],
+                    "source_filter": json.loads(lrow["source_filter_json"]) if lrow.get("source_filter_json") else [],
+                }
+                if lrow.get("max_group_size") is not None:
+                    ldef["max_group_size"] = int(lrow["max_group_size"])
+                config["lenses"].append(ldef)
 
         return config
 
@@ -1204,9 +1213,10 @@ def build_where_clause(
         return f"{watermark_column} > '{last_watermark}'::TIMESTAMP"
 
     elif dialect == "bigquery":
+        wm_ts = f"CAST({watermark_column} AS TIMESTAMP)"
         if lookback_minutes and lookback_minutes > 0:
-            return f"{watermark_column} > TIMESTAMP_SUB(TIMESTAMP('{last_watermark}'), INTERVAL {lookback_minutes} MINUTE)"
-        return f"{watermark_column} > TIMESTAMP('{last_watermark}')"
+            return f"{wm_ts} > TIMESTAMP_SUB(TIMESTAMP('{last_watermark}'), INTERVAL {lookback_minutes} MINUTE)"
+        return f"{wm_ts} > TIMESTAMP('{last_watermark}')"
 
     elif dialect == "databricks":
         if lookback_minutes and lookback_minutes > 0:
@@ -1715,7 +1725,7 @@ def apply_config_to_warehouse(
     )
     mappings_json = json.dumps(cfg.get("survivorship", []))
     config_str = sources_json + rules_json + mappings_json
-    config_hash = hashlib.md5(config_str.encode("utf-8")).hexdigest()
+    config_hash = hashlib.sha256(config_str.encode("utf-8")).hexdigest()[:16]
     current_ts = datetime.now(timezone.utc).isoformat()
 
     def escape_json(s: str) -> str:
@@ -1810,11 +1820,24 @@ def compute_dry_run_summary(
         if current_edges is not None:
             edges_delta = proposed_edges - current_edges
 
-    if normalized_mode == "FULL" and adapter.table_exists("idr_out.identity_clusters_current"):
-        current_clusters = int(
-            adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current") or 0
-        )
-        clusters_delta = proposed_clusters - current_clusters
+    if adapter.table_exists("idr_out.identity_clusters_current"):
+        if normalized_mode == "FULL":
+            current_clusters = int(
+                adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current") or 0
+            )
+            clusters_delta = proposed_clusters - current_clusters
+        elif adapter.table_exists("idr_work.lp_labels") and adapter.table_exists(
+            "idr_out.identity_resolved_membership_current"
+        ):
+            current_clusters = int(
+                adapter.query_one(
+                    "SELECT COUNT(DISTINCT m.resolved_id) "
+                    "FROM idr_out.identity_resolved_membership_current m "
+                    "JOIN idr_work.lp_labels lp ON lp.entity_key = m.entity_key"
+                )
+                or 0
+            )
+            clusters_delta = proposed_clusters - current_clusters
 
     edges_delta_by_type: Dict[str, int] = {}
     shadow_preserved_entities = 0
@@ -1876,12 +1899,12 @@ def compute_dry_run_summary(
                   )
             ),
             removed_endpoints AS (
-                SELECT left_entity_key AS entity_key FROM removed_edges
-                UNION
-                SELECT right_entity_key AS entity_key FROM removed_edges
+                SELECT left_entity_key AS entity_key, identifier_type AS removed_type FROM removed_edges
+                UNION DISTINCT
+                SELECT right_entity_key AS entity_key, identifier_type AS removed_type FROM removed_edges
             ),
             unchanged_removed AS (
-                SELECT r.entity_key
+                SELECT r.entity_key, r.removed_type
                 FROM removed_endpoints r
                 JOIN idr_out.dry_run_results d
                   ON d.entity_key = r.entity_key
@@ -1893,8 +1916,8 @@ def compute_dry_run_summary(
                 UPPER(n.identifier_type) AS corroborating_type
             FROM unchanged_removed u
             JOIN idr_work.edges_new n
-              ON u.entity_key = n.left_entity_key
-              OR u.entity_key = n.right_entity_key
+              ON (u.entity_key = n.left_entity_key OR u.entity_key = n.right_entity_key)
+             AND UPPER(n.identifier_type) != u.removed_type
         """)
         if shadow_rows:
             shadow_preserved_entities = len({str(r["entity_key"]) for r in shadow_rows})

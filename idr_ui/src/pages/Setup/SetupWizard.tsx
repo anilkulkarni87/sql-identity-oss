@@ -41,6 +41,7 @@ export default function SetupWizard() {
     const [restoringHash, setRestoringHash] = useState<string | null>(null);
 
     // Unified Studio Header Save State
+    const [loadingConfig, setLoadingConfig] = useState(true);
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
     const [saveProgress, setSaveProgress] = useState<{
@@ -53,13 +54,18 @@ export default function SetupWizard() {
     } | null>(null);
 
     const checkConfigAndNavigate = async (preferredStage: WizardStage = 'map', connOverride?: any) => {
+        setLoadingConfig(true);
         try {
             const status = await api.getSetupStatus();
-            if (status.connected) {
-                machine.setIsConnected(true);
-                if (!connOverride && !machine.connectionData && status.platform) {
-                    machine.setConnectionData({ platform: status.platform });
-                }
+            queryClient.setQueryData(['setupStatus'], status);
+            if (!status.connected) {
+                machine.setIsConnected(false);
+                machine.goToStage('connect');
+                return false;
+            }
+            machine.setIsConnected(true);
+            if (!connOverride && !machine.connectionData && status.platform) {
+                machine.setConnectionData({ platform: status.platform });
             }
 
             if (status.configured) {
@@ -70,12 +76,12 @@ export default function SetupWizard() {
                 }
             }
 
-            if (status.connected) {
-                machine.resetDraftForUnconfiguredWarehouse();
-                machine.goToStage(preferredStage === 'connect' ? 'connect' : 'map');
-            }
+            machine.resetDraftForUnconfiguredWarehouse();
+            machine.goToStage(preferredStage === 'connect' ? 'connect' : 'map');
         } catch (error) {
             console.error("Failed to load setup config:", error);
+        } finally {
+            setLoadingConfig(false);
         }
         return false;
     };
@@ -347,19 +353,17 @@ export default function SetupWizard() {
                                 {saving ? `Saving (${saveProgress?.percent ?? 0}%)` : 'Save Config'}
                             </button>
 
-                            <button
-                                type="button"
-                                onClick={() => machine.goToStage('review')}
-                                disabled={sourceCount === 0}
-                                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-45 disabled:cursor-not-allowed ${
-                                    machine.stage === 'review'
-                                        ? 'bg-blue-500 text-white shadow-lg shadow-blue-950/40'
-                                        : 'bg-blue-600 hover:bg-blue-500 text-white shadow-md'
-                                }`}
-                            >
-                                <Play className="w-3.5 h-3.5" />
-                                Run Pipeline
-                            </button>
+                            {machine.stage !== 'review' && (
+                                <button
+                                    type="button"
+                                    onClick={() => machine.goToStage('review')}
+                                    disabled={sourceCount === 0}
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-45 disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-700 text-white shadow-md"
+                                >
+                                    <Play className="w-3.5 h-3.5" />
+                                    Run Pipeline
+                                </button>
+                            )}
                         </>
                     )}
                 </div>
@@ -480,15 +484,21 @@ export default function SetupWizard() {
 
             {/* Import JSON Modal */}
             {isImportModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="import-json-modal-title"
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+                >
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-4">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <FileCode2 className="w-5 h-5 text-blue-400" />
-                                <h3 className="text-lg font-bold text-white">Import / Export Configuration JSON</h3>
+                                <h3 id="import-json-modal-title" className="text-lg font-bold text-white">Import / Export Configuration JSON</h3>
                             </div>
                             <button
                                 onClick={() => setIsImportModalOpen(false)}
+                                aria-label="Close Import/Export Configuration JSON modal"
                                 className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
                             >
                                 <X className="w-5 h-5" />
@@ -544,7 +554,7 @@ export default function SetupWizard() {
                                         setImportError(`Invalid JSON: ${err.message}`);
                                     }
                                 }}
-                                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow-md transition-colors"
+                                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-md transition-colors"
                             >
                                 Apply Configuration
                             </button>
@@ -597,6 +607,18 @@ export default function SetupWizard() {
 
             {/* Main Studio Workspace */}
             <div className="bg-slate-900/55 rounded-2xl border border-slate-800/90 shadow-xl p-5 sm:p-6 min-h-[520px]">
+                {loadingConfig ? (
+                    <div className="flex flex-col items-center justify-center py-28 text-center space-y-3">
+                        <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+                        <div className="text-sm font-medium text-slate-200">
+                            Loading warehouse configuration &amp; metadata...
+                        </div>
+                        <p className="text-xs text-slate-400 max-w-sm">
+                            Fetching sources, matching rules, survivorship, and lenses in parallel.
+                        </p>
+                    </div>
+                ) : (
+                <>
                 {machine.stage === 'connect' && (
                     <StepConnect
                         isConnected={machine.isConnected}
@@ -677,6 +699,8 @@ export default function SetupWizard() {
                             }
                         }}
                     />
+                )}
+                </>
                 )}
             </div>
         </div>

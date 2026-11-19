@@ -211,8 +211,25 @@ class ExtractionStage(BaseStage):
                 """)
 
         self._has_retroactive_governance_changes = False
+        self._has_no_wm_deletes = False
         if run_mode == "INCR" and has_membership:
             self._apply_retroactive_governance_in_incr()
+            no_wm_tables = [f"'{tid}'" for tid in getattr(self, "_no_watermark_table_ids", [])]
+            if no_wm_tables:
+                no_wm_in = ", ".join(no_wm_tables)
+                split_mem_expr = self._dialect["split_part"]("m.entity_key", ":", 1)
+                self.adapter.execute(f"""
+                    CREATE OR REPLACE TABLE idr_work.deleted_no_wm_entities AS
+                    SELECT DISTINCT m.entity_key
+                    FROM idr_out.identity_resolved_membership_current m
+                    WHERE {split_mem_expr} IN ({no_wm_in})
+                      AND NOT EXISTS (
+                          SELECT 1 FROM idr_work.entities_delta e
+                          WHERE e.entity_key = m.entity_key
+                      )
+                """)
+                del_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.deleted_no_wm_entities") or 0
+                self._has_no_wm_deletes = del_cnt > 0
 
         count = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.entities_delta")
         return count or 0
@@ -250,7 +267,7 @@ class ExtractionStage(BaseStage):
                             SELECT DISTINCT e.left_entity_key AS entity_key
                             FROM idr_out.identity_edges_current e
                             WHERE {excl_e}
-                            UNION
+                            UNION DISTINCT
                             SELECT DISTINCT e.right_entity_key AS entity_key
                             FROM idr_out.identity_edges_current e
                             WHERE {excl_e}
@@ -259,7 +276,7 @@ class ExtractionStage(BaseStage):
             if self.adapter.table_exists("idr_meta.identity_override"):
                 ov_cnt = (
                     self.adapter.query_one(
-                        "SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE"
+                        "SELECT COUNT(*) FROM idr_meta.identity_override"
                     )
                     or 0
                 )
@@ -276,6 +293,62 @@ class ExtractionStage(BaseStage):
                           AND UPPER(o.override_type) = 'DO_NOT_LINK'
                           AND m1.resolved_id = m2.resolved_id
                     """)
+                    # Deactivated DO_NOT_LINK pairs currently separated that share an identifier
+                    if self.adapter.table_exists("idr_out.identity_identifiers_current"):
+                        impacted_branches.append("""
+                            SELECT DISTINCT m1.entity_key
+                            FROM idr_meta.identity_override o
+                            JOIN idr_out.identity_resolved_membership_current m1
+                              ON m1.entity_key = o.entity_key_a
+                            JOIN idr_out.identity_resolved_membership_current m2
+                              ON m2.entity_key = o.entity_key_b
+                            WHERE o.is_active = FALSE
+                              AND UPPER(o.override_type) = 'DO_NOT_LINK'
+                              AND m1.resolved_id != m2.resolved_id
+                              AND EXISTS (
+                                  SELECT 1 FROM idr_out.identity_identifiers_current i1
+                                  JOIN idr_out.identity_identifiers_current i2
+                                    ON i1.identifier_type = i2.identifier_type
+                                   AND i1.identifier_value_norm = i2.identifier_value_norm
+                                  WHERE i1.entity_key = o.entity_key_a
+                                    AND i2.entity_key = o.entity_key_b
+                              )
+                            UNION DISTINCT
+                            SELECT DISTINCT m2.entity_key
+                            FROM idr_meta.identity_override o
+                            JOIN idr_out.identity_resolved_membership_current m1
+                              ON m1.entity_key = o.entity_key_a
+                            JOIN idr_out.identity_resolved_membership_current m2
+                              ON m2.entity_key = o.entity_key_b
+                            WHERE o.is_active = FALSE
+                              AND UPPER(o.override_type) = 'DO_NOT_LINK'
+                              AND m1.resolved_id != m2.resolved_id
+                              AND EXISTS (
+                                  SELECT 1 FROM idr_out.identity_identifiers_current i1
+                                  JOIN idr_out.identity_identifiers_current i2
+                                    ON i1.identifier_type = i2.identifier_type
+                                   AND i1.identifier_value_norm = i2.identifier_value_norm
+                                  WHERE i1.entity_key = o.entity_key_a
+                                    AND i2.entity_key = o.entity_key_b
+                              )
+                        """)
+                        # Deactivated ISOLATE entities currently isolated that share an identifier with others
+                        impacted_branches.append("""
+                            SELECT DISTINCT m.entity_key
+                            FROM idr_meta.identity_override o
+                            JOIN idr_out.identity_resolved_membership_current m
+                              ON m.entity_key = o.entity_key_a
+                            WHERE o.is_active = FALSE
+                              AND UPPER(o.override_type) = 'ISOLATE'
+                              AND EXISTS (
+                                  SELECT 1 FROM idr_out.identity_identifiers_current i1
+                                  JOIN idr_out.identity_identifiers_current i2
+                                    ON i1.identifier_type = i2.identifier_type
+                                   AND i1.identifier_value_norm = i2.identifier_value_norm
+                                  WHERE i1.entity_key = m.entity_key
+                                    AND i2.entity_key != m.entity_key
+                              )
+                        """)
                     # Clusters where ISOLATE entity still shares a cluster with others
                     impacted_branches.append("""
                         SELECT DISTINCT m.entity_key
@@ -301,7 +374,7 @@ class ExtractionStage(BaseStage):
                         WHERE o.is_active = TRUE
                           AND UPPER(o.override_type) = 'FORCE_LINK'
                           AND m1.resolved_id != m2.resolved_id
-                        UNION
+                        UNION DISTINCT
                         SELECT DISTINCT m2.entity_key
                         FROM idr_meta.identity_override o
                         JOIN idr_out.identity_resolved_membership_current m1
@@ -316,7 +389,7 @@ class ExtractionStage(BaseStage):
             if not impacted_branches:
                 return
 
-            seed_union = " UNION ".join(impacted_branches)
+            seed_union = " UNION DISTINCT ".join(impacted_branches)
             # Expand impacted seed entities to full cluster co-members
             self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.gov_affected_entities AS
@@ -331,7 +404,7 @@ class ExtractionStage(BaseStage):
                 FROM target_clusters tc
                 JOIN idr_out.identity_resolved_membership_current m2
                   ON tc.resolved_id = m2.resolved_id
-                UNION
+                UNION DISTINCT
                 SELECT DISTINCT entity_key FROM seed
             """)
 
@@ -477,6 +550,7 @@ class ExtractionStage(BaseStage):
         # to existing rows are never missed. Here we diff their extracted identifiers against
         # idr_out.identity_identifiers_current and prune entities whose identifiers are 100% unchanged.
         no_wm_tables = [f"'{tid}'" for tid in getattr(self, "_no_watermark_table_ids", [])]
+        self._has_no_wm_deletes = False
         if (
             run_mode == "INCR"
             and no_wm_tables
@@ -487,9 +561,29 @@ class ExtractionStage(BaseStage):
                 has_mem_tbl = self.adapter.table_exists(
                     "idr_out.identity_resolved_membership_current"
                 )
+                # Detect hard-deleted rows from un-watermarked tables (present in membership
+                # for a no-watermark table_id, but absent from the full table scan in entities_delta).
+                split_mem_expr = self._dialect["split_part"]("m.entity_key", ":", 1)
+                if has_mem_tbl:
+                    self.adapter.execute(f"""
+                        CREATE OR REPLACE TABLE idr_work.deleted_no_wm_entities AS
+                        SELECT DISTINCT m.entity_key
+                        FROM idr_out.identity_resolved_membership_current m
+                        WHERE {split_mem_expr} IN ({no_wm_in})
+                          AND NOT EXISTS (
+                              SELECT 1 FROM idr_work.entities_delta e
+                              WHERE e.entity_key = m.entity_key
+                          )
+                    """)
+                    del_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.deleted_no_wm_entities") or 0
+                    self._has_no_wm_deletes = del_cnt > 0
+                else:
+                    self.adapter.execute(
+                        f"CREATE OR REPLACE TABLE idr_work.deleted_no_wm_entities (entity_key {str_type})"
+                    )
                 new_entity_branch = (
                     f"""
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT e.entity_key
                     FROM idr_work.entities_delta e
                     WHERE e.table_id IN ({no_wm_in})
@@ -513,7 +607,7 @@ class ExtractionStage(BaseStage):
                             AND h.identifier_type = d.identifier_type
                             AND h.identifier_value_norm = d.identifier_value_norm
                       )
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT e.entity_key
                     FROM idr_work.entities_delta e
                     JOIN idr_out.identity_identifiers_current h ON e.entity_key = h.entity_key
@@ -554,9 +648,20 @@ class ExtractionStage(BaseStage):
         if run_mode == "INCR" and self.adapter.table_exists("idr_out.identity_identifiers_current"):
             try:
                 # Snapshot entities directly re-extracted in this delta BEFORE cluster expansion
-                self.adapter.execute("""
+                # (including any hard-deleted no-watermark entities so their stale edges are pruned)
+                del_union = (
+                    """
+                    UNION DISTINCT
+                    SELECT DISTINCT entity_key FROM idr_work.deleted_no_wm_entities
+                    """
+                    if getattr(self, "_has_no_wm_deletes", False)
+                    and self.adapter.table_exists("idr_work.deleted_no_wm_entities")
+                    else ""
+                )
+                self.adapter.execute(f"""
                     CREATE OR REPLACE TABLE idr_work.reextracted_entities AS
                     SELECT DISTINCT entity_key FROM idr_work.entities_delta
+                    {del_union}
                 """)
 
                 # Step 2a: Find matching historical entities sharing any delta identifier,
@@ -568,7 +673,7 @@ class ExtractionStage(BaseStage):
                     JOIN idr_out.identity_identifiers_current h
                       ON d.identifier_type = h.identifier_type
                      AND d.identifier_value_norm = h.identifier_value_norm
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT entity_key
                     FROM idr_work.reextracted_entities
                 """)
@@ -619,7 +724,7 @@ class ExtractionStage(BaseStage):
                     CREATE OR REPLACE TABLE idr_work.identifiers_all AS
                     SELECT entity_key, identifier_type, identifier_value_norm, is_hashed, max_group_size
                     FROM idr_work.identifiers_delta
-                    UNION
+                    UNION DISTINCT
                     SELECT h.entity_key, h.identifier_type, h.identifier_value_norm, h.is_hashed, 10000 AS max_group_size
                     FROM idr_work.expanded_cluster_entities exp
                     JOIN idr_out.identity_identifiers_current h

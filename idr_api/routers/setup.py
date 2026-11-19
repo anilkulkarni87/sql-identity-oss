@@ -1,7 +1,8 @@
 import asyncio
 import copy
 import json
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -20,6 +21,15 @@ from ..dependencies import get_current_user, get_manager, get_user_key, require_
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 manager = get_manager()
+
+_SETUP_CACHE_TTL_SECONDS = 30.0
+_STATUS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_CONFIG_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+
+def _invalidate_setup_cache(user_key: str) -> None:
+    _STATUS_CACHE.pop(user_key, None)
+    _CONFIG_CACHE.pop(user_key, None)
 
 
 def _require_user_adapter(current_user: Dict[str, Any]):
@@ -114,8 +124,10 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
             raise HTTPException(400, f"Unsupported platform: {request.platform}")
 
         if adapter:
+            uk = get_user_key(current_user)
+            _invalidate_setup_cache(uk)
             manager.set_adapter_for_user(
-                get_user_key(current_user), adapter, {"platform": request.platform, **params}
+                uk, adapter, {"platform": request.platform, **params}
             )
             return {"status": "connected", "platform": request.platform}
 
@@ -135,48 +147,43 @@ async def get_status(current_user: Dict[str, Any] = Depends(get_current_user)):
     suggested_action = "connect_warehouse"
 
     if connected:
+        cached = _STATUS_CACHE.get(user_key)
+        if cached and (time.monotonic() - cached[0]) < _SETUP_CACHE_TTL_SECONDS:
+            return cached[1]
+
         adapter = manager.get_adapter_for_user(user_key)
         platform = manager.get_config_for_user(user_key).get("platform")
 
-        # Check aliveness
-        is_alive = True
         try:
-            adapter.query_one("SELECT 1")
-        except Exception:
-            is_alive = False
-
-        if not is_alive:
-            state = "STALE"
-            suggested_action = "reconnect_warehouse"
-        else:
-            try:
-                if adapter.table_exists("idr_meta.source_table"):
-                    count = adapter.query_one("SELECT COUNT(*) FROM idr_meta.source_table")
-                    configured = (count or 0) > 0
-                    if configured:
-                        # Check if runs have been executed
-                        if adapter.table_exists("idr_out.identity_clusters_current"):
-                            clusters = adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current")
-                            has_runs = (clusters or 0) > 0
-
-                        if has_runs:
-                            state = "RESOLVED"
-                            suggested_action = "explore_identity_graph"
-                        else:
-                            state = "CONFIGURED_READY"
-                            suggested_action = "trigger_resolution_run"
-                    else:
-                        state = "CONNECTED_UNCONFIGURED"
-                        suggested_action = "discover_and_map_sources"
+            src_row = adapter.query("SELECT 1 AS ok FROM idr_meta.source_table LIMIT 1")
+            configured = bool(src_row)
+            if configured:
+                try:
+                    cls_row = adapter.query(
+                        "SELECT 1 AS ok FROM idr_out.identity_clusters_current LIMIT 1"
+                    )
+                    has_runs = bool(cls_row)
+                except Exception:
+                    has_runs = False
+                if has_runs:
+                    state = "RESOLVED"
+                    suggested_action = "explore_identity_graph"
                 else:
-                    state = "CONNECTED_UNINITIALIZED"
-                    suggested_action = "initialize_metadata"
-            except Exception:
-                configured = False
+                    state = "CONFIGURED_READY"
+                    suggested_action = "trigger_resolution_run"
+            else:
                 state = "CONNECTED_UNCONFIGURED"
                 suggested_action = "discover_and_map_sources"
+        except Exception:
+            try:
+                adapter.query_one("SELECT 1")
+                state = "CONNECTED_UNCONFIGURED"
+                suggested_action = "discover_and_map_sources"
+            except Exception:
+                state = "STALE"
+                suggested_action = "reconnect_warehouse"
 
-    return {
+    res = {
         "connected": connected,
         "configured": configured,
         "platform": platform,
@@ -184,6 +191,9 @@ async def get_status(current_user: Dict[str, Any] = Depends(get_current_user)):
         "has_runs": has_runs,
         "suggested_action": suggested_action,
     }
+    if connected and state != "STALE":
+        _STATUS_CACHE[user_key] = (time.monotonic(), res)
+    return res
 
 
 @router.get("/discovered-connections")
@@ -213,16 +223,20 @@ class IDRConfig(BaseModel):
 @router.get("/config", response_model=IDRConfig)
 def get_current_config(current_user: Dict[str, Any] = Depends(get_current_user)):
     """Get the currently active configuration from metadata tables or latest snapshot."""
-    adapter, _ = _require_user_adapter(current_user)
+    adapter, user_key = _require_user_adapter(current_user)
+
+    cached = _CONFIG_CACHE.get(user_key)
+    if cached and (time.monotonic() - cached[0]) < _SETUP_CACHE_TTL_SECONDS:
+        return IDRConfig(**cached[1])
 
     try:
         from idr_core.config import sql_to_config
 
         # 1. Try to reconstruct from actual metadata tables (Source of Truth)
-        if adapter.table_exists("idr_meta.source_table"):
-            active_config = sql_to_config(adapter)
-            if active_config and len(active_config.get("sources", [])) > 0:
-                return IDRConfig(**active_config)
+        active_config = sql_to_config(adapter)
+        if active_config and len(active_config.get("sources", [])) > 0:
+            _CONFIG_CACHE[user_key] = (time.monotonic(), active_config)
+            return IDRConfig(**active_config)
 
         # 2. Fallback: Fetch latest config snapshot
         rows = adapter.query("""
@@ -237,7 +251,9 @@ def get_current_config(current_user: Dict[str, Any] = Depends(get_current_user))
 
         row = rows[0]
         if row.get("sources_json"):
-            return IDRConfig(**parse_config_snapshot_row(row))
+            parsed = parse_config_snapshot_row(row)
+            _CONFIG_CACHE[user_key] = (time.monotonic(), parsed)
+            return IDRConfig(**parsed)
 
         return IDRConfig(sources=[])
 
@@ -308,10 +324,12 @@ async def save_config(
     request: ConfigSaveRequest, current_user: Dict[str, Any] = Depends(require_write_access)
 ):
     """Save configuration to idr_meta tables using batched SQL writes."""
-    adapter, _ = _require_user_adapter(current_user)
+    adapter, user_key = _require_user_adapter(current_user)
 
     try:
-        return _execute_save_config(adapter, request.config)
+        res = _execute_save_config(adapter, request.config)
+        _invalidate_setup_cache(user_key)
+        return res
     except Exception as e:
         import traceback
 
@@ -327,8 +345,8 @@ async def save_config_async(
     import threading
     import time
 
-    adapter, _ = _require_user_adapter(current_user)
-    user_key = get_user_key(current_user)
+    adapter, user_key = _require_user_adapter(current_user)
+    _invalidate_setup_cache(user_key)
 
     existing = _ACTIVE_SAVE_PROGRESS.get(user_key)
     if existing and existing.get("status") == "SAVING":
@@ -408,6 +426,7 @@ class RunRequest(BaseModel):
     max_moved_entities_pct: Optional[float] = None
     max_cluster_delta_pct: Optional[float] = None
     lens: Optional[str] = None
+    skip_lenses: bool = False
     config: Optional[Dict[str, Any]] = None
 
 
@@ -561,6 +580,7 @@ async def run_pipeline(
     import time
 
     adapter, user_key = _require_user_adapter(current_user)
+    _invalidate_setup_cache(user_key)
     meta_snapshots: Dict[str, bool] = {}
 
     try:
@@ -569,6 +589,7 @@ async def run_pipeline(
         from idr_core.runner import IDRRunner, RunConfig
 
         if request.dry_run and request.config is not None:
+            IDRRunner.check_no_active_run_lock(adapter)
             meta_snapshots = snapshot_meta_tables(adapter)
             _execute_save_config(adapter, request.config, record_snapshot=False)
 
@@ -581,10 +602,12 @@ async def run_pipeline(
             max_moved_entities_pct=request.max_moved_entities_pct,
             max_cluster_delta_pct=request.max_cluster_delta_pct,
             lens=request.lens,
+            skip_lenses=request.skip_lenses,
         )
 
-        has_lenses = bool(request.lens)
-        if not has_lenses and not config.dry_run:
+        skip_lenses = request.skip_lenses or (request.lens or "").strip().lower() in ("__none__", "none")
+        has_lenses = bool(request.lens) and not skip_lenses
+        if not has_lenses and not skip_lenses and not config.dry_run:
             try:
                 if adapter.table_exists("idr_meta.lens_definition"):
                     cnt = adapter.query_one(

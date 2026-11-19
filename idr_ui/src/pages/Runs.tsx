@@ -23,9 +23,17 @@ export default function Runs() {
     const navigate = useNavigate()
     const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
 
-    const { data: runs, isLoading } = useQuery({
+    const { data: setupStatus } = useQuery({
+        queryKey: ['setupStatus'],
+        queryFn: () => api.getSetupStatus(),
+    })
+
+    const isConnected = Boolean(setupStatus?.connected)
+
+    const { data: runs, isLoading, isError } = useQuery({
         queryKey: ['runs'],
-        queryFn: () => api.getRuns()
+        queryFn: () => api.getRuns(),
+        enabled: isConnected,
     })
 
     const { data: runDetail, isLoading: detailLoading } = useQuery({
@@ -90,7 +98,7 @@ export default function Runs() {
 
                 <button
                     onClick={() => navigate('/explorer')}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-xl shadow-md transition-all self-start"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl shadow-md transition-all self-start"
                 >
                     <Network className="w-4 h-4" />
                     Open Graph Explorer
@@ -114,10 +122,29 @@ export default function Runs() {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-700/60">
-                        {isLoading ? (
+                        {setupStatus && !isConnected ? (
+                            <tr>
+                                <td colSpan={9} className="px-4 py-12 text-center text-slate-400 text-sm">
+                                    Warehouse disconnected.{' '}
+                                    <button
+                                        onClick={() => navigate('/setup')}
+                                        className="text-blue-400 hover:text-blue-300 underline font-medium"
+                                    >
+                                        Connect in Identity Studio
+                                    </button>{' '}
+                                    to view run telemetry.
+                                </td>
+                            </tr>
+                        ) : isLoading ? (
                             <tr>
                                 <td colSpan={9} className="px-4 py-12 text-center text-gray-400 text-sm">
                                     Loading run telemetry...
+                                </td>
+                            </tr>
+                        ) : isError ? (
+                            <tr>
+                                <td colSpan={9} className="px-4 py-12 text-center text-rose-300 text-sm">
+                                    Failed to load run telemetry. Check your warehouse connection in Identity Studio.
                                 </td>
                             </tr>
                         ) : runs?.length === 0 ? (

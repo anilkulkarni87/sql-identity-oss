@@ -859,3 +859,26 @@ def test_cli_run_incr_mode(monkeypatch):
 
     assert rc == 0
     assert FakeRunner.last_config.run_mode == "INCR"
+
+
+def test_cli_demo_runs_quickstart_and_launches_ui(tmp_path, monkeypatch):
+    from idr_core.cli import main
+
+    db_file = str(tmp_path / "demo_cli.duckdb")
+    captured = {}
+
+    def fake_quickstart(output, rows, seed):
+        captured["quickstart"] = (output, rows, seed)
+        return 0
+
+    def fake_serve(args):
+        captured["serve"] = (args.platform, args.db, args.host, args.port, args.open)
+        return 0
+
+    monkeypatch.setattr("idr_core.quickstart.run_quickstart", fake_quickstart)
+    monkeypatch.setattr("idr_core.cli.handle_serve", fake_serve)
+
+    rc = main(["demo", "--rows", "500", "--output", db_file, "--port", "8123", "--no-browser"])
+    assert rc == 0
+    assert captured["quickstart"] == (db_file, 500, 42)
+    assert captured["serve"] == ("duckdb", db_file, "127.0.0.1", 8123, False)

@@ -8,7 +8,7 @@ PII masking is automatically enabled for non-local endpoints.
 from __future__ import annotations
 
 from threading import RLock
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from idr_api.dependencies import get_adapter, get_current_user, get_user_key
 from idr_core.ai_assistant import (
     ask_identity_graph,
+    copilot_chat,
     explain_cluster_with_ai,
     suggest_config_with_ai,
     test_llm_connection,
@@ -73,8 +74,11 @@ class AIAskRequest(BaseModel):
 
 
 class AISuggestConfigRequest(BaseModel):
-    prompt: str
+    prompt: str = "Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views."
+    goal: Optional[str] = None
     tables: list[str] = []
+    sample_size: int = 2000
+    verify_sql: bool = True
 
 
 @router.get("/config")
@@ -188,6 +192,30 @@ def ask_ai(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class AICopilotRequest(BaseModel):
+    message: str
+    history: Optional[List[Dict[str, str]]] = None
+
+
+@router.post("/copilot")
+def copilot(
+    payload: AICopilotRequest,
+    adapter=Depends(get_adapter),
+    current_user: dict = Depends(get_current_user),
+    store: LLMConfigStore = Depends(get_llm_config_store),
+):
+    try:
+        cfg = store.get(get_user_key(current_user))
+        return copilot_chat(
+            adapter,
+            payload.message,
+            history=payload.history,
+            client=LLMClient(cfg),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/suggest-config")
 def suggest_config(
     payload: AISuggestConfigRequest,
@@ -196,14 +224,27 @@ def suggest_config(
     store: LLMConfigStore = Depends(get_llm_config_store),
 ):
     try:
-        tables = payload.tables
+        from idr_core.profiler import is_system_table
+
+        tables = [t for t in (payload.tables or []) if t and not is_system_table(t)]
         if not tables and hasattr(adapter, "list_tables"):
-            tables = adapter.list_tables()[:10]
-        profile = IDRDataProfiler(adapter).profile_and_generate_config(tables) if tables else {}
+            tables = [t for t in adapter.list_tables() if not is_system_table(t)][:15]
         cfg = store.get(get_user_key(current_user))
+        goal_text = (payload.goal or payload.prompt or "").strip()
+        if tables:
+            return suggest_config_with_ai(
+                {},
+                goal_text,
+                client=LLMClient(cfg),
+                adapter=adapter,
+                tables=tables,
+                sample_size=payload.sample_size,
+                verify_sql=payload.verify_sql,
+            )
+        profile = IDRDataProfiler(adapter).profile_and_generate_config(tables) if tables else {}
         return suggest_config_with_ai(
             profile,
-            payload.prompt,
+            goal_text,
             client=LLMClient(cfg),
         )
     except Exception as exc:
