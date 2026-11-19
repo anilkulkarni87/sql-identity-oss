@@ -1213,9 +1213,10 @@ def build_where_clause(
         return f"{watermark_column} > '{last_watermark}'::TIMESTAMP"
 
     elif dialect == "bigquery":
+        wm_ts = f"CAST({watermark_column} AS TIMESTAMP)"
         if lookback_minutes and lookback_minutes > 0:
-            return f"{watermark_column} > TIMESTAMP_SUB(TIMESTAMP('{last_watermark}'), INTERVAL {lookback_minutes} MINUTE)"
-        return f"{watermark_column} > TIMESTAMP('{last_watermark}')"
+            return f"{wm_ts} > TIMESTAMP_SUB(TIMESTAMP('{last_watermark}'), INTERVAL {lookback_minutes} MINUTE)"
+        return f"{wm_ts} > TIMESTAMP('{last_watermark}')"
 
     elif dialect == "databricks":
         if lookback_minutes and lookback_minutes > 0:
@@ -1899,7 +1900,7 @@ def compute_dry_run_summary(
             ),
             removed_endpoints AS (
                 SELECT left_entity_key AS entity_key, identifier_type AS removed_type FROM removed_edges
-                UNION
+                UNION DISTINCT
                 SELECT right_entity_key AS entity_key, identifier_type AS removed_type FROM removed_edges
             ),
             unchanged_removed AS (

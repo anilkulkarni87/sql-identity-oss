@@ -431,10 +431,11 @@ Examples:
         ("test", "Test connection to configured AI model (defaults to local Ollama)"),
         ("models", "List locally available Ollama models"),
         ("ask", "Ask a natural-language question about the identity graph"),
+        ("generate-config", "Profile warehouse tables (zero-PII) and generate a validated IDR config with AI reasoning"),
     ]:
         p = ai_subparsers.add_parser(sub_name, help=sub_help)
         p.add_argument("--provider", help="ollama | openai | anthropic | gemini | openai_compatible")
-        p.add_argument("--model", help="Model name (e.g. llama3.2, gpt-4o-mini)")
+        p.add_argument("--model", help="Model name (e.g. llama3.2, qwen2.5:14b, gpt-4o-mini)")
         p.add_argument("--base-url", help="Custom base URL (e.g. http://localhost:11434/v1)")
         p.add_argument("--api-key", help="API key (or set IDR_LLM_API_KEY)")
         mask_grp = p.add_mutually_exclusive_group()
@@ -445,6 +446,39 @@ Examples:
             p.add_argument("--platform", "-p", choices=["duckdb", "bigquery", "snowflake", "databricks"])
             p.add_argument("--db", help="DuckDB database path")
             p.add_argument("--project", help="GCP project ID (BigQuery)")
+        elif sub_name == "generate-config":
+            _add_connection_args(p)
+            p.add_argument(
+                "--tables",
+                help="Comma-separated table FQNs to include (if omitted, auto-discovers non-system tables)",
+            )
+            p.add_argument("--schema", help="Optional schema/dataset filter when auto-discovering tables")
+            p.add_argument(
+                "--goal",
+                default="Unify customer records accurately across sources with safe supernode guardrails and practical golden-profile survivorship.",
+                help="Business goal or domain guidance for the AI architect",
+            )
+            p.add_argument(
+                "--output",
+                "-o",
+                default="idr_config.yaml",
+                help="Output YAML file path (default: idr_config.yaml)",
+            )
+            p.add_argument(
+                "--reasoning-out",
+                help="Optional path to write full JSON reasoning & validation report",
+            )
+            p.add_argument(
+                "--sample-size",
+                type=int,
+                default=2000,
+                help="Sample size per table for statistical profiling (default: 2000)",
+            )
+            p.add_argument(
+                "--no-verify-sql",
+                action="store_true",
+                help="Skip live warehouse SQL dry-parse verification",
+            )
 
     # === idr explain ===
     explain_parser = subparsers.add_parser("explain", help="Explain why an identity cluster merged using AI")
@@ -1368,6 +1402,79 @@ def handle_ai(args) -> int:
         print(f"[{res['provider']}:{res['model']} | pii_masked={res['pii_masked']}]\n")
         print(res["answer"])
         return 0
+
+    if args.ai_cmd == "generate-config":
+        import json
+
+        from idr_core.bootstrap import AutoBootstrapper
+        from idr_core.rule_generator import AIRuleGenerator, render_config_yaml_with_reasoning
+
+        adapter = get_adapter(args)
+        tables_arg = getattr(args, "tables", None)
+        if tables_arg:
+            tables = [t.strip() for t in tables_arg.split(",") if t.strip()]
+        else:
+            tables = AutoBootstrapper(adapter)._discover_tables(getattr(args, "schema", None))
+
+        if not tables:
+            print("❌ No candidate tables found. Pass --tables schema.table1,schema.table2 explicitly.")
+            return 1
+
+        print("=" * 72)
+        print("⚡ SQL Identity Resolution — AI Rule & Config Generator (Zero-PII)")
+        print("=" * 72)
+        print(f"Tables ({len(tables)}): {', '.join(tables)}")
+        print(f"Model:  {client.config.provider}:{client.config.resolved_model()}")
+        print("Profiling & synthesizing validated IDR configuration...")
+
+        plan = AIRuleGenerator(adapter, client=client).generate(
+            tables=tables,
+            goal=getattr(args, "goal", ""),
+            sample_size=getattr(args, "sample_size", 2000),
+            verify_sql=not getattr(args, "no_verify_sql", False),
+        )
+
+        yaml_text = render_config_yaml_with_reasoning(plan)
+        out_path = getattr(args, "output", "idr_config.yaml")
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+
+        reasoning_out = getattr(args, "reasoning_out", None)
+        if reasoning_out:
+            with open(reasoning_out, "w", encoding="utf-8") as f:
+                json.dump(plan.model_dump(), f, indent=2, default=str)
+
+        cfg = plan.suggested_config or {}
+        print(f"\n✓ Mode: {plan.generation_mode} | Validated: {plan.validation_report.valid} | SQL Verified: {plan.validation_report.sql_verified}")
+        print(f"✓ Sources: {len(cfg.get('sources') or [])} | Rules: {len(cfg.get('rules') or [])} | Survivorship: {len(cfg.get('survivorship') or [])} | Lenses: {len(cfg.get('lenses') or [])}")
+
+        overlaps = (plan.profile_summary or {}).get("cross_table_overlaps") or []
+        if overlaps:
+            print("\nCross-Table Key Overlaps Detected:")
+            for ov in overlaps[:8]:
+                print(
+                    f"  • {ov['table_a']}.{ov['column_a']} ↔ {ov['table_b']}.{ov['column_b']} "
+                    f"[{ov['identifier_type']}]: {ov['overlap_a_in_b']:.0%} / {ov['overlap_b_in_a']:.0%}"
+                )
+
+        if plan.explanations.rules:
+            print("\nProposed Rules & Reasoning:")
+            for item in plan.explanations.rules:
+                flag = " ⚠ NEEDS REVIEW" if item.needs_review else ""
+                print(f"  • {item.target} ({item.confidence}{flag}): {item.summary}")
+                for r in item.risks:
+                    print(f"      Risk: {r}")
+
+        if plan.validation_report.warnings:
+            print("\nWarnings:")
+            for w in plan.validation_report.warnings:
+                print(f"  ! {w}")
+
+        print(f"\n📁 Config written to: {out_path}")
+        if reasoning_out:
+            print(f"📄 Reasoning report written to: {reasoning_out}")
+        print(f"💡 Next step: Review {out_path}, then run `idr config apply --config {out_path}`.")
+        return 0 if plan.validation_report.valid else 1
 
     return 0
 

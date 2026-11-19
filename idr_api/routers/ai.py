@@ -74,8 +74,11 @@ class AIAskRequest(BaseModel):
 
 
 class AISuggestConfigRequest(BaseModel):
-    prompt: str
+    prompt: str = "Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views."
+    goal: Optional[str] = None
     tables: list[str] = []
+    sample_size: int = 2000
+    verify_sql: bool = True
 
 
 @router.get("/config")
@@ -221,14 +224,27 @@ def suggest_config(
     store: LLMConfigStore = Depends(get_llm_config_store),
 ):
     try:
-        tables = payload.tables
+        from idr_core.profiler import is_system_table
+
+        tables = [t for t in (payload.tables or []) if t and not is_system_table(t)]
         if not tables and hasattr(adapter, "list_tables"):
-            tables = adapter.list_tables()[:10]
-        profile = IDRDataProfiler(adapter).profile_and_generate_config(tables) if tables else {}
+            tables = [t for t in adapter.list_tables() if not is_system_table(t)][:15]
         cfg = store.get(get_user_key(current_user))
+        goal_text = (payload.goal or payload.prompt or "").strip()
+        if tables:
+            return suggest_config_with_ai(
+                {},
+                goal_text,
+                client=LLMClient(cfg),
+                adapter=adapter,
+                tables=tables,
+                sample_size=payload.sample_size,
+                verify_sql=payload.verify_sql,
+            )
+        profile = IDRDataProfiler(adapter).profile_and_generate_config(tables) if tables else {}
         return suggest_config_with_ai(
             profile,
-            payload.prompt,
+            goal_text,
             client=LLMClient(cfg),
         )
     except Exception as exc:

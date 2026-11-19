@@ -8,12 +8,18 @@ watermarks with mathematical validation, flags supernode risks, and generates
 validated IDR configurations.
 """
 
+import hashlib
 import re
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Pre-compiled regex patterns
 _EMAIL_RE = re.compile(
     r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+)
+_EMAIL_PLUS_TAG_RE = re.compile(
+    r"^[a-zA-Z0-9_.-]+\+[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
 )
 _PHONE_FORMATTED_RE = re.compile(
     r"^(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}(?:\s*(?:x|ext|ext\.)\s*\d+)?$",
@@ -25,6 +31,220 @@ _DATE_OR_TS_RE = re.compile(
     r"^(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2})"
 )
 _HEX_TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,64}$")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_BOOL_VALUES = {"true", "false", "0", "1", "yes", "no", "y", "n", "t", "f"}
+_CONSENT_HINTS = ("consent", "opt_in", "opt_out", "optin", "optout", "unsubscribe", "marketing_ok", "do_not_")
+_METRIC_HINTS = (
+    "price", "cost", "amount", "value", "quantity", "qty", "rating",
+    "score", "count", "pct", "percent", "rate", "weight", "total", "subtotal", "revenue", "ltv",
+)
+
+
+def _to_shape_skeleton(value: str) -> str:
+    """Convert a string into a zero-PII character-class skeleton (e.g. '999-999-9999', 'a+@a+.a+')."""
+    if not value:
+        return ""
+    if _EMAIL_RE.match(value):
+        return "EMAIL_PLUS_TAG" if "+" in value.split("@", 1)[0] else "EMAIL_STANDARD"
+    if _UUID_RE.match(value):
+        return "UUID"
+    if _HEX_TOKEN_RE.match(value):
+        return f"HEX_{len(value)}"
+    if _DATE_OR_TS_RE.match(value):
+        return "ISO_DATETIME" if ("T" in value or ":" in value) else "DATE"
+    # Replace digits with '9', uppercase with 'A', lowercase with 'a' and cap length
+    chars = []
+    for ch in value[:24]:
+        if ch.isdigit():
+            chars.append("9")
+        elif ch.isupper():
+            chars.append("A")
+        elif ch.islower():
+            chars.append("a")
+        else:
+            chars.append(ch)
+    skeleton = "".join(chars)
+    if len(value) > 24:
+        skeleton += "..."
+    return skeleton
+
+
+@dataclass
+class SafeColumnProfile:
+    """
+    Zero-PII statistical profile of a single column.
+    Structurally stores ONLY counts, ratios, pattern hit rates, shape skeletons,
+    and deterministic hints — never raw cell values.
+    """
+
+    name: str
+    declared_type: str = ""
+    sample_count: int = 0
+    non_null_count: int = 0
+    null_rate: float = 1.0
+    distinct_count: int = 0
+    uniqueness_ratio: float = 0.0
+    min_len: int = 0
+    max_len: int = 0
+    max_frequency_count: int = 1
+    top1_share_pct: float = 0.0
+    email_rate: float = 0.0
+    email_plus_tag_rate: float = 0.0
+    phone_us10_rate: float = 0.0
+    phone_e164_rate: float = 0.0
+    hex_hash_rate: float = 0.0
+    uuid_rate: float = 0.0
+    date_ts_rate: float = 0.0
+    bool_rate: float = 0.0
+    top_shapes: List[str] = field(default_factory=list)
+    # Deterministic pre-annotated hints (improves small local models like llama3.2)
+    hint_role: str = "attribute"  # entity_key | watermark | identifier | consent_flag | metric | attribute
+    hint_identifier_type: Optional[str] = None
+    hint_canonicalizer: Optional[str] = None
+    hint_is_hashed: bool = False
+    hint_confidence: float = 0.0
+
+    def to_compact_dict(self, verbose: bool = True) -> Dict[str, Any]:
+        """Serialize to a token-efficient dict for LLM prompts (zero raw PII)."""
+        if not verbose:
+            return {
+                "name": self.name,
+                "type": self.declared_type,
+                "null_rate": round(self.null_rate, 3),
+                "hint_role": self.hint_role,
+            }
+        out: Dict[str, Any] = {
+            "name": self.name,
+            "type": self.declared_type,
+            "null_rate": round(self.null_rate, 3),
+            "uniqueness_ratio": round(self.uniqueness_ratio, 3),
+            "max_freq": self.max_frequency_count,
+            "top1_share_pct": round(self.top1_share_pct, 3),
+            "hint_role": self.hint_role,
+        }
+        if self.hint_identifier_type:
+            out["hint_identifier_type"] = self.hint_identifier_type
+        if self.hint_canonicalizer:
+            out["hint_canonicalizer"] = self.hint_canonicalizer
+        if self.hint_is_hashed:
+            out["hint_is_hashed"] = True
+        if self.hint_confidence > 0:
+            out["hint_confidence"] = round(self.hint_confidence, 2)
+        # Only include non-zero pattern rates to save tokens
+        patterns: Dict[str, float] = {}
+        for k, v in (
+            ("email", self.email_rate),
+            ("email_plus_tag", self.email_plus_tag_rate),
+            ("phone_us10", self.phone_us10_rate),
+            ("phone_e164", self.phone_e164_rate),
+            ("hex_hash", self.hex_hash_rate),
+            ("uuid", self.uuid_rate),
+            ("date_ts", self.date_ts_rate),
+            ("bool", self.bool_rate),
+        ):
+            if v >= 0.05:
+                patterns[k] = round(v, 3)
+        if patterns:
+            out["patterns"] = patterns
+        if self.top_shapes:
+            out["shapes"] = self.top_shapes[:3]
+        return out
+
+
+@dataclass
+class SafeTableProfile:
+    """Zero-PII statistical profile of a warehouse table."""
+
+    table_fqn: str
+    row_count: int = 0
+    sample_rows_analyzed: int = 0
+    columns: List[SafeColumnProfile] = field(default_factory=list)
+    hint_entity_key: Optional[str] = None
+    hint_watermark: Optional[str] = None
+    duplicate_entity_keys_detected: bool = False
+    null_entity_keys_detected: bool = False
+    has_candidate_identifiers: bool = False
+
+    def column_names(self) -> Set[str]:
+        return {c.name.lower() for c in self.columns}
+
+    def to_prompt_dict(self, max_passive_attrs: int = 25) -> Dict[str, Any]:
+        """Token-budgeted, zero-PII representation of this table for LLM prompts."""
+        key_cols: List[Dict[str, Any]] = []
+        passive_cols: List[Dict[str, Any]] = []
+        for col in self.columns:
+            if col.hint_role in ("entity_key", "watermark", "identifier", "consent_flag") or (
+                col.email_rate >= 0.1 or col.phone_us10_rate >= 0.1 or col.phone_e164_rate >= 0.1 or col.hex_hash_rate >= 0.5
+            ):
+                key_cols.append(col.to_compact_dict(verbose=True))
+            else:
+                passive_cols.append(col.to_compact_dict(verbose=False))
+        return {
+            "table": self.table_fqn,
+            "row_count": self.row_count,
+            "sample_rows": self.sample_rows_analyzed,
+            "hint_entity_key": self.hint_entity_key,
+            "hint_watermark": self.hint_watermark,
+            "duplicate_entity_keys": self.duplicate_entity_keys_detected,
+            "key_and_signal_columns": key_cols,
+            "other_columns": passive_cols[:max_passive_attrs],
+            **(
+                {"omitted_other_columns_count": len(passive_cols) - max_passive_attrs}
+                if len(passive_cols) > max_passive_attrs
+                else {}
+            ),
+        }
+
+
+@dataclass
+class CrossTableOverlap:
+    """Privacy-preserving overlap score between two candidate identifier columns."""
+
+    table_a: str
+    column_a: str
+    table_b: str
+    column_b: str
+    identifier_type: str
+    overlap_a_in_b: float  # fraction of distinct A values found in B
+    overlap_b_in_a: float  # fraction of distinct B values found in A
+    shared_distinct_estimate: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "table_a": self.table_a,
+            "column_a": self.column_a,
+            "table_b": self.table_b,
+            "column_b": self.column_b,
+            "identifier_type": self.identifier_type,
+            "overlap_a_in_b": round(self.overlap_a_in_b, 3),
+            "overlap_b_in_a": round(self.overlap_b_in_a, 3),
+            "shared_distinct_estimate": self.shared_distinct_estimate,
+        }
+
+
+@dataclass
+class SafeSchemaProfile:
+    """Zero-PII profile across all selected warehouse tables + cross-table overlap matrix."""
+
+    dialect: str
+    tables: List[SafeTableProfile] = field(default_factory=list)
+    overlaps: List[CrossTableOverlap] = field(default_factory=list)
+
+    def table_map(self) -> Dict[str, SafeTableProfile]:
+        return {t.table_fqn: t for t in self.tables}
+
+    def to_summary_dict(self) -> Dict[str, Any]:
+        return {
+            "dialect": self.dialect,
+            "tables_profiled": len(self.tables),
+            "tables_with_identifiers": sum(1 for t in self.tables if t.has_candidate_identifiers),
+            "cross_table_overlaps": [o.to_dict() for o in self.overlaps],
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 def is_system_table(table_name: str) -> bool:
@@ -84,19 +304,23 @@ class IDRDataProfiler:
         type_str = col_type.lower()
         if any(t in type_str for t in ("timestamp", "date", "datetime", "timestamptz", "time")):
             return True
+        # Numeric/boolean columns (e.g. lifetime_points, response_time_ms) are never timestamps
+        if any(t in type_str for t in ("int", "float", "double", "numeric", "decimal", "bool")):
+            return False
 
         name = col_name.lower()
-        # Semantic naming cues
+        # Semantic naming cues (avoid bare "time" matching "lifetime_points")
         temporal_names = (
             "date", "_date", "start_date", "end_date", "order_date", "birth_date", "dob",
             "_at", "created_at", "updated_at", "modified_at", "assigned_at", "enrolled_at",
-            "_ts", "timestamp", "time", "event_time", "period"
+            "_ts", "timestamp", "_time", "event_time", "period"
         )
-        if any(w in name for w in temporal_names):
+        if name == "time" or any(w in name for w in temporal_names):
             if values:
                 matches = sum(1 for v in values if _DATE_OR_TS_RE.match(v))
                 if (matches / len(values)) >= 0.4:
                     return True
+                return False
             return True
 
         if values:
@@ -479,3 +703,288 @@ class IDRDataProfiler:
             "suggested_config": suggested_config,
             "profiling_diagnostics": profiling_diagnostics,
         }
+
+    # =========================================================================
+    # Zero-PII Pushdown & Statistical Profiler for AI Rule Generation
+    # =========================================================================
+
+    def _get_table_row_count(self, table_fqn: str) -> int:
+        """Compute exact row count in warehouse SQL (zero PII)."""
+        try:
+            cnt = self.adapter.query_one(f"SELECT COUNT(*) FROM {table_fqn}")
+            return int(cnt or 0)
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _normalize_for_overlap_hash(val: str, id_type: str) -> str:
+        """Normalize a value in-memory and immediately SHA-256 hash it for zero-PII overlap math."""
+        s = val.strip().lower()
+        if id_type == "phone":
+            base = _PHONE_EXT_CLEAN_RE.sub("", s).strip()
+            digits = re.sub(r"[^0-9]", "", base)
+            if len(digits) == 11 and digits.startswith("1"):
+                digits = digits[1:]
+            s = digits
+        return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+
+    def _build_safe_column_profile(
+        self,
+        col_prof: ColumnProfile,
+        raw_values: List[str],
+    ) -> SafeColumnProfile:
+        """
+        Convert raw sampled values + basic ColumnProfile into a strictly zero-PII
+        SafeColumnProfile with pattern hit rates, shape skeletons, and deterministic hints.
+        Raw values are discarded immediately after computing aggregates.
+        """
+        n = len(raw_values)
+        sp = SafeColumnProfile(
+            name=col_prof.name,
+            declared_type=col_prof.declared_type,
+            sample_count=col_prof.sample_count,
+            non_null_count=col_prof.non_null_count,
+            null_rate=round(col_prof.null_ratio, 4),
+            distinct_count=col_prof.distinct_count,
+            uniqueness_ratio=round(col_prof.uniqueness_ratio, 4),
+            max_frequency_count=col_prof.max_frequency_count,
+            top1_share_pct=round(col_prof.max_frequency_count / n, 4) if n > 0 else 0.0,
+        )
+
+        if n > 0:
+            lengths = [len(v) for v in raw_values]
+            sp.min_len = min(lengths)
+            sp.max_len = max(lengths)
+
+            email_hits = 0
+            email_plus_hits = 0
+            phone_us10_hits = 0
+            phone_e164_hits = 0
+            hex_hits = 0
+            uuid_hits = 0
+            date_hits = 0
+            bool_hits = 0
+            shape_counter: Counter = Counter()
+
+            for v in raw_values:
+                if _EMAIL_RE.match(v):
+                    email_hits += 1
+                    if _EMAIL_PLUS_TAG_RE.match(v):
+                        email_plus_hits += 1
+                elif _UUID_RE.match(v):
+                    uuid_hits += 1
+                elif _HEX_TOKEN_RE.match(v):
+                    hex_hits += 1
+                elif _DATE_OR_TS_RE.match(v):
+                    date_hits += 1
+                else:
+                    base_v = _PHONE_EXT_CLEAN_RE.sub("", v).strip()
+                    clean_digits = re.sub(r"[\s\-\(\)\.]", "", base_v)
+                    if not (len(clean_digits) == 8 and (clean_digits.startswith("19") or clean_digits.startswith("20"))):
+                        if clean_digits.startswith("+") and _PHONE_DIGITS_RE.match(clean_digits):
+                            phone_e164_hits += 1
+                        elif _PHONE_DIGITS_RE.match(clean_digits) or _PHONE_FORMATTED_RE.match(v):
+                            digits_only = re.sub(r"[^0-9]", "", base_v)
+                            if len(digits_only) == 10 or (len(digits_only) == 11 and digits_only.startswith("1")):
+                                phone_us10_hits += 1
+                            elif 7 <= len(digits_only) <= 15:
+                                phone_e164_hits += 1
+
+                if v.lower() in _BOOL_VALUES:
+                    bool_hits += 1
+                shape_counter[_to_shape_skeleton(v)] += 1
+
+            sp.email_rate = round(email_hits / n, 4)
+            sp.email_plus_tag_rate = round(email_plus_hits / n, 4)
+            sp.phone_us10_rate = round(phone_us10_hits / n, 4)
+            sp.phone_e164_rate = round(phone_e164_hits / n, 4)
+            sp.hex_hash_rate = round(hex_hits / n, 4)
+            sp.uuid_rate = round(uuid_hits / n, 4)
+            sp.date_ts_rate = round(date_hits / n, 4)
+            sp.bool_rate = round(bool_hits / n, 4)
+            sp.top_shapes = [s for s, _ in shape_counter.most_common(3) if s]
+
+        # Deterministic pre-annotated hints (grounds small local models like llama3.2)
+        name_l = sp.name.lower()
+        if col_prof.is_entity_key:
+            sp.hint_role = "entity_key"
+            sp.hint_confidence = 0.95
+        elif col_prof.is_temporal:
+            sp.hint_role = "watermark"
+            sp.hint_confidence = 0.90
+        elif col_prof.detected_identifier_type:
+            sp.hint_role = "identifier"
+            sp.hint_identifier_type = col_prof.detected_identifier_type
+            sp.hint_confidence = col_prof.detection_confidence
+            if sp.hint_identifier_type == "email":
+                sp.hint_canonicalizer = (
+                    "EMAIL_STRIP_PLUS" if sp.email_plus_tag_rate >= 0.02 else "EMAIL_STANDARD"
+                )
+            elif sp.hint_identifier_type == "phone":
+                sp.hint_canonicalizer = (
+                    "PHONE_US_10" if sp.phone_us10_rate >= sp.phone_e164_rate else "PHONE_DIGITS"
+                )
+            elif sp.hint_identifier_type == "loyalty":
+                sp.hint_canonicalizer = "ALPHANUMERIC_UPPER"
+            else:
+                sp.hint_canonicalizer = "EXACT"
+        elif sp.hex_hash_rate >= 0.85 and any(
+            k in name_l for k in ("email", "phone", "sha", "md5", "hash", "pii", "id")
+        ):
+            sp.hint_role = "identifier"
+            sp.hint_is_hashed = True
+            if "email" in name_l:
+                sp.hint_identifier_type = "email_hash"
+            elif "phone" in name_l:
+                sp.hint_identifier_type = "phone_hash"
+            else:
+                sp.hint_identifier_type = name_l
+            sp.hint_canonicalizer = "LOWERCASE"
+            sp.hint_confidence = 0.85
+        elif (sp.bool_rate >= 0.90 or "bool" in sp.declared_type) and any(
+            k in name_l for k in _CONSENT_HINTS
+        ):
+            sp.hint_role = "consent_flag"
+            sp.hint_confidence = 0.90
+        elif any(m in name_l for m in _METRIC_HINTS):
+            sp.hint_role = "metric"
+            sp.hint_confidence = 0.85
+        else:
+            sp.hint_role = "attribute"
+
+        return sp
+
+    def profile_tables_safe(
+        self,
+        candidate_tables: List[str],
+        sample_size: int = 2000,
+        compute_overlap: bool = True,
+    ) -> SafeSchemaProfile:
+        """
+        Profile candidate warehouse tables and return a strictly zero-PII SafeSchemaProfile
+        (counts, ratios, pattern hit rates, shape skeletons, deterministic hints, and
+        cross-table key overlap matrix). Raw cell values are never retained in the result.
+        """
+        dialect = getattr(self.adapter, "dialect", getattr(self.adapter, "platform", "duckdb"))
+        safe_tables: List[SafeTableProfile] = []
+        # Ephemeral hashed value sets used ONLY in-memory for cross-table overlap, then discarded
+        hashed_sets: Dict[Tuple[str, str, str], Set[str]] = {}
+
+        def _profile_one_table(fqn: str) -> Optional[Tuple[SafeTableProfile, Dict[Tuple[str, str, str], Set[str]]]]:
+            cols = []
+            if hasattr(self.adapter, "get_table_columns"):
+                cols = self.adapter.get_table_columns(fqn)
+            elif hasattr(self.adapter, "get_columns"):
+                cols = self.adapter.get_columns(fqn)
+            if not cols:
+                return None
+
+            table_name_short = fqn.split(".")[-1].lower()
+            row_count = self._get_table_row_count(fqn)
+            sample_rows = self.sample_table(fqn, sample_size=sample_size)
+            col_profiles = self.profile_columns(table_name_short, cols, sample_rows)
+
+            safe_cols: List[SafeColumnProfile] = []
+            local_hashes: Dict[Tuple[str, str, str], Set[str]] = {}
+            for col_info in cols:
+                cname = col_info["name"].lower()
+                cp = col_profiles.get(cname)
+                if cp is None:
+                    continue
+                raw_vals = [
+                    str(r.get(cname)).strip()
+                    for r in sample_rows
+                    if isinstance(r, dict)
+                    and r.get(cname) is not None
+                    and str(r.get(cname)).strip() != ""
+                    and str(r.get(cname)).lower() not in ("null", "none")
+                ]
+                sp = self._build_safe_column_profile(cp, raw_vals)
+                safe_cols.append(sp)
+
+                if compute_overlap and sp.hint_role == "identifier" and sp.hint_identifier_type and raw_vals:
+                    local_hashes[(fqn, sp.name, sp.hint_identifier_type)] = {
+                        self._normalize_for_overlap_hash(v, sp.hint_identifier_type)
+                        for v in raw_vals
+                    }
+
+            entity_keys = [c.name for c in safe_cols if c.hint_role == "entity_key"]
+            hint_ek = entity_keys[0] if entity_keys else (safe_cols[0].name if safe_cols else None)
+            wm_candidates = [c.name for c in safe_cols if c.hint_role == "watermark" and c.name != hint_ek]
+            hint_wm = wm_candidates[0] if wm_candidates else None
+
+            # Check duplicate/null keys on sample without retaining values
+            has_dup_keys = False
+            has_null_keys = False
+            if hint_ek and sample_rows:
+                seen_k: Set[str] = set()
+                for r in sample_rows:
+                    if not isinstance(r, dict):
+                        continue
+                    v = r.get(hint_ek)
+                    if v is None or str(v).strip() == "":
+                        has_null_keys = True
+                    else:
+                        hv = hashlib.sha256(str(v).encode("utf-8")).hexdigest()[:16]
+                        if hv in seen_k:
+                            has_dup_keys = True
+                        seen_k.add(hv)
+
+            return (
+                SafeTableProfile(
+                    table_fqn=fqn,
+                    row_count=row_count,
+                    sample_rows_analyzed=len(sample_rows),
+                    columns=safe_cols,
+                    hint_entity_key=hint_ek,
+                    hint_watermark=hint_wm,
+                    duplicate_entity_keys_detected=has_dup_keys,
+                    null_entity_keys_detected=has_null_keys,
+                    has_candidate_identifiers=any(c.hint_role == "identifier" for c in safe_cols),
+                ),
+                local_hashes,
+            )
+
+        if len(candidate_tables) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            workers = min(6, len(candidate_tables))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                results = list(pool.map(_profile_one_table, candidate_tables))
+        else:
+            results = [_profile_one_table(fqn) for fqn in candidate_tables]
+
+        for res in results:
+            if res is None:
+                continue
+            tprof, local_hashes = res
+            safe_tables.append(tprof)
+            hashed_sets.update(local_hashes)
+
+        # Compute cross-table overlap matrix across tables sharing candidate identifier types
+        overlaps: List[CrossTableOverlap] = []
+        if compute_overlap and len(hashed_sets) >= 2:
+            items = list(hashed_sets.items())
+            for i in range(len(items)):
+                (tbl_a, col_a, type_a), set_a = items[i]
+                if not set_a:
+                    continue
+                for j in range(i + 1, len(items)):
+                    (tbl_b, col_b, type_b), set_b = items[j]
+                    if tbl_a == tbl_b or type_a != type_b or not set_b:
+                        continue
+                    shared = len(set_a & set_b)
+                    overlaps.append(
+                        CrossTableOverlap(
+                            table_a=tbl_a,
+                            column_a=col_a,
+                            table_b=tbl_b,
+                            column_b=col_b,
+                            identifier_type=type_a,
+                            overlap_a_in_b=round(shared / len(set_a), 4),
+                            overlap_b_in_a=round(shared / len(set_b), 4),
+                            shared_distinct_estimate=shared,
+                        )
+                    )
+
+        return SafeSchemaProfile(dialect=dialect, tables=safe_tables, overlaps=overlaps)

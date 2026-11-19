@@ -1485,6 +1485,34 @@ def connect_from_env():
         print(f"⚠ Failed to connect to {platform}: {e}", file=sys.stderr)
 
 
+@mcp.tool()
+def generate_idr_rules(
+    tables: Optional[list[str]] = None,
+    goal: str = "Unify customer records accurately across sources with safe supernode guardrails and practical golden-profile survivorship.",
+    sample_size: int = 2000,
+    verify_sql: bool = True,
+) -> Dict[str, Any]:
+    """
+    Profile warehouse tables (strictly zero-PII) and synthesize a validated IDR
+    configuration with human-readable reasoning for each table, rule, survivorship,
+    and lens decision. Read-only: never mutates idr_meta tables.
+    """
+    from idr_core.profiler import is_system_table
+    from idr_core.rule_generator import AIRuleGenerator
+
+    adapter = get_adapter()
+    target_tables = [t for t in (tables or []) if t and not is_system_table(t)]
+    if not target_tables and hasattr(adapter, "list_tables"):
+        target_tables = [t for t in adapter.list_tables() if not is_system_table(t)][:15]
+    plan = AIRuleGenerator(adapter).generate(
+        tables=target_tables,
+        goal=goal,
+        sample_size=sample_size,
+        verify_sql=verify_sql,
+    )
+    return plan.model_dump()
+
+
 def main():
     """CLI entrypoint for `idr-mcp` binary."""
     connect_from_env()

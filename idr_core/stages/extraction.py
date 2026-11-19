@@ -267,7 +267,7 @@ class ExtractionStage(BaseStage):
                             SELECT DISTINCT e.left_entity_key AS entity_key
                             FROM idr_out.identity_edges_current e
                             WHERE {excl_e}
-                            UNION
+                            UNION DISTINCT
                             SELECT DISTINCT e.right_entity_key AS entity_key
                             FROM idr_out.identity_edges_current e
                             WHERE {excl_e}
@@ -313,7 +313,7 @@ class ExtractionStage(BaseStage):
                                   WHERE i1.entity_key = o.entity_key_a
                                     AND i2.entity_key = o.entity_key_b
                               )
-                            UNION
+                            UNION DISTINCT
                             SELECT DISTINCT m2.entity_key
                             FROM idr_meta.identity_override o
                             JOIN idr_out.identity_resolved_membership_current m1
@@ -374,7 +374,7 @@ class ExtractionStage(BaseStage):
                         WHERE o.is_active = TRUE
                           AND UPPER(o.override_type) = 'FORCE_LINK'
                           AND m1.resolved_id != m2.resolved_id
-                        UNION
+                        UNION DISTINCT
                         SELECT DISTINCT m2.entity_key
                         FROM idr_meta.identity_override o
                         JOIN idr_out.identity_resolved_membership_current m1
@@ -389,7 +389,7 @@ class ExtractionStage(BaseStage):
             if not impacted_branches:
                 return
 
-            seed_union = " UNION ".join(impacted_branches)
+            seed_union = " UNION DISTINCT ".join(impacted_branches)
             # Expand impacted seed entities to full cluster co-members
             self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.gov_affected_entities AS
@@ -404,7 +404,7 @@ class ExtractionStage(BaseStage):
                 FROM target_clusters tc
                 JOIN idr_out.identity_resolved_membership_current m2
                   ON tc.resolved_id = m2.resolved_id
-                UNION
+                UNION DISTINCT
                 SELECT DISTINCT entity_key FROM seed
             """)
 
@@ -583,7 +583,7 @@ class ExtractionStage(BaseStage):
                     )
                 new_entity_branch = (
                     f"""
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT e.entity_key
                     FROM idr_work.entities_delta e
                     WHERE e.table_id IN ({no_wm_in})
@@ -607,7 +607,7 @@ class ExtractionStage(BaseStage):
                             AND h.identifier_type = d.identifier_type
                             AND h.identifier_value_norm = d.identifier_value_norm
                       )
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT e.entity_key
                     FROM idr_work.entities_delta e
                     JOIN idr_out.identity_identifiers_current h ON e.entity_key = h.entity_key
@@ -651,7 +651,7 @@ class ExtractionStage(BaseStage):
                 # (including any hard-deleted no-watermark entities so their stale edges are pruned)
                 del_union = (
                     """
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT entity_key FROM idr_work.deleted_no_wm_entities
                     """
                     if getattr(self, "_has_no_wm_deletes", False)
@@ -673,7 +673,7 @@ class ExtractionStage(BaseStage):
                     JOIN idr_out.identity_identifiers_current h
                       ON d.identifier_type = h.identifier_type
                      AND d.identifier_value_norm = h.identifier_value_norm
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT entity_key
                     FROM idr_work.reextracted_entities
                 """)
@@ -724,7 +724,7 @@ class ExtractionStage(BaseStage):
                     CREATE OR REPLACE TABLE idr_work.identifiers_all AS
                     SELECT entity_key, identifier_type, identifier_value_norm, is_hashed, max_group_size
                     FROM idr_work.identifiers_delta
-                    UNION
+                    UNION DISTINCT
                     SELECT h.entity_key, h.identifier_type, h.identifier_value_norm, h.is_hashed, 10000 AS max_group_size
                     FROM idr_work.expanded_cluster_entities exp
                     JOIN idr_out.identity_identifiers_current h

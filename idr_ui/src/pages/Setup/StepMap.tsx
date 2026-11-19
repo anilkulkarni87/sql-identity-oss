@@ -114,6 +114,9 @@ export default function StepMap({
     const [validationError, setValidationError] = useState<string | null>(null);
     const [aiSuggesting, setAiSuggesting] = useState(false);
     const [aiNotice, setAiNotice] = useState<string | null>(null);
+    const [aiGoal, setAiGoal] = useState<string>('');
+    const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null);
+    const [aiReportOpen, setAiReportOpen] = useState<boolean>(true);
 
     const latestInitialConfigRef = useRef<IDRConfig | undefined>(initialConfig);
     latestInitialConfigRef.current = initialConfig;
@@ -529,10 +532,10 @@ export default function StepMap({
                                     setValidationError(null);
                                     setAiNotice(null);
                                     try {
-                                        const res = await api.suggestConfigAi(
-                                            tables,
-                                            'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views (strict_person vs household) for these tables.'
-                                        );
+                                        const goalPrompt = aiGoal.trim() || 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views (strict_person vs household) for these tables.';
+                                        const res = await api.suggestConfigAi(tables, goalPrompt);
+                                        setAiReport(res);
+                                        setAiReportOpen(true);
                                         const suggested = res.suggested_config as unknown as IDRConfig;
                                         if (suggested && Array.isArray(suggested.sources) && suggested.sources.length > 0) {
                                             const merged: IDRConfig = {
@@ -546,7 +549,10 @@ export default function StepMap({
                                                 onTablesChange?.(nextTables);
                                             }
                                             onChange?.(merged);
-                                            setAiNotice(`AI (${res.model}) suggested mappings, rules, and lenses. Review and click Save Config.`);
+                                            const modeLabel = res.generation_mode === 'deterministic_fallback'
+                                                ? 'Deterministic Fallback'
+                                                : `AI (${res.provider}:${res.model})`;
+                                            setAiNotice(`${modeLabel} proposed mappings, rules, and survivorship. Review reasoning below and click Save Config.`);
                                         } else {
                                             setValidationError('AI did not return any source mappings.');
                                         }
@@ -589,13 +595,145 @@ export default function StepMap({
                 </div>
             </div>
 
+            {tables.length > 0 && (
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
+                    <span className="text-[11px] font-semibold text-purple-300 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        AI Goal (Optional)
+                    </span>
+                    <input
+                        type="text"
+                        value={aiGoal}
+                        onChange={e => setAiGoal(e.target.value)}
+                        placeholder="e.g. Strict B2C person matching on email & loyalty, prioritize CRM over web for names..."
+                        className="flex-1 bg-slate-950/70 border border-slate-700/70 rounded-lg px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                </div>
+            )}
+
             {aiNotice && (
                 <div className="bg-purple-950/40 border border-purple-500/40 rounded-xl p-3 text-xs text-purple-200 flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2">
                         <Sparkles className="w-4 h-4 shrink-0 text-purple-300" />
                         {aiNotice}
                     </span>
-                    <button type="button" onClick={() => setAiNotice(null)} className="text-purple-300 hover:text-white">✕</button>
+                    <div className="flex items-center gap-2 shrink-0">
+                        {aiReport?.explanations && (
+                            <button
+                                type="button"
+                                onClick={() => setAiReportOpen(prev => !prev)}
+                                className="px-2 py-0.5 rounded bg-purple-900/60 hover:bg-purple-800/70 text-purple-200 text-[11px] font-medium"
+                            >
+                                {aiReportOpen ? 'Hide Reasoning' : 'Show Reasoning'}
+                            </button>
+                        )}
+                        <button type="button" onClick={() => { setAiNotice(null); setAiReport(null); }} className="text-purple-300 hover:text-white">✕</button>
+                    </div>
+                </div>
+            )}
+
+            {aiReport && aiReportOpen && (
+                <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-4 space-y-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-white">AI Proposal &amp; Reasoning</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                                aiReport.generation_mode === 'deterministic_fallback'
+                                    ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
+                                    : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                            }`}>
+                                {aiReport.generation_mode === 'deterministic_fallback'
+                                    ? 'Deterministic Fallback'
+                                    : `${aiReport.generation_mode === 'ai_repaired' ? 'AI Repaired' : 'AI Validated'} (${aiReport.provider}:${aiReport.model})`}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                                Zero-PII Profile
+                            </span>
+                            {aiReport.validation_report?.sql_verified && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-950/60 text-blue-300 border border-blue-500/40">
+                                    SQL Verified
+                                </span>
+                            )}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setAiReportOpen(false)}
+                            className="text-slate-400 hover:text-white text-[11px]"
+                        >
+                            Collapse
+                        </button>
+                    </div>
+
+                    {aiReport.validation_report?.warnings && aiReport.validation_report.warnings.length > 0 && (
+                        <div className="bg-amber-950/30 border border-amber-500/30 rounded-lg p-2.5 text-amber-200 space-y-1">
+                            {aiReport.validation_report.warnings.map((w, idx) => (
+                                <div key={idx}>⚠ {w}</div>
+                            ))}
+                        </div>
+                    )}
+
+                    {aiReport.profile_summary?.cross_table_overlaps && aiReport.profile_summary.cross_table_overlaps.length > 0 && (
+                        <div className="space-y-1">
+                            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Cross-Table Key Overlaps</div>
+                            <div className="flex flex-wrap gap-1.5">
+                                {aiReport.profile_summary.cross_table_overlaps.slice(0, 8).map((ov, idx) => (
+                                    <span key={idx} className="px-2 py-1 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">
+                                        <span className="text-purple-300 font-semibold">{ov.identifier_type}</span>: {ov.table_a.split('.').pop()}.{ov.column_a} ↔ {ov.table_b.split('.').pop()}.{ov.column_b}{' '}
+                                        <span className="text-emerald-300 font-mono">{Math.round(ov.overlap_a_in_b * 100)}% / {Math.round(ov.overlap_b_in_a * 100)}%</span>
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {aiReport.explanations && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {[
+                                { title: 'Matching Rules', items: aiReport.explanations.rules || [] },
+                                { title: 'Table Mappings', items: aiReport.explanations.tables || [] },
+                                { title: 'Survivorship', items: aiReport.explanations.survivorship || [] },
+                                { title: 'Identity Lenses', items: aiReport.explanations.lenses || [] },
+                            ]
+                                .filter(sec => sec.items.length > 0)
+                                .map(sec => (
+                                    <div key={sec.title} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3 space-y-2">
+                                        <div className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">{sec.title}</div>
+                                        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                                            {sec.items.map((item, idx) => (
+                                                <div key={`${item.target}-${idx}`} className="border-b border-slate-800/70 last:border-0 pb-1.5 last:pb-0 space-y-0.5">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="font-mono font-semibold text-slate-100">{item.target}</span>
+                                                        <div className="flex items-center gap-1">
+                                                            {item.needs_review && (
+                                                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-semibold">
+                                                                    Needs Review
+                                                                </span>
+                                                            )}
+                                                            {item.confidence && (
+                                                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]">
+                                                                    {item.confidence}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-slate-300 leading-relaxed">{item.summary}</p>
+                                                    {item.evidence && item.evidence.length > 0 && (
+                                                        <div className="text-[10px] text-slate-400 font-mono">
+                                                            Evidence: {item.evidence.join(' · ')}
+                                                        </div>
+                                                    )}
+                                                    {item.risks && item.risks.length > 0 && (
+                                                        <div className="text-[10px] text-amber-300">
+                                                            Risk: {item.risks.join(' ')}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                        </div>
+                    )}
                 </div>
             )}
 

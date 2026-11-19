@@ -508,16 +508,74 @@ export const api = {
         body: JSON.stringify({ message, history })
     }),
 
-    suggestConfigAi: (tables?: string[], prompt = 'Suggest identifier mappings, matching rules, survivorship, and multi-lens views.') => fetchJson<{
+    suggestConfigAi: (tables?: string[], prompt = 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views.') => fetchJson<{
         pii_masked: boolean
         provider: string
         model: string
+        generation_mode?: 'ai_validated' | 'ai_repaired' | 'deterministic_fallback'
         suggested_config: Record<string, unknown>
+        explanations?: {
+            tables: Array<{
+                target: string
+                summary: string
+                evidence?: string[]
+                risks?: string[]
+                confidence?: 'high' | 'medium' | 'low'
+                needs_review?: boolean
+            }>
+            rules: Array<{
+                target: string
+                summary: string
+                evidence?: string[]
+                risks?: string[]
+                confidence?: 'high' | 'medium' | 'low'
+                needs_review?: boolean
+            }>
+            survivorship: Array<{
+                target: string
+                summary: string
+                evidence?: string[]
+                risks?: string[]
+                confidence?: 'high' | 'medium' | 'low'
+                needs_review?: boolean
+            }>
+            lenses: Array<{
+                target: string
+                summary: string
+                evidence?: string[]
+                risks?: string[]
+                confidence?: 'high' | 'medium' | 'low'
+                needs_review?: boolean
+            }>
+        }
+        validation_report?: {
+            valid: boolean
+            errors: string[]
+            warnings: string[]
+            repair_attempts: number
+            sql_verified: boolean
+        }
+        profile_summary?: {
+            dialect?: string
+            tables_profiled?: number
+            tables_with_identifiers?: number
+            cross_table_overlaps?: Array<{
+                table_a: string
+                column_a: string
+                table_b: string
+                column_b: string
+                identifier_type: string
+                overlap_a_in_b: number
+                overlap_b_in_a: number
+                shared_distinct_estimate: number
+            }>
+        }
     }>('/ai/suggest-config', {
         method: 'POST',
         body: JSON.stringify({
             ...(tables && tables.length > 0 ? { tables } : {}),
-            prompt
+            prompt,
+            goal: prompt
         })
     }),
 

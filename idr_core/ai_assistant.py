@@ -360,9 +360,30 @@ def suggest_config_with_ai(
     profiler_summary: Dict[str, Any],
     prompt_text: str,
     client: Optional[LLMClient] = None,
+    adapter: Any = None,
+    tables: Optional[List[str]] = None,
+    sample_size: int = 2000,
+    verify_sql: bool = True,
 ) -> Dict[str, Any]:
-    """Generate/refine an IDR config dictionary from schema profile + natural-language goal."""
+    """
+    Generate/refine an IDR config dictionary from schema profile + natural-language goal.
+
+    When `adapter` and `tables` are provided, runs the full Zero-PII two-pass
+    `AIRuleGenerator` pipeline (strict schema validation, grounding, self-repair,
+    per-rule reasoning, and deterministic fallback).
+    """
     client = client or LLMClient()
+    if adapter is not None and tables:
+        from .rule_generator import AIRuleGenerator
+
+        plan = AIRuleGenerator(adapter, client=client).generate(
+            tables=tables,
+            goal=prompt_text,
+            sample_size=sample_size,
+            verify_sql=verify_sql,
+        )
+        return _sanitize_json(plan.model_dump())
+
     safe_profile = mask_pii_payload(profiler_summary) if client.config.effective_mask_pii else profiler_summary
 
     prompt = (

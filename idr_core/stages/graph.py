@@ -617,7 +617,7 @@ class GraphStage(BaseStage):
                     SELECT DISTINCT winning_resolved_id AS reserved_id
                     FROM winning_cluster
                     WHERE win_rn = 1
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT resolved_id AS reserved_id
                     FROM idr_out.identity_resolved_membership_current
                 )
@@ -787,7 +787,7 @@ class GraphStage(BaseStage):
         if attr_parts:
             self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.cluster_attributes AS
-                {" UNION ".join(attr_parts)}
+                {" UNION DISTINCT ".join(attr_parts)}
             """)
         else:
             self.adapter.execute(f"""
@@ -946,7 +946,7 @@ class GraphStage(BaseStage):
         self.adapter.execute("""
             CREATE OR REPLACE TABLE idr_work.lp_fuzzy_labels AS
             SELECT DISTINCT left_id AS entity_key, left_id AS label FROM idr_work.fuzzy_edges
-            UNION
+            UNION DISTINCT
             SELECT DISTINCT right_id AS entity_key, right_id AS label FROM idr_work.fuzzy_edges
         """)
 
@@ -1344,7 +1344,7 @@ class GraphStage(BaseStage):
                     SELECT DISTINCT winning_resolved_id AS reserved_id
                     FROM winning_cluster
                     WHERE win_rn = 1
-                    UNION
+                    UNION DISTINCT
                     SELECT DISTINCT resolved_id AS reserved_id
                     FROM prev_lens_mem
                 )
