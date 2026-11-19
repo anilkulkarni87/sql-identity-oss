@@ -945,6 +945,7 @@ def handle_run(args) -> int:
         if args.config:
             config_data = load_config(args.config)
             if args.dry_run:
+                IDRRunner.check_no_active_run_lock(adapter)
                 ephemeral_dry_run = True
                 meta_snapshots = snapshot_meta_tables(adapter)
                 apply_config_to_warehouse(adapter, config_data, record_snapshot=False)

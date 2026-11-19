@@ -589,6 +589,7 @@ async def run_pipeline(
         from idr_core.runner import IDRRunner, RunConfig
 
         if request.dry_run and request.config is not None:
+            IDRRunner.check_no_active_run_lock(adapter)
             meta_snapshots = snapshot_meta_tables(adapter)
             _execute_save_config(adapter, request.config, record_snapshot=False)
 

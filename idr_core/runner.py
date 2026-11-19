@@ -263,7 +263,7 @@ class IDRRunner:
             entities = extraction.extract_entities(config.run_mode)
             self._end_stage("entity_extraction", entities)
 
-            if entities == 0:
+            if entities == 0 and not getattr(extraction, "_has_no_wm_deletes", False):
                 return self._complete_run(
                     start_time, config, entities=0, edges=0, clusters=0, status="SUCCESS_NO_CHANGES"
                 )
@@ -280,8 +280,10 @@ class IDRRunner:
             # In INCR mode, state-diffing prunes unchanged rows from no-watermark tables.
             # Refresh delta entities count (excluding candidate-expanded historical rows where watermark_value IS NULL)
             # and short-circuit immediately if no delta entities remain (unless retroactive governance changes apply).
-            if config.run_mode == "INCR" and not getattr(
-                extraction, "_has_retroactive_governance_changes", False
+            if (
+                config.run_mode == "INCR"
+                and not getattr(extraction, "_has_retroactive_governance_changes", False)
+                and not getattr(extraction, "_has_no_wm_deletes", False)
             ):
                 entities = (
                     self.adapter.query_one(
@@ -393,6 +395,39 @@ class IDRRunner:
             if lock_acquired:
                 self._release_run_lock()
 
+    @staticmethod
+    def check_no_active_run_lock(adapter, lock_ttl_seconds: int = 3600) -> None:
+        """Raise RuntimeError if an active (non-stale) advisory run lock is held in idr_meta.run_state."""
+        if not adapter.table_exists("idr_meta.run_state"):
+            return
+        rows = adapter.query(
+            "SELECT last_run_id, updated_at FROM idr_meta.run_state WHERE table_id = '__idr_run_lock__'"
+        )
+        if not rows or not rows[0].get("last_run_id"):
+            return
+        active_run_id = str(rows[0]["last_run_id"])
+        locked_at = rows[0].get("updated_at")
+        is_stale = False
+        if locked_at is not None:
+            if isinstance(locked_at, str):
+                try:
+                    locked_dt = datetime.fromisoformat(locked_at.replace("Z", "+00:00"))
+                except ValueError:
+                    locked_dt = None
+            else:
+                locked_dt = locked_at
+            if locked_dt is not None:
+                now_utc = datetime.now(timezone.utc)
+                if locked_dt.tzinfo is None:
+                    locked_dt = locked_dt.replace(tzinfo=timezone.utc)
+                age_seconds = (now_utc - locked_dt).total_seconds()
+                is_stale = age_seconds > max(0, int(lock_ttl_seconds))
+        if not is_stale:
+            raise RuntimeError(
+                f"Concurrent IDR run in progress (run_id={active_run_id}, started_at={locked_at}). "
+                f"Wait for completion or pass force_unlock=True."
+            )
+
     def _acquire_run_lock(self, config: RunConfig) -> None:
         """Acquire an advisory run lock in idr_meta.run_state to serialize concurrent runs."""
         if not self.adapter.table_exists("idr_meta.run_state"):
@@ -448,8 +483,7 @@ class IDRRunner:
             if not self.adapter.table_exists("idr_meta.run_state"):
                 return
             self.adapter.execute(f"""
-                UPDATE idr_meta.run_state
-                SET last_run_id = NULL, updated_at = {self._dialect["current_timestamp"]}
+                DELETE FROM idr_meta.run_state
                 WHERE table_id = '__idr_run_lock__' AND last_run_id = '{self.run_id}'
             """)
         except Exception as e:

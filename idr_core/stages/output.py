@@ -429,7 +429,21 @@ class OutputStage(BaseStage):
             # 1b. Record resolved_id crosswalk for any clusters that merged or split
             self._record_resolved_id_crosswalk()
 
-            # 2. Update membership table
+            # 2. Update membership table (and remove hard-deleted no-watermark entities in INCR mode)
+            if (
+                self.config
+                and self.config.run_mode == "INCR"
+                and self.adapter.table_exists("idr_work.deleted_no_wm_entities")
+            ):
+                self.adapter.execute("""
+                    DELETE FROM idr_work.lp_labels
+                    WHERE entity_key IN (SELECT entity_key FROM idr_work.deleted_no_wm_entities)
+                """)
+                self.adapter.execute("""
+                    DELETE FROM idr_out.identity_resolved_membership_current
+                    WHERE entity_key IN (SELECT entity_key FROM idr_work.deleted_no_wm_entities)
+                """)
+
             self.upsert(
                 target_table="idr_out.identity_resolved_membership_current",
                 source_query=f"""

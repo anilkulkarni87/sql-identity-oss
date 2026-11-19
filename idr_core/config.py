@@ -1724,7 +1724,7 @@ def apply_config_to_warehouse(
     )
     mappings_json = json.dumps(cfg.get("survivorship", []))
     config_str = sources_json + rules_json + mappings_json
-    config_hash = hashlib.md5(config_str.encode("utf-8")).hexdigest()
+    config_hash = hashlib.sha256(config_str.encode("utf-8")).hexdigest()[:16]
     current_ts = datetime.now(timezone.utc).isoformat()
 
     def escape_json(s: str) -> str:

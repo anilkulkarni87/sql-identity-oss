@@ -223,6 +223,8 @@ By default, all sensitive PII (emails, phone numbers, exact match values) is mas
 
 For teams that orchestrate transformations strictly through **dbt Core** or **dbt Cloud**, [`dbt_idr`](https://github.com/anilkulkarni87/sql-identity-oss/tree/main/dbt_idr) provides a pure-Jinja SQL implementation compatible with `dbt-duckdb`, `dbt-snowflake`, `dbt-bigquery`, and `dbt-databricks`.
 
+> **When to use `dbt_idr` vs. `idr run` (`idr_core`)**: `dbt_idr` is designed as a **batch/full-refresh dbt starter** (supporting anchor-star edges, `max_group_size`, `FORCE_LINK`/`DO_NOT_LINK`/`ISOLATE` overrides, confidence scoring, and `golden_profiles`). Unlike ID-stitching-only dbt packages, it includes survivorship and stewardship overrides out of the box—and shares the same metadata schema so you can graduate to `idr run` (`idr_core`) whenever you need **incremental cluster splits**, **cross-run `resolved_id` stabilization**, **pre-write blast-radius gates**, or **fuzzy matching**.
+
 ### Exporting Config to dbt Seeds (`idr dbt export`)
 
 You can design your rules in YAML or the Web UI and export all **7 standard `dbt_idr` seed CSVs** in one command:

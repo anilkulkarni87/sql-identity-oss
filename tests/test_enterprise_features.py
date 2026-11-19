@@ -1391,6 +1391,221 @@ def test_advisory_run_lock_blocks_concurrent_run_and_recovers_stale_lock(adapter
     assert released is None
 
 
+def test_lens_do_not_link_third_party_anchor_and_fallback_collision(adapter):
+    """
+    Verify resolve_lens enforces DO_NOT_LINK across 3-member shared-anchor groups
+    and _stabilize_lens_resolved_ids avoids fallback ID collisions.
+    """
+    import hashlib
+    import logging
+
+    from idr_core.adapters.base import get_dialect_config
+    from idr_core.stages.base import StageContext
+    from idr_core.stages.graph import GraphStage
+
+    adapter.execute("""
+        CREATE TABLE lens_u (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        INSERT INTO lens_u VALUES
+            ('1', 'lens@acmecorp.io', CURRENT_TIMESTAMP),
+            ('2', 'lens@acmecorp.io', CURRENT_TIMESTAMP),
+            ('3', 'lens@acmecorp.io', CURRENT_TIMESTAMP);
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "lens_u",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "email", "expr": "email"}],
+            }
+        ],
+        "rules": [{"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"}],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    # Run once without DO_NOT_LINK to populate idr_work.edges_new & entities_delta,
+    # then test resolve_lens with DO_NOT_LINK(crm:2, crm:3)
+    adapter.execute("""
+        INSERT INTO idr_meta.identity_override (override_type, entity_key_a, entity_key_b, reason, is_active)
+        VALUES ('DO_NOT_LINK', 'crm:2', 'crm:3', 'Lens split test', TRUE)
+    """)
+    ctx = StageContext(
+        adapter=adapter,
+        run_id="r_lens",
+        dialect=get_dialect_config("duckdb"),
+        logger=logging.getLogger("test"),
+        warnings=[],
+    )
+    gs = GraphStage(ctx, config=RunConfig(run_mode="FULL"))
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_work.entities_delta AS
+        SELECT 'r_lens' AS run_id, 'crm' AS table_id, 'crm:1' AS entity_key, CURRENT_TIMESTAMP AS watermark_value
+        UNION ALL SELECT 'r_lens', 'crm', 'crm:2', CURRENT_TIMESTAMP
+        UNION ALL SELECT 'r_lens', 'crm', 'crm:3', CURRENT_TIMESTAMP
+    """)
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_work.edges_new AS
+        SELECT 'crm:2' AS left_entity_key, 'crm:1' AS right_entity_key, 'EMAIL' AS identifier_type, 'lens@acmecorp.io' AS identifier_value_norm
+        UNION ALL
+        SELECT 'crm:3', 'crm:1', 'EMAIL', 'lens@acmecorp.io'
+    """)
+    gs.resolve_lens({"lens_id": "strict_email", "include_types": ["EMAIL"]}, max_iters=10)
+    lens_labels = {
+        r["entity_key"]: r["label"]
+        for r in adapter.query("SELECT entity_key, label FROM idr_work.lp_labels_lens")
+    }
+    assert lens_labels["crm:1"] == "crm:1"
+    assert lens_labels["crm:2"] == "crm:1"
+    assert lens_labels["crm:3"] == "crm:3"
+
+    # Also verify _stabilize_lens_resolved_ids prevents fallback collision
+    colliding = f"crm:a:split:{hashlib.md5(b'crm:a').hexdigest()[:8]}"
+    adapter.execute(f"""
+        INSERT INTO idr_out.identity_lens_membership_current (lens_id, entity_key, resolved_id, updated_at, run_id)
+        VALUES
+            ('strict_email', 'crm:b', 'crm:a', TIMESTAMP '2026-10-01', 'r1'),
+            ('strict_email', 'crm:c', 'crm:a', TIMESTAMP '2026-10-01', 'r1'),
+            ('strict_email', 'crm:d', '{colliding}', TIMESTAMP '2026-10-01', 'r1')
+    """)
+    adapter.execute("""
+        CREATE OR REPLACE TABLE idr_work.lp_labels_lens AS
+        SELECT 'crm:a' AS entity_key, 'crm:a' AS label
+        UNION ALL SELECT 'crm:b', 'crm:b'
+        UNION ALL SELECT 'crm:c', 'crm:b'
+        UNION ALL SELECT 'crm:d', 'crm:d'
+    """)
+    gs._stabilize_lens_resolved_ids("strict_email")
+    stab = {
+        r["entity_key"]: r["label"]
+        for r in adapter.query("SELECT entity_key, label FROM idr_work.lp_labels_lens")
+    }
+    assert stab["crm:b"] == "crm:a"
+    assert stab["crm:c"] == "crm:a"
+    assert stab["crm:d"] == colliding
+    assert stab["crm:a"] not in ("crm:a", colliding)
+
+
+def test_incr_no_watermark_hard_delete_splits_and_removes_member(adapter):
+    """
+    When a row is hard-deleted from an un-watermarked source table, INCR mode must
+    detect the deletion, remove the deleted entity from membership, and split any
+    surviving co-members that were only bridged by the deleted row.
+    """
+    adapter.execute("""
+        CREATE TABLE crm_src (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        CREATE TABLE phone_src (id VARCHAR, phone VARCHAR, updated_at TIMESTAMP);
+        CREATE TABLE bridge_src (id VARCHAR, email VARCHAR, phone VARCHAR);
+        INSERT INTO crm_src VALUES ('1', 'a@acmecorp.io', TIMESTAMP '2026-10-01');
+        INSERT INTO phone_src VALUES ('2', '5550102', TIMESTAMP '2026-10-01');
+        INSERT INTO bridge_src VALUES ('99', 'a@acmecorp.io', '5550102');
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "crm_src",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "email", "expr": "email"}],
+            },
+            {
+                "id": "ph",
+                "table": "phone_src",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "phone", "expr": "phone"}],
+            },
+            {
+                "id": "bridge",
+                "table": "bridge_src",
+                "entity_key": "id",
+                "identifiers": [
+                    {"type": "email", "expr": "email"},
+                    {"type": "phone", "expr": "phone"},
+                ],
+            },
+        ],
+        "rules": [
+            {"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"},
+            {"id": "r_phone", "match_keys": ["phone"]},
+        ],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    m1 = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert m1["crm:1"] == m1["ph:2"]
+
+    # Hard-delete bridge:99 from un-watermarked table
+    adapter.execute("DELETE FROM bridge_src WHERE id = '99'")
+    res = IDRRunner(adapter).run(RunConfig(run_mode="INCR"))
+    assert res.status == "SUCCESS"
+
+    m2 = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert "bridge:99" not in m2
+    assert m2["crm:1"] == "crm:1"
+    assert m2["ph:2"] == "ph:2"
+
+
+def test_incr_deactivated_do_not_link_remerges_cluster(adapter):
+    """
+    Deactivating an active DO_NOT_LINK override (is_active = FALSE) with zero source
+    changes must retroactively seed the separated pair in INCR mode and re-merge them.
+    """
+    adapter.execute("""
+        CREATE TABLE relax_u (id VARCHAR, email VARCHAR, updated_at TIMESTAMP);
+        INSERT INTO relax_u VALUES
+            ('1', 'same@acmecorp.io', TIMESTAMP '2026-10-01'),
+            ('2', 'same@acmecorp.io', TIMESTAMP '2026-10-01');
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "crm",
+                "table": "relax_u",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [{"type": "email", "expr": "email"}],
+            }
+        ],
+        "rules": [{"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"}],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    adapter.execute("""
+        INSERT INTO idr_meta.identity_override (override_type, entity_key_a, entity_key_b, reason, is_active)
+        VALUES ('DO_NOT_LINK', 'crm:1', 'crm:2', 'Temporary block', TRUE)
+    """)
+    IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
+    m1 = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert m1["crm:1"] != m1["crm:2"]
+
+    # Deactivate override without changing source rows
+    adapter.execute("UPDATE idr_meta.identity_override SET is_active = FALSE")
+    res = IDRRunner(adapter).run(RunConfig(run_mode="INCR"))
+    assert res.status == "SUCCESS"
+    m2 = {
+        r["entity_key"]: r["resolved_id"]
+        for r in adapter.query("SELECT entity_key, resolved_id FROM idr_out.identity_resolved_membership_current")
+    }
+    assert m2["crm:1"] == m2["crm:2"] == "crm:1"
+
+
+
+
 
 
 
