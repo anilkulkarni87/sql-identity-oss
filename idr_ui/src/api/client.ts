@@ -579,6 +579,63 @@ export const api = {
         })
     }),
 
+    suggestConfigAiStream: async (
+        tables?: string[],
+        prompt = 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views.',
+        onProgress?: (evt: { stage: string; step: number; total_steps: number; message: string }) => void
+    ) => {
+        const res = await apiRequest('/ai/suggest-config/stream', {
+            method: 'POST',
+            body: JSON.stringify({
+                ...(tables && tables.length > 0 ? { tables } : {}),
+                prompt,
+                goal: prompt,
+            }),
+        })
+        if (!res.body) {
+            return api.suggestConfigAi(tables, prompt)
+        }
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let finalResult: any = null
+
+        while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const frames = buffer.split('\n\n')
+            buffer = frames.pop() || ''
+
+            for (const frame of frames) {
+                if (!frame.trim() || frame.startsWith(':')) continue
+                let eventType = 'message'
+                const dataLines: string[] = []
+                for (const line of frame.split('\n')) {
+                    if (line.startsWith('event:')) {
+                        eventType = line.slice(6).trim()
+                    } else if (line.startsWith('data:')) {
+                        dataLines.push(line.slice(5).trim())
+                    }
+                }
+                const rawData = dataLines.join('\n')
+                if (!rawData) continue
+                const parsed = JSON.parse(rawData)
+                if (eventType === 'progress') {
+                    onProgress?.(parsed)
+                } else if (eventType === 'result') {
+                    finalResult = parsed
+                } else if (eventType === 'error') {
+                    throw new APIError(400, parsed?.detail || 'AI config suggestion failed')
+                }
+            }
+        }
+        if (!finalResult) {
+            throw new APIError(500, 'AI stream ended before returning a configuration.')
+        }
+        return finalResult as Awaited<ReturnType<typeof api.suggestConfigAi>>
+    },
+
     // Multi-Lens Identity
     listLenses: () => fetchJson<{
         lenses: Array<{

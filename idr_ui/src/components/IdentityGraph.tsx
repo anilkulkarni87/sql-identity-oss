@@ -16,6 +16,8 @@ export interface GraphNodeData {
     borderColor: string
     size: number
     degree?: number
+    isGroup?: boolean
+    groupCount?: number
 }
 
 export interface GraphEdgeData {
@@ -73,8 +75,8 @@ export default function IdentityGraph({
 
         const cytoscapeNodes = nodes.map((n) => {
             const deg = degreeMap[n.id] || 0
-            const size = Math.min(42, Math.max(20, 20 + deg * 2.2))
-            const displayLabel = showAllLabels || !isLargeCluster || deg >= 4 ? n.label : ''
+            const size = n.isGroup ? 34 : Math.min(42, Math.max(20, 20 + deg * 2.2))
+            const displayLabel = n.isGroup || showAllLabels || !isLargeCluster || deg >= 4 ? n.label : ''
 
             return {
                 data: {
@@ -84,6 +86,7 @@ export default function IdentityGraph({
                     displayLabel,
                     fullLabel: n.label,
                 },
+                classes: n.isGroup ? 'group-hub' : undefined,
             }
         })
 
@@ -135,6 +138,24 @@ export default function IdentityGraph({
                     'text-background-shape': 'roundrectangle',
                     width: 'data(size)',
                     height: 'data(size)',
+                },
+            },
+            {
+                selector: 'node.group-hub',
+                style: {
+                    shape: 'round-rectangle',
+                    width: 'label',
+                    height: 28,
+                    padding: '10px',
+                    'border-style': 'dashed',
+                    'border-width': 2,
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'text-margin-y': 0,
+                    color: '#ffffff',
+                    'font-size': '11px',
+                    'font-weight': '600',
+                    'text-background-opacity': 0,
                 },
             },
             {
@@ -386,11 +407,10 @@ export default function IdentityGraph({
                             type="button"
                             onClick={() => switchLayout(l.id)}
                             aria-pressed={currentLayout === l.id}
-                            className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                                currentLayout === l.id
+                            className={`px-2 py-1 rounded text-xs font-medium transition-colors ${currentLayout === l.id
                                     ? 'bg-surface text-ink border border-line-strong'
                                     : 'text-ink-muted hover:text-ink hover:bg-hover border border-transparent'
-                            }`}
+                                }`}
                         >
                             {l.label}
                         </button>
@@ -403,11 +423,10 @@ export default function IdentityGraph({
                         onClick={() => setShowAllLabels((v) => !v)}
                         aria-pressed={showAllLabels}
                         aria-label="Toggle all node and edge labels"
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
-                            showAllLabels
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${showAllLabels
                                 ? 'bg-accent-soft text-accent border-accent-border'
                                 : 'bg-surface text-ink-muted border-line hover:text-ink'
-                        }`}
+                            }`}
                     >
                         <Tag className="w-3 h-3" />
                         <span>Labels</span>

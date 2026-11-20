@@ -293,3 +293,194 @@ def test_profiler_and_rule_generator_disambiguate_homonym_attributes(adapter):
     assert shipments_attrs == {"status": "shipments_status", "disposition": "shipments_disposition", "city": "city"}
     assert len(explanations) == 2
 
+
+def test_phase1_pk_as_identifier_and_domain_agnostic_join_discovery(adapter):
+    """
+    Verify Phase 1 intelligence:
+    1. PK-to-FK promotion: orders.order_id stays entity_key AND is promoted to identifier_type='order_id'
+       when shipments.order_id overlaps with it.
+    2. Domain-agnostic join key discovery: healthcare mrn <-> patient_mrn is discovered via zero-PII
+       hash overlap without hardcoded domain regexes, while descriptive 'city' is not promoted.
+    """
+    from idr_core.profiler import IDRDataProfiler
+
+    adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    adapter.execute("CREATE TABLE raw.orders (order_id VARCHAR, total_amt DOUBLE)")
+    adapter.execute("CREATE TABLE raw.shipments (shipment_id VARCHAR, order_id VARCHAR, carrier VARCHAR)")
+    adapter.execute("""
+        INSERT INTO raw.orders VALUES
+            ('ORD-1001', 50.0), ('ORD-1002', 75.0), ('ORD-1003', 120.0), ('ORD-1004', 90.0)
+    """)
+    adapter.execute("""
+        INSERT INTO raw.shipments VALUES
+            ('SHP-1', 'ORD-1001', 'UPS'), ('SHP-2', 'ORD-1002', 'UPS'),
+            ('SHP-3', 'ORD-1003', 'FEDEX'), ('SHP-4', 'ORD-1004', 'FEDEX')
+    """)
+
+    # Healthcare tables with domain-specific unlabeled keys (mrn <-> patient_mrn)
+    adapter.execute("CREATE TABLE raw.patients (pat_row_id VARCHAR, mrn VARCHAR, city VARCHAR)")
+    adapter.execute("CREATE TABLE raw.lab_results (lab_row_id VARCHAR, patient_mrn VARCHAR, city VARCHAR)")
+    adapter.execute("""
+        INSERT INTO raw.patients VALUES
+            ('P1', 'MRN-88001', 'Seattle'), ('P2', 'MRN-88002', 'Seattle'),
+            ('P3', 'MRN-88003', 'Austin'), ('P4', 'MRN-88004', 'Austin')
+    """)
+    adapter.execute("""
+        INSERT INTO raw.lab_results VALUES
+            ('L1', 'MRN-88001', 'Seattle'), ('L2', 'MRN-88002', 'Seattle'),
+            ('L3', 'MRN-88003', 'Austin'), ('L4', 'MRN-88004', 'Austin')
+    """)
+
+    prof = IDRDataProfiler(adapter).profile_tables_safe(
+        ["raw.orders", "raw.shipments", "raw.patients", "raw.lab_results"]
+    )
+    tmap = prof.table_map()
+
+    # 1. PK-to-FK promotion on orders.order_id <-> shipments.order_id
+    orders_pk = {c.name: c for c in tmap["raw.orders"].columns}["order_id"]
+    ship_fk = {c.name: c for c in tmap["raw.shipments"].columns}["order_id"]
+    assert orders_pk.hint_role == "entity_key"
+    assert orders_pk.hint_identifier_type == "order_id"
+    assert ship_fk.hint_identifier_type == "order_id"
+
+    # 2. Domain-agnostic join discovery on patients.mrn <-> lab_results.patient_mrn
+    pat_cols = {c.name: c for c in tmap["raw.patients"].columns}
+    lab_cols = {c.name: c for c in tmap["raw.lab_results"].columns}
+    assert pat_cols["mrn"].hint_identifier_type == "mrn"
+    assert lab_cols["patient_mrn"].hint_identifier_type == "mrn"
+    assert pat_cols["city"].hint_identifier_type is None
+    assert lab_cols["city"].hint_identifier_type is None
+
+
+def test_phase1_table_role_classification_and_event_attr_filtering(adapter):
+    """
+    Verify 4-way table role classification (MASTER_ENTITY, SUB_ENTITY, EVENT_FACT, REFERENCE_LOOKUP)
+    and that EVENT_FACT tables do not auto-dump transactional columns into golden_profile attributes.
+    """
+    from idr_core.config_schema import IdentifierMappingSpec, PassATableDecision
+    from idr_core.profiler import IDRDataProfiler
+    from idr_core.rule_generator import AIRuleGenerator
+
+    adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    adapter.execute("CREATE TABLE raw.customers (customer_id VARCHAR, email VARCHAR, first_name VARCHAR)")
+    adapter.execute("CREATE TABLE raw.addresses (address_id VARCHAR, customer_id VARCHAR, city VARCHAR)")
+    adapter.execute("CREATE TABLE raw.clickstream (event_id VARCHAR, customer_id VARCHAR, page_url VARCHAR, event_ts VARCHAR)")
+    adapter.execute("CREATE TABLE raw.products (sku VARCHAR, product_name VARCHAR, price DOUBLE)")
+
+    adapter.execute("""
+        INSERT INTO raw.customers VALUES
+            ('C1', 'a@corp.io', 'Alice'), ('C2', 'b@corp.io', 'Bob'), ('C3', 'c@corp.io', 'Carol')
+    """)
+    adapter.execute("""
+        INSERT INTO raw.addresses VALUES
+            ('A1', 'C1', 'Seattle'), ('A2', 'C1', 'Bellevue'), ('A3', 'C2', 'Austin'), ('A4', 'C3', 'Denver')
+    """)
+    adapter.execute("""
+        INSERT INTO raw.clickstream VALUES
+            ('E1', 'C1', '/home', '2026-01-01T10:00:00'),
+            ('E2', 'C1', '/cart', '2026-01-01T10:05:00'),
+            ('E3', 'C1', '/checkout', '2026-01-01T10:06:00'),
+            ('E4', 'C2', '/home', '2026-01-02T11:00:00')
+    """)
+    adapter.execute("INSERT INTO raw.products VALUES ('SKU1', 'Shoes', 99.0), ('SKU2', 'Hat', 25.0)")
+
+    prof = IDRDataProfiler(adapter).profile_tables_safe(
+        ["raw.customers", "raw.addresses", "raw.clickstream", "raw.products"]
+    )
+    roles = {t.table_fqn: t.table_role for t in prof.tables}
+    assert roles["raw.customers"] == "MASTER_ENTITY"
+    assert roles["raw.addresses"] == "SUB_ENTITY"
+    assert roles["raw.clickstream"] == "EVENT_FACT"
+    assert roles["raw.products"] == "REFERENCE_LOOKUP"
+
+    # Materialize sources via AIRuleGenerator: clickstream (EVENT_FACT) should not auto-populate page_url
+    gen = AIRuleGenerator(adapter)
+    decisions = [
+        PassATableDecision(
+            table="raw.customers",
+            source_id="customers",
+            include_in_idr=True,
+            entity_key="customer_id",
+            identifiers=[IdentifierMappingSpec(type="email", expr="email")],
+            attributes=[],
+            reasoning="Master customer table.",
+        ),
+        PassATableDecision(
+            table="raw.clickstream",
+            source_id="clickstream",
+            include_in_idr=True,
+            entity_key="event_id",
+            watermark_column="event_ts",
+            identifiers=[IdentifierMappingSpec(type="customer_id", expr="customer_id")],
+            attributes=[],
+            reasoning="Clickstream telemetry.",
+        ),
+    ]
+    sources, _ = gen._materialize_sources(decisions, prof)
+    src_by_id = {s.id: s for s in sources}
+    # customers.customer_id was auto-merged back in as an identifier via PK->FK overlap!
+    assert {i.type for i in src_by_id["customers"].identifiers} >= {"email", "customer_id"}
+    assert [a.name for a in src_by_id["customers"].attributes] == ["first_name"]
+    assert src_by_id["clickstream"].attributes == []
+
+
+def test_phase2_pushdown_stats_heavy_hitters_and_progress_events(adapter):
+    """
+    Verify Phase 2 intelligence:
+    1. Heavy-hitter SQL pushdown detects placeholder emails ('test@test.com', 'erased_user@anonymized.local')
+       as auto-discovered exclusions AND flags statistical supernode outliers without exposing raw PII.
+    2. Full-table pushdown stats run cleanly when row_count > sample_size.
+    3. AIRuleGenerator emits structured progress events via on_progress.
+    """
+    from idr_core.profiler import IDRDataProfiler
+    from idr_core.rule_generator import AIRuleGenerator
+
+    adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    adapter.execute("CREATE TABLE raw.accounts (acct_id VARCHAR, email VARCHAR, phone VARCHAR)")
+
+    rows = []
+    # 35 rows sharing a placeholder email + 30 rows sharing a kiosk email (statistical outlier)
+    for i in range(35):
+        rows.append(f"('P{i}', 'test@test.com', '555-000-{1000+i}')")
+    for i in range(30):
+        rows.append(f"('K{i}', 'kiosk@store.internal', '555-111-{1000+i}')")
+    for i in range(60):
+        rows.append(f"('U{i}', 'user{i}@realmail.org', '555-222-{1000+i}')")
+    adapter.execute(f"INSERT INTO raw.accounts VALUES {', '.join(rows)}")
+
+    progress_events = []
+    prof = IDRDataProfiler(adapter).profile_tables_safe(
+        ["raw.accounts"],
+        sample_size=50,  # Force full-table SQL pushdown (125 > 50)
+        on_progress=lambda evt: progress_events.append(evt),
+    )
+
+    # Full-table pushdown updated true max_frequency_count (>= 35)
+    email_col = {c.name: c for c in prof.table_map()["raw.accounts"].columns}["email"]
+    assert email_col.max_frequency_count >= 35
+
+    # Placeholder 'test@test.com' auto-discovered as exclusion
+    excl_patterns = {e["identifier_value_pattern"] for e in prof.discovered_exclusions}
+    assert "test@test.com" in excl_patterns
+
+    # Heavy-hitter risk reported with counts only (zero raw PII in risk dict)
+    assert len(prof.heavy_hitter_risks) >= 1
+    risk = prof.heavy_hitter_risks[0]
+    assert risk["max_frequency"] >= 35
+    assert "kiosk@store.internal" not in str(risk)
+
+    # Progress callback emitted discovery event
+    assert any(e["stage"] == "discovery" for e in progress_events)
+
+    # AIRuleGenerator.generate emits profiling + discovery events even in deterministic fallback
+    gen_events = []
+    plan = AIRuleGenerator(adapter).generate(
+        ["raw.accounts"],
+        sample_size=50,
+        on_progress=lambda evt: gen_events.append(evt),
+    )
+    assert any(e["stage"] == "profiling" for e in gen_events)
+    assert plan.profile_summary.get("discovered_exclusions_count", 0) >= 1
+
+
+

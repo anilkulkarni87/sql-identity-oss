@@ -364,6 +364,7 @@ def suggest_config_with_ai(
     tables: Optional[List[str]] = None,
     sample_size: int = 2000,
     verify_sql: bool = True,
+    on_progress: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Generate/refine an IDR config dictionary from schema profile + natural-language goal.
@@ -381,6 +382,7 @@ def suggest_config_with_ai(
             goal=prompt_text,
             sample_size=sample_size,
             verify_sql=verify_sql,
+            on_progress=on_progress,
         )
         return _sanitize_json(plan.model_dump())
 

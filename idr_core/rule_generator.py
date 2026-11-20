@@ -121,11 +121,19 @@ class AIRuleGenerator:
         goal: str = "Unify customer records accurately across sources with safe supernode guardrails and practical golden-profile survivorship.",
         sample_size: int = 2000,
         verify_sql: bool = True,
+        on_progress: Optional[Any] = None,
     ) -> GeneratedIDRPlan:
         """
         Run the full profiling -> mapping -> rule synthesis -> validation pipeline.
         Never mutates `idr_meta` tables.
         """
+        def _emit(stage: str, step: int, message: str) -> None:
+            if callable(on_progress):
+                try:
+                    on_progress({"stage": stage, "step": step, "total_steps": 5, "message": message})
+                except Exception:
+                    pass
+
         if not tables:
             return GeneratedIDRPlan(
                 generation_mode="deterministic_fallback",
@@ -140,8 +148,13 @@ class AIRuleGenerator:
             )
 
         # Stage 1: Zero-PII Statistical & Overlap Profiling
+        _emit(
+            "profiling",
+            1,
+            f"Profiling {len(tables)} warehouse table(s) — schema, sample shapes & full-table stats…",
+        )
         schema_profile = self.profiler.profile_tables_safe(
-            tables, sample_size=sample_size, compute_overlap=True
+            tables, sample_size=sample_size, compute_overlap=True, on_progress=on_progress
         )
         if not schema_profile.tables:
             return GeneratedIDRPlan(
@@ -171,7 +184,9 @@ class AIRuleGenerator:
 
         try:
             # Stage 2A: Pass A — Chunked Table & Column Metadata Mapping
-            pass_a_decisions, repairs_a, warnings_a = self._run_pass_a(schema_profile, goal)
+            pass_a_decisions, repairs_a, warnings_a = self._run_pass_a(
+                schema_profile, goal, on_progress=on_progress
+            )
             total_repairs += repairs_a
             warnings.extend(warnings_a)
 
@@ -185,6 +200,11 @@ class AIRuleGenerator:
                 )
 
             # Stage 2B: Pass B — Cross-Table Rules, Fuzzy Templates, Survivorship & Lenses
+            _emit(
+                "pass_b",
+                4,
+                f"AI Pass B: Synthesizing matching rules, survivorship & lenses across {len(sources)} source(s)…",
+            )
             pass_b_out, repairs_b, warnings_b = self._run_pass_b(
                 sources, schema_profile, goal
             )
@@ -197,6 +217,11 @@ class AIRuleGenerator:
             )
 
             # Stage 3: Final Grounding, Registry, and optional SQL EXPLAIN verification
+            _emit(
+                "validation",
+                5,
+                "Validating config grounding, canonicalizers & warehouse SQL expressions…",
+            )
             val_report = self.validate_plan(
                 config_spec,
                 schema_profile,
@@ -204,6 +229,12 @@ class AIRuleGenerator:
             )
             val_report.repair_attempts = total_repairs
             val_report.warnings.extend(warnings)
+            for risk in schema_profile.heavy_hitter_risks:
+                val_report.warnings.append(
+                    f"Heavy-hitter detected in {risk['table']}.{risk['column']} ({risk['identifier_type']}): "
+                    f"top value appears {risk['max_frequency']} times (baseline ~{risk['baseline_frequency']}). "
+                    f"Consider reviewing exclusions or max_group_size."
+                )
 
             if not val_report.valid:
                 return self._build_deterministic_fallback(
@@ -243,14 +274,29 @@ class AIRuleGenerator:
         self,
         schema_profile: SafeSchemaProfile,
         goal: str,
+        on_progress: Optional[Any] = None,
     ) -> Tuple[List[PassATableDecision], int, List[str]]:
         schema_json = PassAMappingOutput.model_json_schema()
         all_decisions: List[PassATableDecision] = []
         total_repairs = 0
         warnings: List[str] = []
         table_map = schema_profile.table_map()
+        total_batches = max(1, (len(schema_profile.tables) + self.batch_size - 1) // self.batch_size)
 
         for i in range(0, len(schema_profile.tables), self.batch_size):
+            batch_num = i // self.batch_size + 1
+            if callable(on_progress):
+                try:
+                    on_progress(
+                        {
+                            "stage": "pass_a",
+                            "step": 3,
+                            "total_steps": 5,
+                            "message": f"AI Pass A: Mapping tables & columns (batch {batch_num} of {total_batches})…",
+                        }
+                    )
+                except Exception:
+                    pass
             batch = schema_profile.tables[i : i + self.batch_size]
             batch_payload = [t.to_prompt_dict() for t in batch]
             batch_fqns = {t.table_fqn for t in batch}
@@ -262,9 +308,9 @@ class AIRuleGenerator:
                 "1. Use ONLY exact table names and column names present in the provided profile.\n"
                 "2. Review the deterministic hints (hint_entity_key, hint_watermark, hint_role, hint_identifier_type, hint_is_hashed) "
                 "and confirm or refine them based on column names, stats, and the user's goal.\n"
-                "3. Exclude non-identity lookup/catalog tables (include_in_idr=false) that have no person/account identifiers.\n"
-                "4. Use consistent lowercase snake_case semantic identifier types across tables (e.g., email, phone, customer_id, loyalty, device_id, address_id) — NEVER SQL data types like 'string'.\n"
-                "5. Leave `attributes` as an empty list [] unless you need to rename a specific profile attribute; passive non-key/non-identifier columns are mapped automatically.\n"
+                "3. Exclude non-identity lookup/catalog tables (`table_role == REFERENCE_LOOKUP`, include_in_idr=false) that have no person/account identifiers.\n"
+                "4. Use consistent lowercase snake_case semantic identifier types across tables (e.g., email, phone, customer_id, order_id, loyalty, device_id) — NEVER SQL data types like 'string'. When a table's `entity_key` ALSO has a `hint_identifier_type` (e.g., `orders.order_id` linking to `shipments.order_id`), include it in `identifiers` as well as `entity_key`.\n"
+                "5. Leave `attributes` as an empty list [] unless you need to rename a specific profile attribute; passive non-key/non-identifier columns are mapped automatically for MASTER_ENTITY and SUB_ENTITY tables (skipped for EVENT_FACT tables to keep golden profiles clean).\n"
                 "6. Set needs_review=true and add concise risks if a key has duplicates/nulls, or if an identifier has high fanout (max_freq >= 5) or high null_rate (> 0.5).\n"
                 "Return JSON strictly matching the schema."
             )
@@ -464,13 +510,14 @@ class AIRuleGenerator:
                             is_hashed=ident.is_hashed,
                         )
                     )
-            # If the LLM dropped high-confidence deterministic identifier columns (common on 3B local models),
-            # merge them back in so cross-table linkages are preserved.
+            # If the LLM dropped high-confidence deterministic identifier columns (including PKs promoted
+            # via cross-table overlap, e.g. customers.customer_id or orders.order_id), merge them back in
+            # so cross-table linkages are preserved.
             if tprof:
                 existing_exprs = {u.expr.lower() for u in uniq_ids}
                 for col in tprof.columns:
                     if (
-                        col.hint_role == "identifier"
+                        col.hint_role in ("identifier", "entity_key")
                         and col.hint_identifier_type
                         and col.hint_confidence >= 0.80
                         and col.name.lower() not in existing_exprs
@@ -489,7 +536,8 @@ class AIRuleGenerator:
                 continue
 
             # Deduplicate attributes by name per table; auto-populate passive non-key/non-id columns
-            # when the LLM leaves `attributes` empty (saves ~75% output tokens on local & frontier models).
+            # when the LLM leaves `attributes` empty — skip auto-populating transactional columns on
+            # EVENT_FACT tables so golden_profile_current stays clean and person-centric.
             uniq_attrs: List[AttributeMappingSpec] = []
             seen_attrs: Set[str] = set()
             for attr in dec.attributes:
@@ -498,7 +546,7 @@ class AIRuleGenerator:
                     seen_attrs.add(aname)
                     uniq_attrs.append(AttributeMappingSpec(name=aname, expr=attr.expr.strip()))
 
-            if not uniq_attrs and tprof:
+            if not uniq_attrs and tprof and tprof.table_role != "EVENT_FACT":
                 ek_l = (dec.entity_key or tprof.hint_entity_key or "").lower()
                 wm_l = (dec.watermark_column or tprof.hint_watermark or "").lower()
                 id_exprs_l = {u.expr.lower() for u in uniq_ids}
@@ -540,7 +588,7 @@ class AIRuleGenerator:
                     is_hashed=c.hint_is_hashed,
                 )
                 for c in tprof.columns
-                if c.hint_role == "identifier" and c.hint_identifier_type
+                if c.hint_role in ("identifier", "entity_key") and c.hint_identifier_type
             ]
             if not hint_ids:
                 continue
@@ -551,11 +599,15 @@ class AIRuleGenerator:
             ek = tprof.hint_entity_key or "AUTO"
             wm = tprof.hint_watermark
             id_exprs = {h.expr.lower() for h in hint_ids}
-            attrs = [
-                AttributeMappingSpec(name=c.name, expr=c.name)
-                for c in tprof.columns
-                if c.name != ek and c.name != wm and c.name.lower() not in id_exprs and c.non_null_count > 0
-            ]
+            attrs = (
+                []
+                if tprof.table_role == "EVENT_FACT"
+                else [
+                    AttributeMappingSpec(name=c.name, expr=c.name)
+                    for c in tprof.columns
+                    if c.name != ek and c.name != wm and c.name.lower() not in id_exprs and c.non_null_count > 0
+                ]
+            )
             sources.append(
                 SourceSpec(
                     id=src_id,
@@ -697,6 +749,7 @@ class AIRuleGenerator:
                 {
                     "id": s.id,
                     "table": s.table,
+                    "table_role": table_map[s.table].table_role if s.table in table_map else "MASTER_ENTITY",
                     "entity_type": s.entity_type,
                     "has_watermark": bool(s.watermark_column),
                     "identifiers": [i.type for i in s.identifiers],
@@ -1078,8 +1131,16 @@ class AIRuleGenerator:
                     cp = col_map.get(a.expr.lower())
                     if cp and cp.hint_role == "consent_flag":
                         consent_attrs.add(a.name)
+            role_rank = {"MASTER_ENTITY": 0, "SUB_ENTITY": 1, "EVENT_FACT": 2, "REFERENCE_LOOKUP": 3}
             for aname in sorted(attr_to_sources.keys()):
-                srcs = attr_to_sources[aname]
+                srcs = sorted(
+                    attr_to_sources[aname],
+                    key=lambda s: (
+                        role_rank.get(table_map[s.table].table_role, 1) if s.table in table_map else 1,
+                        0 if s.watermark_column else 1,
+                        s.id,
+                    ),
+                )
                 if aname in consent_attrs:
                     strat = "ANY_TRUE"
                     sp = []
@@ -1113,8 +1174,25 @@ class AIRuleGenerator:
             for ln in pass_b.lenses
         ]
 
+        # Merge auto-discovered non-PII placeholder exclusions from Phase 2 heavy-hitter scan
+        merged_exclusions: List[ExclusionSpec] = []
+        seen_excls: Set[Tuple[str, str]] = set()
+        for ex in getattr(schema_profile, "discovered_exclusions", []) or []:
+            key = (str(ex.get("identifier_type", "ANY")).upper(), str(ex.get("identifier_value_pattern", "")).lower())
+            if key[1] and key not in seen_excls:
+                seen_excls.add(key)
+                merged_exclusions.append(
+                    ExclusionSpec(
+                        identifier_type=key[0],
+                        identifier_value_pattern=key[1],
+                        match_type=str(ex.get("match_type", "EXACT")).upper(),
+                        reason=str(ex.get("reason", "Auto-discovered placeholder")),
+                    )
+                )
+
         spec = IDRConfigSpec(
             use_default_exclusions=pass_b.use_default_exclusions,
+            exclusions=merged_exclusions,
             sources=sources,
             rules=final_rules,
             fuzzy_rules=fuzzy_rules_dicts,

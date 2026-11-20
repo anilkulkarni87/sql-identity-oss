@@ -54,6 +54,9 @@ export default function Explorer() {
     const [activeTab, setActiveTab] = useState<InspectorTab>('golden')
     const [layoutName, setLayoutName] = useState<GraphLayoutName>('concentric')
     const [hiddenSources, setHiddenSources] = useState<Set<string>>(new Set())
+    const [groupHighVolume, setGroupHighVolume] = useState(true)
+    const [expandedGraphGroups, setExpandedGraphGroups] = useState<Set<string>>(new Set())
+    const [expandedEntityGroups, setExpandedEntityGroups] = useState<Set<string>>(new Set())
     const [hideEmptyAttrs, setHideEmptyAttrs] = useState(true)
     const [attrFilter, setAttrFilter] = useState('')
     const [edgeSearch, setEdgeSearch] = useState('')
@@ -128,13 +131,28 @@ export default function Explorer() {
         enabled: !!selectedCluster,
     })
 
+    useEffect(() => {
+        setExpandedGraphGroups(new Set())
+        setExpandedEntityGroups(new Set())
+    }, [selectedCluster])
+
     const handleSelectNode = (node: GraphNodeData | null) => {
+        if (node?.isGroup) {
+            setExpandedGraphGroups((prev) => {
+                const next = new Set(prev)
+                next.add(node.source_id)
+                return next
+            })
+            return
+        }
         setSelectedNode(node)
         setConfirmOverrideKey(null)
         if (node) {
             setActiveTab('entity')
         }
     }
+
+    const GROUP_THRESHOLD = 12
 
     const uniqueSources = useMemo(() => {
         if (!clusterDetail?.entities) return []
@@ -150,7 +168,23 @@ export default function Explorer() {
         return counts
     }, [clusterDetail])
 
-    const graphNodes: GraphNodeData[] = useMemo(() => {
+    const hasHighVolumeSources = useMemo(
+        () => Object.values(sourceCounts).some((cnt) => cnt > GROUP_THRESHOLD),
+        [sourceCounts]
+    )
+
+    const collapsedSources = useMemo(() => {
+        const set = new Set<string>()
+        if (!groupHighVolume) return set
+        for (const [src, cnt] of Object.entries(sourceCounts)) {
+            if (cnt > GROUP_THRESHOLD && !hiddenSources.has(src) && !expandedGraphGroups.has(src)) {
+                set.add(src)
+            }
+        }
+        return set
+    }, [groupHighVolume, sourceCounts, hiddenSources, expandedGraphGroups])
+
+    const visibleEntities: GraphNodeData[] = useMemo(() => {
         if (!clusterDetail?.entities) return []
         return clusterDetail.entities
             .filter((e) => !hiddenSources.has(e.source_id))
@@ -170,27 +204,72 @@ export default function Explorer() {
             })
     }, [clusterDetail, uniqueSources, hiddenSources])
 
-    const graphEdges: GraphEdgeData[] = useMemo(() => {
-        if (!clusterDetail?.edges) return []
-        const activeNodeIds = new Set(graphNodes.map((n) => n.id))
-        return clusterDetail.edges
-            .filter((e) => activeNodeIds.has(e.left_entity_key) && activeNodeIds.has(e.right_entity_key))
-            .map((e, idx) => {
-                const isFuzzy =
-                    (e.rule_id || '').toLowerCase().includes('fuzzy') ||
-                    (e.identifier_type || '').toLowerCase().includes('fuzzy')
-                return {
-                    id: `edge-${idx}`,
-                    source: e.left_entity_key,
-                    target: e.right_entity_key,
-                    label: e.identifier_type,
-                    identifier_type: e.identifier_type,
-                    identifier_value: e.identifier_value,
-                    rule_id: e.rule_id,
-                    isFuzzy,
-                }
+    const { graphNodes, graphEdges } = useMemo(() => {
+        if (!clusterDetail?.entities) return { graphNodes: [] as GraphNodeData[], graphEdges: [] as GraphEdgeData[] }
+
+        const entityToGroupId = new Map<string, string>()
+        const nodes: GraphNodeData[] = []
+
+        for (const src of collapsedSources) {
+            const colorScheme = getEntityColor(src, uniqueSources)
+            const count = sourceCounts[src] || 0
+            const groupId = `__group__:${src}`
+            nodes.push({
+                id: groupId,
+                source_id: src,
+                source_key: `${count} entities`,
+                label: `${formatSourceName(src)} ×${count}`,
+                color: colorScheme.bg,
+                borderColor: colorScheme.border,
+                size: 34,
+                isGroup: true,
+                groupCount: count,
             })
-    }, [clusterDetail, graphNodes])
+        }
+
+        for (const n of visibleEntities) {
+            if (collapsedSources.has(n.source_id)) {
+                entityToGroupId.set(n.id, `__group__:${n.source_id}`)
+            } else {
+                nodes.push(n)
+            }
+        }
+
+        const activeNodeIds = new Set(nodes.map((n) => n.id))
+        const seenEdges = new Set<string>()
+        const edges: GraphEdgeData[] = []
+
+        for (let idx = 0; idx < (clusterDetail.edges || []).length; idx++) {
+            const e = clusterDetail.edges[idx]
+            const srcId = entityToGroupId.get(e.left_entity_key) || e.left_entity_key
+            const tgtId = entityToGroupId.get(e.right_entity_key) || e.right_entity_key
+            if (srcId === tgtId) continue
+            if (!activeNodeIds.has(srcId) || !activeNodeIds.has(tgtId)) continue
+
+            const isGroupEdge = srcId.startsWith('__group__:') || tgtId.startsWith('__group__:')
+            if (isGroupEdge) {
+                const pairKey = [srcId, tgtId].sort().join('|') + `|${e.identifier_type}`
+                if (seenEdges.has(pairKey)) continue
+                seenEdges.add(pairKey)
+            }
+
+            const isFuzzy =
+                (e.rule_id || '').toLowerCase().includes('fuzzy') ||
+                (e.identifier_type || '').toLowerCase().includes('fuzzy')
+            edges.push({
+                id: `edge-${idx}`,
+                source: srcId,
+                target: tgtId,
+                label: e.identifier_type,
+                identifier_type: e.identifier_type,
+                identifier_value: e.identifier_value,
+                rule_id: e.rule_id,
+                isFuzzy,
+            })
+        }
+
+        return { graphNodes: nodes, graphEdges: edges }
+    }, [clusterDetail, visibleEntities, collapsedSources, uniqueSources, sourceCounts])
 
     const displayedEdges = useMemo(() => {
         if (!clusterDetail?.edges) return []
@@ -464,8 +543,8 @@ export default function Explorer() {
                             {setupStatus && !isConnected
                                 ? 'Warehouse disconnected — connect in Identity Studio to search.'
                                 : searching
-                                ? 'Querying identity index…'
-                                : `${searchResults?.length || 0} matching clusters`}
+                                    ? 'Querying identity index…'
+                                    : `${searchResults?.length || 0} matching clusters`}
                         </span>
                         {searchResults && searchResults.length > 0 && (
                             <span>Select a cluster to inspect</span>
@@ -490,11 +569,10 @@ export default function Explorer() {
                                             setAiExplanation(null)
                                             setActiveTab('golden')
                                         }}
-                                        className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 transition-colors ${
-                                            isSelected
+                                        className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 transition-colors ${isSelected
                                                 ? 'bg-selected text-ink'
                                                 : 'bg-surface hover:bg-subtle text-ink-secondary'
-                                        }`}
+                                            }`}
                                     >
                                         <div className="flex items-center gap-2 min-w-0">
                                             <Hash className="w-3.5 h-3.5 text-accent shrink-0" />
@@ -599,8 +677,7 @@ export default function Explorer() {
                                     try {
                                         const res = await api.explainClusterAi(selectedCluster, aiCustomPrompt)
                                         setAiExplanation(
-                                            `[${res.provider}:${res.model} · PII Masking: ${
-                                                res.pii_masked ? 'ON' : 'OFF (local)'
+                                            `[${res.provider}:${res.model} · PII Masking: ${res.pii_masked ? 'ON' : 'OFF (local)'
                                             }]\n\n${res.explanation}`
                                         )
                                     } catch (err: any) {
@@ -857,16 +934,20 @@ export default function Explorer() {
                                             {(clusterDetail.confidence_score * 100).toFixed(1)}%
                                         </span>
                                     )}
-                                    {clusterDetail.super_cluster_id && (
-                                        <span className="badge-neutral font-mono" title={`Super-cluster ${clusterDetail.super_cluster_id}`}>
-                                            Super: {clusterDetail.super_cluster_id.slice(0, 10)}
-                                        </span>
-                                    )}
+                                    {clusterDetail.super_cluster_id &&
+                                        clusterDetail.super_cluster_id !== clusterDetail.resolved_id && (
+                                            <span
+                                                className="badge-neutral font-mono"
+                                                title={`Super-cluster ${clusterDetail.super_cluster_id}`}
+                                            >
+                                                Super: …{clusterDetail.super_cluster_id.slice(-8)}
+                                            </span>
+                                        )}
                                 </div>
 
                                 <div className="flex items-center gap-2 shrink-0">
                                     <span className="text-xs font-mono tabular-nums text-ink-muted">
-                                        {graphNodes.length}/{clusterDetail.entities.length} nodes · {graphEdges.length} edges
+                                        {visibleEntities.length}/{clusterDetail.entities.length} entities · {graphEdges.length} edges
                                     </span>
                                     <button
                                         type="button"
@@ -898,11 +979,10 @@ export default function Explorer() {
                                                 type="button"
                                                 onClick={() => toggleSourceFilter(sourceId)}
                                                 aria-pressed={!isHidden}
-                                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs border transition-colors ${
-                                                    isHidden
+                                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs border transition-colors ${isHidden
                                                         ? 'bg-subtle text-ink-subtle border-line line-through opacity-65'
                                                         : 'bg-surface text-ink-secondary border-line-strong hover:bg-subtle'
-                                                }`}
+                                                    }`}
                                             >
                                                 <span
                                                     className="w-2 h-2 rounded-full shrink-0"
@@ -915,15 +995,33 @@ export default function Explorer() {
                                             </button>
                                         )
                                     })}
-                                    {hiddenSources.size > 0 && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setHiddenSources(new Set())}
-                                            className="text-xs font-medium text-accent hover:underline ml-auto"
-                                        >
-                                            Show all
-                                        </button>
-                                    )}
+                                    <div className="flex items-center gap-2 ml-auto">
+                                        {hasHighVolumeSources && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setGroupHighVolume((v) => !v)
+                                                    setExpandedGraphGroups(new Set())
+                                                }}
+                                                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${groupHighVolume
+                                                        ? 'bg-accent-soft text-accent border-accent-border'
+                                                        : 'bg-surface text-ink-muted border-line hover:text-ink'
+                                                    }`}
+                                                title="Collapse source tables with >12 entities into a single expandable hub node"
+                                            >
+                                                {groupHighVolume ? 'Grouped (>12)' : 'Expand all'}
+                                            </button>
+                                        )}
+                                        {hiddenSources.size > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setHiddenSources(new Set())}
+                                                className="text-xs font-medium text-accent hover:underline"
+                                            >
+                                                Show all
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
@@ -957,11 +1055,10 @@ export default function Explorer() {
                                             type="button"
                                             aria-selected={isActive}
                                             onClick={() => setActiveTab(tab.id)}
-                                            className={`px-3 py-1.5 text-xs font-medium rounded-t-md border-t border-x transition-colors ${
-                                                isActive
+                                            className={`px-3 py-1.5 text-xs font-medium rounded-t-md border-t border-x transition-colors ${isActive
                                                     ? 'bg-surface text-ink border-line -mb-px pb-[7px]'
                                                     : 'bg-transparent text-ink-muted hover:text-ink border-transparent'
-                                            }`}
+                                                }`}
                                         >
                                             {tab.label}
                                         </button>
@@ -1033,10 +1130,10 @@ export default function Explorer() {
                                                                                         isEmpty
                                                                                             ? 'font-mono text-ink-subtle'
                                                                                             : typeof attr.value === 'boolean'
-                                                                                            ? attr.value
-                                                                                                ? 'badge-success font-mono'
-                                                                                                : 'badge-danger font-mono'
-                                                                                            : 'font-mono text-ink tabular-nums'
+                                                                                                ? attr.value
+                                                                                                    ? 'badge-success font-mono'
+                                                                                                    : 'badge-danger font-mono'
+                                                                                                : 'font-mono text-ink tabular-nums'
                                                                                     }
                                                                                 >
                                                                                     {display}
@@ -1275,30 +1372,71 @@ export default function Explorer() {
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-2">
+                                        <div className="space-y-2.5">
                                             <p className="text-xs text-ink-muted">
                                                 Click a node on the graph or select an entity below to inspect its keys and incident edges.
                                             </p>
-                                            <div className="border border-line rounded-md divide-y divide-line overflow-hidden">
-                                                {graphNodes.map((node) => (
-                                                    <button
-                                                        key={node.id}
-                                                        type="button"
-                                                        onClick={() => handleSelectNode(node)}
-                                                        className="w-full px-3 py-2 text-left bg-surface hover:bg-subtle flex items-center justify-between gap-2 text-xs transition-colors"
-                                                    >
-                                                        <span className="inline-flex items-center gap-2 min-w-0">
-                                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: node.color }} />
-                                                            <span className="font-medium text-ink truncate">
-                                                                {formatSourceName(node.source_id)}
-                                                            </span>
-                                                        </span>
-                                                        <span className="font-mono text-[11px] text-ink-muted truncate max-w-[160px]">
-                                                            {node.source_key}
-                                                        </span>
-                                                    </button>
-                                                ))}
-                                            </div>
+                                            {(() => {
+                                                const bySource: Record<string, GraphNodeData[]> = {}
+                                                for (const n of visibleEntities) {
+                                                    bySource[n.source_id] = [...(bySource[n.source_id] || []), n]
+                                                }
+                                                // Show core/smaller tables first so high-volume event tables don't bury Customers/Orders
+                                                const grouped = Object.entries(bySource).sort(
+                                                    (a, b) => a[1].length - b[1].length || a[0].localeCompare(b[0])
+                                                )
+                                                return grouped.map(([srcId, items]) => {
+                                                    const isLarge = items.length > 15
+                                                    const isExpanded = !isLarge || expandedEntityGroups.has(srcId)
+                                                    const color = items[0]?.color || '#64748b'
+                                                    return (
+                                                        <div key={srcId} className="border border-line rounded-md overflow-hidden">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    setExpandedEntityGroups((prev) => {
+                                                                        const next = new Set(prev)
+                                                                        if (isExpanded) next.delete(srcId)
+                                                                        else next.add(srcId)
+                                                                        return next
+                                                                    })
+                                                                }
+                                                                className="w-full px-3 py-1.5 bg-subtle hover:bg-hover flex items-center justify-between gap-2 text-xs font-medium text-ink transition-colors"
+                                                            >
+                                                                <span className="inline-flex items-center gap-2 min-w-0">
+                                                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                                                    <span className="truncate">{formatSourceName(srcId)}</span>
+                                                                    <span className="font-mono tabular-nums text-[11px] text-ink-muted">
+                                                                        ({items.length})
+                                                                    </span>
+                                                                </span>
+                                                                {isLarge && (
+                                                                    <span className="text-[11px] text-accent">
+                                                                        {isExpanded ? 'Collapse' : 'Show all'}
+                                                                    </span>
+                                                                )}
+                                                            </button>
+                                                            {isExpanded && (
+                                                                <div className="divide-y divide-line">
+                                                                    {items.map((node) => (
+                                                                        <button
+                                                                            key={node.id}
+                                                                            type="button"
+                                                                            onClick={() => handleSelectNode(node)}
+                                                                            className="w-full px-3 py-1.5 text-left bg-surface hover:bg-subtle flex items-center justify-between gap-2 text-xs transition-colors"
+                                                                        >
+                                                                            <span className="font-mono text-[11px] text-ink truncate">
+                                                                                {node.source_key}
+                                                                            </span>
+                                                                            <span className="text-[11px] text-ink-subtle shrink-0">Inspect →</span>
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })
+                                            })()}
                                         </div>
                                     )}
                                 </div>

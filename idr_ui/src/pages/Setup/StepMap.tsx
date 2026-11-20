@@ -7,6 +7,7 @@ import {
 import { IDRConfig, SourceConfig, TableColumn, Identifier, Attribute } from '../../types';
 import { api } from '../../api/client';
 import { CustomSelect } from '../../components/CustomSelect';
+import { AiProgressStepper, AiProgressEvent } from '../../components/AiProgressStepper';
 
 interface StepMapProps {
     tables: string[];
@@ -115,6 +116,7 @@ export default function StepMap({
     const [scanError, setScanError] = useState<string | null>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
     const [aiSuggesting, setAiSuggesting] = useState(false);
+    const [aiProgress, setAiProgress] = useState<AiProgressEvent | null>(null);
     const [aiNotice, setAiNotice] = useState<string | null>(null);
     const [aiGoal, setAiGoal] = useState<string>('');
     const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null);
@@ -516,11 +518,19 @@ export default function StepMap({
                                 disabled={aiSuggesting}
                                 onClick={async () => {
                                     setAiSuggesting(true);
+                                    setAiProgress({
+                                        stage: 'profiling',
+                                        step: 1,
+                                        total_steps: 5,
+                                        message: `Connecting to warehouse to profile ${tables.length} table(s)…`,
+                                    });
                                     setValidationError(null);
                                     setAiNotice(null);
                                     try {
                                         const goalPrompt = aiGoal.trim() || 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views (strict_person vs household) for these tables.';
-                                        const res = await api.suggestConfigAi(tables, goalPrompt);
+                                        const res = await api.suggestConfigAiStream(tables, goalPrompt, (evt) => {
+                                            setAiProgress(evt);
+                                        });
                                         setAiReport(res);
                                         setAiReportOpen(true);
                                         const suggested = res.suggested_config as unknown as IDRConfig;
@@ -547,6 +557,7 @@ export default function StepMap({
                                         setValidationError(`AI Suggest failed: ${err?.message || err}`);
                                     } finally {
                                         setAiSuggesting(false);
+                                        setAiProgress(null);
                                     }
                                 }}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs font-medium transition-colors"
@@ -587,6 +598,10 @@ export default function StepMap({
                         className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
                     />
                 </div>
+            )}
+
+            {aiSuggesting && (
+                <AiProgressStepper progress={aiProgress} tableCount={tables.length} />
             )}
 
             {aiNotice && (

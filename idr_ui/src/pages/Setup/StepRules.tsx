@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { ExclusionRule, IDRConfig, LensRule, MatchingRule, OverrideRule } from '../../types'
 import { api } from '../../api/client'
+import { AiProgressStepper, AiProgressEvent } from '../../components/AiProgressStepper'
 import { CustomSelect } from '../../components/CustomSelect'
 import { useToast } from '../../components/Toast'
 
@@ -75,6 +76,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
     // AI Rule Generation state directly inside Rules tab
     const [aiRuleGoal, setAiRuleGoal] = useState('')
     const [aiGenerating, setAiGenerating] = useState(false)
+    const [aiProgress, setAiProgress] = useState<AiProgressEvent | null>(null)
     const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null)
 
     const latestConfigRef = useRef(config)
@@ -176,12 +178,20 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             return
         }
         setAiGenerating(true)
+        setAiProgress({
+            stage: 'profiling',
+            step: 1,
+            total_steps: 5,
+            message: `Connecting to warehouse to profile ${tables.length} table(s)…`,
+        })
         setValidationError(null)
         try {
             const goalPrompt =
                 aiRuleGoal.trim() ||
                 'Suggest deterministic exact rules, probabilistic fuzzy rules, survivorship, and multi-lens views (strict_person vs household) for these tables.'
-            const res = await api.suggestConfigAi(tables, goalPrompt)
+            const res = await api.suggestConfigAiStream(tables, goalPrompt, (evt) => {
+                setAiProgress(evt)
+            })
             setAiReport(res)
             const suggested = res.suggested_config as unknown as IDRConfig
             if (suggested) {
@@ -204,6 +214,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             setValidationError(`AI Rule Generator failed: ${err?.message || err}`)
         } finally {
             setAiGenerating(false)
+            setAiProgress(null)
         }
     }
 
@@ -547,6 +558,13 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                             )}
                         </button>
                     </div>
+
+                    {aiGenerating && (
+                        <AiProgressStepper
+                            progress={aiProgress}
+                            tableCount={(config.sources || []).length}
+                        />
+                    )}
 
                     {aiReport?.explanations?.rules && aiReport.explanations.rules.length > 0 && (
                         <div className="surface-panel p-3 space-y-2 text-xs">

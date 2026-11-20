@@ -49,6 +49,29 @@ GENERIC_HOMONYM_ATTRIBUTES: Set[str] = {
     "amount", "total", "subtotal", "price", "value", "score", "rating",
     "count", "quantity", "qty",
 }
+# Descriptive low-entropy profile attributes that should NOT be auto-promoted as
+# cross-table join keys purely because two tables share values like "Seattle" or "USD".
+_NON_JOIN_DESCRIPTIVE_ATTRS: Set[str] = {
+    "first_name", "last_name", "full_name", "name", "city", "state", "province",
+    "country", "country_code", "zip", "zipcode", "zip_code", "postal_code",
+    "gender", "sex", "currency", "language", "locale", "timezone", "browser",
+    "os", "platform", "device_type", "segment", "tier", "plan", "brand",
+    "category", "subcategory", "status", "type", "channel", "source", "medium",
+    "campaign", "carrier", "payment_method", "shipping_method", "region",
+}
+_EVENT_TABLE_HINTS = (
+    "event", "events", "clickstream", "click", "clicks", "log", "logs",
+    "session", "sessions", "transaction", "transactions", "order_item",
+    "line_item", "impression", "telemetry", "activity", "audit", "visit",
+    "visits", "page_view", "pageview", "webhook", "shipment", "shipments",
+    "ticket", "tickets", "claim", "claims", "assignment", "assignments",
+)
+_SUB_ENTITY_TABLE_HINTS = (
+    "address", "addresses", "payment", "payments", "consent", "consents",
+    "preference", "preferences", "device", "devices", "contact", "contacts",
+    "order", "orders", "subscription", "subscriptions", "card", "cards",
+)
+_KEY_LIKE_SUFFIXES = ("_id", "_key", "_no", "_num", "_number", "_code", "_ref", "_uuid", "_guid", "_token")
 
 
 def _to_shape_skeleton(value: str) -> str:
@@ -185,6 +208,7 @@ class SafeTableProfile:
     duplicate_entity_keys_detected: bool = False
     null_entity_keys_detected: bool = False
     has_candidate_identifiers: bool = False
+    table_role: str = "MASTER_ENTITY"  # MASTER_ENTITY | SUB_ENTITY | EVENT_FACT | REFERENCE_LOOKUP
 
     def column_names(self) -> Set[str]:
         return {c.name.lower() for c in self.columns}
@@ -194,14 +218,20 @@ class SafeTableProfile:
         key_cols: List[Dict[str, Any]] = []
         passive_cols: List[Dict[str, Any]] = []
         for col in self.columns:
-            if col.hint_role in ("entity_key", "watermark", "identifier", "consent_flag") or (
-                col.email_rate >= 0.1 or col.phone_us10_rate >= 0.1 or col.phone_e164_rate >= 0.1 or col.hex_hash_rate >= 0.5
+            if (
+                col.hint_role in ("entity_key", "watermark", "identifier", "consent_flag")
+                or col.hint_identifier_type is not None
+                or col.email_rate >= 0.1
+                or col.phone_us10_rate >= 0.1
+                or col.phone_e164_rate >= 0.1
+                or col.hex_hash_rate >= 0.5
             ):
                 key_cols.append(col.to_compact_dict(verbose=True))
             else:
                 passive_cols.append(col.to_compact_dict(verbose=False))
         out: Dict[str, Any] = {
             "table": self.table_fqn,
+            "table_role": self.table_role,
             "row_count": self.row_count,
             "sample_rows": self.sample_rows_analyzed,
             "hint_entity_key": self.hint_entity_key,
@@ -254,6 +284,8 @@ class SafeSchemaProfile:
     tables: List[SafeTableProfile] = field(default_factory=list)
     overlaps: List[CrossTableOverlap] = field(default_factory=list)
     attribute_homonyms: List[Dict[str, Any]] = field(default_factory=list)
+    heavy_hitter_risks: List[Dict[str, Any]] = field(default_factory=list)
+    discovered_exclusions: List[Dict[str, Any]] = field(default_factory=list)
 
     def table_map(self) -> Dict[str, SafeTableProfile]:
         return {t.table_fqn: t for t in self.tables}
@@ -263,8 +295,11 @@ class SafeSchemaProfile:
             "dialect": self.dialect,
             "tables_profiled": len(self.tables),
             "tables_with_identifiers": sum(1 for t in self.tables if t.has_candidate_identifiers),
+            "table_roles": {t.table_fqn: t.table_role for t in self.tables},
             "cross_table_overlaps": [o.to_dict() for o in self.overlaps],
             "attribute_homonyms": self.attribute_homonyms,
+            "heavy_hitter_risks": self.heavy_hitter_risks,
+            "discovered_exclusions_count": len(self.discovered_exclusions),
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -909,11 +944,158 @@ class IDRDataProfiler:
 
         return sp
 
+    def _pushdown_full_table_stats(
+        self,
+        fqn: str,
+        safe_cols: List[SafeColumnProfile],
+        row_count: int,
+        dialect: str,
+    ) -> None:
+        """
+        Push down a single lightweight SQL aggregate query to compute exact full-table
+        null_rate and distinct_count for candidate identifier/key columns when the table
+        exceeds the sample size. Gracefully no-ops on any warehouse error.
+        """
+        target_cols = [
+            c for c in safe_cols
+            if c.hint_role in ("entity_key", "identifier") or c.hint_identifier_type
+        ][:12]
+        if not target_cols or row_count <= 0:
+            return
+        approx_fn = (
+            "APPROX_COUNT_DISTINCT"
+            if dialect in ("bigquery", "snowflake", "databricks")
+            else "COUNT(DISTINCT "
+        )
+        exprs = ["COUNT(*) AS _total_rows"]
+        for idx, col in enumerate(target_cols):
+            cname = col.name
+            if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cname):
+                continue
+            exprs.append(f"SUM(CASE WHEN {cname} IS NULL THEN 1 ELSE 0 END) AS _null_{idx}")
+            if approx_fn.endswith("("):
+                exprs.append(f"COUNT(DISTINCT {cname}) AS _dist_{idx}")
+            else:
+                exprs.append(f"{approx_fn}({cname}) AS _dist_{idx}")
+        if len(exprs) == 1:
+            return
+        try:
+            rows = self.adapter.query(f"SELECT {', '.join(exprs)} FROM {fqn}")
+            if not rows:
+                return
+            row = {k.lower(): v for k, v in rows[0].items()} if isinstance(rows[0], dict) else {}
+            total = int(row.get("_total_rows") or row_count or 0)
+            if total <= 0:
+                return
+            for idx, col in enumerate(target_cols):
+                nulls = row.get(f"_null_{idx}")
+                dists = row.get(f"_dist_{idx}")
+                if nulls is not None:
+                    non_null = max(0, total - int(nulls))
+                    col.null_rate = round(1.0 - (non_null / total), 4)
+                    if dists is not None and non_null > 0:
+                        col.distinct_count = int(dists)
+                        col.uniqueness_ratio = round(min(1.0, int(dists) / non_null), 4)
+        except Exception:
+            return
+
+    def _detect_heavy_hitters(
+        self,
+        fqn: str,
+        col: SafeColumnProfile,
+        row_count: int,
+        dialect: str,
+    ) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Run a top-10 frequency pushdown query on a candidate identifier column to:
+        1. Measure true full-table max_frequency_count (calibrates max_group_size).
+        2. Discover safe non-PII placeholder values for automatic exclusion.
+        3. Flag extreme statistical supernode outliers without exposing raw PII.
+        """
+        cname = col.name
+        id_type = (col.hint_identifier_type or cname).upper()
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cname):
+            return None, []
+        str_type = "STRING" if dialect in ("bigquery", "databricks") else "VARCHAR"
+        try:
+            rows = self.adapter.query(
+                f"""
+                SELECT LOWER(TRIM(CAST({cname} AS {str_type}))) AS val, COUNT(*) AS cnt
+                FROM {fqn}
+                WHERE {cname} IS NOT NULL AND LENGTH(TRIM(CAST({cname} AS {str_type}))) > 0
+                GROUP BY 1
+                ORDER BY 2 DESC
+                LIMIT 10
+                """
+            )
+        except Exception:
+            return None, []
+
+        if not rows:
+            return None, []
+
+        pairs: List[Tuple[str, int]] = []
+        for r in rows:
+            if isinstance(r, dict):
+                rl = {k.lower(): v for k, v in r.items()}
+                val = str(rl.get("val") or "").strip().lower()
+                cnt = int(rl.get("cnt") or 0)
+                if val and cnt > 0:
+                    pairs.append((val, cnt))
+        if not pairs:
+            return None, []
+
+        top_cnt = pairs[0][1]
+        col.max_frequency_count = max(col.max_frequency_count, top_cnt)
+
+        # Known non-PII placeholder patterns safe to auto-exclude
+        _PLACEHOLDER_EXACT = {
+            "null", "none", "n/a", "na", "unknown", "redacted", "anonymous",
+            "refused", "---", "0", "0000000000", "1111111111", "9999999999",
+            "1234567890", "test", "default", "tbd", "pending",
+        }
+        discovered_excls: List[Dict[str, Any]] = []
+        for val, cnt in pairs:
+            if cnt < 2:
+                continue
+            is_placeholder = (
+                val in _PLACEHOLDER_EXACT
+                or val.startswith(("test@", "noreply@", "no-reply@", "erased_", "redacted@", "unknown@"))
+                or val.endswith(("@example.com", "@test.com", "@anonymized.local", "@invalid.local"))
+                or (len(val) >= 7 and len(set(re.sub(r"[^0-9]", "", val))) == 1 and re.sub(r"[^0-9]", "", val) != "")
+            )
+            if is_placeholder:
+                discovered_excls.append(
+                    {
+                        "identifier_type": id_type,
+                        "identifier_value_pattern": val,
+                        "match_type": "EXACT",
+                        "reason": f"Auto-discovered placeholder in {fqn}.{cname} ({cnt} rows)",
+                    }
+                )
+
+        # Statistical outlier detection (strictly zero-PII: reports counts only, never raw values)
+        risk: Optional[Dict[str, Any]] = None
+        rest_counts = [c for _, c in pairs[1:]]
+        baseline = rest_counts[len(rest_counts) // 2] if rest_counts else 1
+        if top_cnt >= 25 and (top_cnt >= max(25, baseline * 5) or (row_count >= 100 and top_cnt / max(row_count, 1) >= 0.05)):
+            risk = {
+                "table": fqn,
+                "column": cname,
+                "identifier_type": id_type.lower(),
+                "max_frequency": top_cnt,
+                "baseline_frequency": baseline,
+                "row_count": row_count,
+            }
+
+        return risk, discovered_excls
+
     def profile_tables_safe(
         self,
         candidate_tables: List[str],
         sample_size: int = 2000,
         compute_overlap: bool = True,
+        on_progress: Any = None,
     ) -> SafeSchemaProfile:
         """
         Profile candidate warehouse tables and return a strictly zero-PII SafeSchemaProfile
@@ -924,6 +1106,8 @@ class IDRDataProfiler:
         safe_tables: List[SafeTableProfile] = []
         # Ephemeral hashed value sets used ONLY in-memory for cross-table overlap, then discarded
         hashed_sets: Dict[Tuple[str, str, str], Set[str]] = {}
+        # Ephemeral generic join-key hash sets (includes entity_keys & unlabeled ID-like columns)
+        join_hashed_sets: Dict[Tuple[str, str], Set[str]] = {}
         # Ephemeral categorical attribute hash sets for zero-PII homonym collision detection
         attr_hashed_sets: Dict[str, Dict[str, Set[str]]] = {}
 
@@ -933,6 +1117,7 @@ class IDRDataProfiler:
             Tuple[
                 SafeTableProfile,
                 Dict[Tuple[str, str, str], Set[str]],
+                Dict[Tuple[str, str], Set[str]],
                 Dict[str, Set[str]],
             ]
         ]:
@@ -951,6 +1136,7 @@ class IDRDataProfiler:
 
             safe_cols: List[SafeColumnProfile] = []
             local_hashes: Dict[Tuple[str, str, str], Set[str]] = {}
+            local_join_hashes: Dict[Tuple[str, str], Set[str]] = {}
             local_attr_hashes: Dict[str, Set[str]] = {}
             for col_info in cols:
                 cname = col_info["name"].lower()
@@ -973,7 +1159,24 @@ class IDRDataProfiler:
                         self._normalize_for_overlap_hash(v, sp.hint_identifier_type)
                         for v in raw_vals
                     }
-                elif (
+                if (
+                    compute_overlap
+                    and raw_vals
+                    and sp.distinct_count >= 2
+                    and sp.hint_role not in ("watermark", "metric", "consent_flag")
+                    and sp.bool_rate < 0.8
+                    and sp.date_ts_rate < 0.5
+                    and sp.name.lower() not in _NON_JOIN_DESCRIPTIVE_ATTRS
+                    and (sp.hint_role in ("entity_key", "identifier") or sp.uniqueness_ratio >= 0.15)
+                ):
+                    # Cap sketch at 1000 distinct hashes per column to keep memory & CPU tiny
+                    hset: Set[str] = set()
+                    for v in raw_vals:
+                        hset.add(hashlib.sha256(v.strip().lower().encode("utf-8")).hexdigest()[:16])
+                        if len(hset) >= 1000:
+                            break
+                    local_join_hashes[(fqn, sp.name.lower())] = hset
+                if (
                     compute_overlap
                     and sp.hint_role in ("attribute", "metric", "consent_flag")
                     and 2 <= sp.distinct_count <= 50
@@ -1006,6 +1209,9 @@ class IDRDataProfiler:
                             has_dup_keys = True
                         seen_k.add(hv)
 
+            if row_count > len(sample_rows):
+                self._pushdown_full_table_stats(fqn, safe_cols, row_count, dialect)
+
             tbl_desc = None
             if hasattr(self.adapter, "get_table_description"):
                 try:
@@ -1029,6 +1235,7 @@ class IDRDataProfiler:
                     has_candidate_identifiers=any(c.hint_role == "identifier" for c in safe_cols),
                 ),
                 local_hashes,
+                local_join_hashes,
                 local_attr_hashes,
             )
 
@@ -1044,14 +1251,25 @@ class IDRDataProfiler:
         for res in results:
             if res is None:
                 continue
-            tprof, local_hashes, local_attr_hashes = res
+            tprof, local_hashes, local_join_hashes, local_attr_hashes = res
             safe_tables.append(tprof)
             hashed_sets.update(local_hashes)
+            join_hashed_sets.update(local_join_hashes)
             for col_l, hset in local_attr_hashes.items():
                 attr_hashed_sets.setdefault(col_l, {})[tprof.table_fqn] = hset
 
         # Compute cross-table overlap matrix across tables sharing candidate identifier types
+        if callable(on_progress):
+            on_progress(
+                {
+                    "stage": "discovery",
+                    "step": 2,
+                    "total_steps": 5,
+                    "message": f"Analyzing PK→FK overlaps, table roles, homonyms & heavy-hitters across {len(safe_tables)} tables…",
+                }
+            )
         overlaps: List[CrossTableOverlap] = []
+        seen_overlap_pairs: Set[Tuple[str, str, str, str]] = set()
         if compute_overlap and len(hashed_sets) >= 2:
             items = list(hashed_sets.items())
             for i in range(len(items)):
@@ -1063,6 +1281,8 @@ class IDRDataProfiler:
                     if tbl_a == tbl_b or type_a != type_b or not set_b:
                         continue
                     shared = len(set_a & set_b)
+                    seen_overlap_pairs.add((tbl_a, col_a.lower(), tbl_b, col_b.lower()))
+                    seen_overlap_pairs.add((tbl_b, col_b.lower(), tbl_a, col_a.lower()))
                     overlaps.append(
                         CrossTableOverlap(
                             table_a=tbl_a,
@@ -1075,6 +1295,113 @@ class IDRDataProfiler:
                             shared_distinct_estimate=shared,
                         )
                     )
+
+        # Domain-agnostic PK-to-FK & unlabeled join-key discovery via zero-PII hash overlap
+        if compute_overlap and len(join_hashed_sets) >= 2:
+            col_lookup: Dict[Tuple[str, str], SafeColumnProfile] = {
+                (tp.table_fqn, c.name.lower()): c for tp in safe_tables for c in tp.columns
+            }
+            tbl_lookup: Dict[str, SafeTableProfile] = {tp.table_fqn: tp for tp in safe_tables}
+            join_items = list(join_hashed_sets.items())
+            for i in range(len(join_items)):
+                (tbl_a, col_a), set_a = join_items[i]
+                if len(set_a) < 2:
+                    continue
+                sp_a = col_lookup.get((tbl_a, col_a))
+                if sp_a is None:
+                    continue
+                for j in range(i + 1, len(join_items)):
+                    (tbl_b, col_b), set_b = join_items[j]
+                    if tbl_a == tbl_b or len(set_b) < 2:
+                        continue
+                    if (tbl_a, col_a, tbl_b, col_b) in seen_overlap_pairs:
+                        continue
+                    sp_b = col_lookup.get((tbl_b, col_b))
+                    if sp_b is None:
+                        continue
+
+                    shared = len(set_a & set_b)
+                    if shared < 2:
+                        continue
+                    ov_a = shared / len(set_a)
+                    ov_b = shared / len(set_b)
+                    max_ov = max(ov_a, ov_b)
+
+                    is_pk_pair = sp_a.hint_role == "entity_key" or sp_b.hint_role == "entity_key"
+                    same_name = col_a == col_b
+                    key_like = any(col_a.endswith(sfx) for sfx in _KEY_LIKE_SUFFIXES) or any(
+                        col_b.endswith(sfx) for sfx in _KEY_LIKE_SUFFIXES
+                    )
+                    shapes_overlap = bool(set(sp_a.top_shapes) & set(sp_b.top_shapes)) if (sp_a.top_shapes and sp_b.top_shapes) else False
+
+                    promote = False
+                    if is_pk_pair:
+                        # PK -> FK join discovery (e.g. customers.customer_id <-> orders.customer_id, orders.order_id <-> shipments.order_id)
+                        if max_ov >= 0.25 and (same_name or key_like or (max_ov >= 0.50 and shared >= 3)):
+                            promote = True
+                    else:
+                        # Unlabeled domain-agnostic join key (e.g. mrn <-> patient_mrn, buyer_ref <-> cust_no)
+                        if max_ov >= 0.35 and shared >= 3 and (same_name or (key_like and shapes_overlap) or (max_ov >= 0.60 and shapes_overlap)):
+                            promote = True
+
+                    if not promote:
+                        continue
+
+                    # Choose a consistent semantic identifier_type
+                    chosen_type = (
+                        sp_a.hint_identifier_type
+                        or sp_b.hint_identifier_type
+                        or (col_a if sp_a.hint_role == "entity_key" else (col_b if sp_b.hint_role == "entity_key" else (col_a if len(col_a) <= len(col_b) else col_b)))
+                    )
+                    conf = round(max(0.85, min(0.99, max_ov)), 2)
+
+                    for tbl_x, sp_x in ((tbl_a, sp_a), (tbl_b, sp_b)):
+                        if not sp_x.hint_identifier_type:
+                            sp_x.hint_identifier_type = chosen_type
+                            sp_x.hint_canonicalizer = sp_x.hint_canonicalizer or "EXACT"
+                            sp_x.hint_confidence = max(sp_x.hint_confidence, conf)
+                            # Keep entity_key role intact on PKs so entity_key selection stays accurate
+                            if sp_x.hint_role != "entity_key":
+                                sp_x.hint_role = "identifier"
+                            tbl_lookup[tbl_x].has_candidate_identifiers = True
+
+                    seen_overlap_pairs.add((tbl_a, col_a, tbl_b, col_b))
+                    seen_overlap_pairs.add((tbl_b, col_b, tbl_a, col_a))
+                    overlaps.append(
+                        CrossTableOverlap(
+                            table_a=tbl_a,
+                            column_a=col_a,
+                            table_b=tbl_b,
+                            column_b=col_b,
+                            identifier_type=chosen_type,
+                            overlap_a_in_b=round(ov_a, 4),
+                            overlap_b_in_a=round(ov_b, 4),
+                            shared_distinct_estimate=shared,
+                        )
+                    )
+
+        # Classify universal 4-way table roles: MASTER_ENTITY | SUB_ENTITY | EVENT_FACT | REFERENCE_LOOKUP
+        for tp in safe_tables:
+            id_cols = [c for c in tp.columns if c.hint_role == "identifier" or c.hint_identifier_type]
+            if not id_cols:
+                tp.table_role = "REFERENCE_LOOKUP"
+                continue
+            tbl_short = tp.table_fqn.split(".")[-1].lower()
+            non_pk_id_cols = [c for c in id_cols if c.hint_role != "entity_key"]
+            max_id_fanout = max((c.max_frequency_count for c in non_pk_id_cols), default=1)
+            min_id_uniq = min((c.uniqueness_ratio for c in non_pk_id_cols), default=1.0)
+            has_wm = bool(tp.hint_watermark)
+            is_event_named = any(tok in tbl_short for tok in _EVENT_TABLE_HINTS)
+            is_sub_named = any(tok in tbl_short for tok in _SUB_ENTITY_TABLE_HINTS)
+
+            if (is_event_named and (has_wm or max_id_fanout >= 2 or min_id_uniq < 0.9)) or (
+                has_wm and max_id_fanout >= 5 and min_id_uniq <= 0.55
+            ):
+                tp.table_role = "EVENT_FACT"
+            elif is_sub_named or (max_id_fanout >= 2 and min_id_uniq < 0.85):
+                tp.table_role = "SUB_ENTITY"
+            else:
+                tp.table_role = "MASTER_ENTITY"
 
         # Detect semantic homonym attributes across tables (generic names or disjoint categorical domains)
         attribute_homonyms: List[Dict[str, Any]] = []
@@ -1120,9 +1447,30 @@ class IDRDataProfiler:
                             }
                         )
 
+        # Phase 2: Pushdown heavy-hitter & placeholder exclusion discovery on candidate identifiers
+        heavy_hitter_risks: List[Dict[str, Any]] = []
+        discovered_exclusions: List[Dict[str, Any]] = []
+        seen_excl_keys: Set[Tuple[str, str]] = set()
+        for tp in safe_tables:
+            id_cols = [
+                c for c in tp.columns
+                if c.hint_role == "identifier" and c.hint_identifier_type
+            ]
+            for c in id_cols[:6]:
+                risk, excls = self._detect_heavy_hitters(tp.table_fqn, c, tp.row_count, dialect)
+                if risk:
+                    heavy_hitter_risks.append(risk)
+                for ex in excls:
+                    ek = (ex["identifier_type"], ex["identifier_value_pattern"])
+                    if ek not in seen_excl_keys:
+                        seen_excl_keys.add(ek)
+                        discovered_exclusions.append(ex)
+
         return SafeSchemaProfile(
             dialect=dialect,
             tables=safe_tables,
             overlaps=overlaps,
             attribute_homonyms=attribute_homonyms,
+            heavy_hitter_risks=heavy_hitter_risks,
+            discovered_exclusions=discovered_exclusions,
         )
