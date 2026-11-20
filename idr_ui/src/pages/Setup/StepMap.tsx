@@ -119,6 +119,9 @@ export default function StepMap({
     const [aiProgress, setAiProgress] = useState<AiProgressEvent | null>(null);
     const [aiNotice, setAiNotice] = useState<string | null>(null);
     const [aiGoal, setAiGoal] = useState<string>('');
+    const [aiGrain, setAiGrain] = useState<'individual' | 'household' | 'account'>('individual');
+    const [aiEventPolicy, setAiEventPolicy] = useState<'bridge' | 'include' | 'exclude'>('bridge');
+    const [aiSystemOfRecord, setAiSystemOfRecord] = useState<string>('');
     const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null);
     const [aiReportOpen, setAiReportOpen] = useState<boolean>(true);
 
@@ -527,7 +530,26 @@ export default function StepMap({
                                     setValidationError(null);
                                     setAiNotice(null);
                                     try {
-                                        const goalPrompt = aiGoal.trim() || 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views (strict_person vs household) for these tables.';
+                                        const policyParts: string[] = [];
+                                        if (aiGrain === 'individual') {
+                                            policyParts.push('Primary resolution grain: Strict Individual (person-level; keep household/shared identifiers in a separate household lens).');
+                                        } else if (aiGrain === 'household') {
+                                            policyParts.push('Primary resolution grain: Household (include shared phone/address identifiers in primary matching).');
+                                        } else {
+                                            policyParts.push('Primary resolution grain: B2B Account / Organization (prioritize company/account/domain identifiers).');
+                                        }
+                                        if (aiEventPolicy === 'bridge') {
+                                            policyParts.push('Event/fact tables: include only for cross-channel bridging without mapping transactional attributes into golden_profile.');
+                                        } else if (aiEventPolicy === 'exclude') {
+                                            policyParts.push('Event/fact tables: set include_in_idr=false for high-volume clickstream/telemetry/event tables.');
+                                        } else {
+                                            policyParts.push('Event/fact tables: include fully in IDR.');
+                                        }
+                                        if (aiSystemOfRecord) {
+                                            policyParts.push(`System of Record for Survivorship source_priority #1: ${aiSystemOfRecord}.`);
+                                        }
+                                        const baseGoal = aiGoal.trim() || 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views.';
+                                        const goalPrompt = `${baseGoal} ${policyParts.join(' ')}`;
                                         const res = await api.suggestConfigAiStream(tables, goalPrompt, (evt) => {
                                             setAiProgress(evt);
                                         });
@@ -585,18 +607,59 @@ export default function StepMap({
             </div>
 
             {tables.length > 0 && (
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-subtle border border-line-default rounded-md px-3 py-2">
-                    <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-                        <Bot className="w-3.5 h-3.5" />
-                        AI Goal (Optional)
-                    </span>
-                    <input
-                        type="text"
-                        value={aiGoal}
-                        onChange={e => setAiGoal(e.target.value)}
-                        placeholder="e.g. Strict B2C person matching on email & loyalty, prioritize CRM over web for names..."
-                        className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
-                    />
+                <div className="bg-subtle border border-line-default rounded-md px-3 py-2 space-y-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+                            <Bot className="w-3.5 h-3.5" />
+                            AI Goal (Optional)
+                        </span>
+                        <input
+                            type="text"
+                            value={aiGoal}
+                            onChange={e => setAiGoal(e.target.value)}
+                            placeholder="e.g. Strict B2C person matching on email & loyalty, prioritize CRM over web for names..."
+                            className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
+                        />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-line-default/60 text-[11px]">
+                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                            <span className="font-medium">Grain:</span>
+                            <select
+                                value={aiGrain}
+                                onChange={e => setAiGrain(e.target.value as 'individual' | 'household' | 'account')}
+                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
+                            >
+                                <option value="individual">Strict Individual</option>
+                                <option value="household">Household</option>
+                                <option value="account">Account / B2B</option>
+                            </select>
+                        </label>
+                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                            <span className="font-medium">Event Tables:</span>
+                            <select
+                                value={aiEventPolicy}
+                                onChange={e => setAiEventPolicy(e.target.value as 'bridge' | 'include' | 'exclude')}
+                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
+                            >
+                                <option value="bridge">Bridge Only (Clean Profile)</option>
+                                <option value="include">Include Fully</option>
+                                <option value="exclude">Exclude Event Tables</option>
+                            </select>
+                        </label>
+                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                            <span className="font-medium">System of Record:</span>
+                            <select
+                                value={aiSystemOfRecord}
+                                onChange={e => setAiSystemOfRecord(e.target.value)}
+                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent max-w-[200px]"
+                            >
+                                <option value="">Auto (Master Entity)</option>
+                                {tables.map(t => (
+                                    <option key={t} value={t}>{t}</option>
+                                ))}
+                            </select>
+                        </label>
+                    </div>
                 </div>
             )}
 

@@ -636,6 +636,59 @@ export const api = {
         return finalResult as Awaited<ReturnType<typeof api.suggestConfigAi>>
     },
 
+    critiqueDryRunAi: (
+        config: Record<string, unknown>,
+        dryRunSummary?: Record<string, unknown>,
+        warnings?: string[]
+    ) =>
+        fetchJson<{
+            health: 'healthy' | 'needs_tuning' | 'over_merged_risk'
+            headline: string
+            provider: string
+            model: string
+            pii_masked: boolean
+            telemetry: {
+                total_entities: number
+                total_clusters: number
+                singletons: number
+                singleton_pct: number
+                max_cluster_size: number
+                size_buckets: Record<string, number>
+                edges_by_type: Record<string, number>
+                zero_edge_rules: Array<{ rule_id: string; identifier_type: string }>
+                source_singletons: Array<{
+                    source_id: string
+                    total_entities: number
+                    singleton_entities: number
+                    singleton_pct: number
+                }>
+                skipped_supernodes: Array<{
+                    identifier_type: string
+                    skipped_groups: number
+                    max_group_size_seen: number
+                }>
+            }
+            findings: Array<{
+                severity: 'high' | 'medium' | 'info'
+                title: string
+                detail: string
+                metric: string
+                patch?: {
+                    action: 'remove_source' | 'remove_rule' | 'enable_default_exclusions' | 'raise_fuzzy_threshold'
+                    label: string
+                    target: string
+                    value: unknown
+                } | null
+            }>
+        }>('/ai/critique-dry-run', {
+            method: 'POST',
+            body: JSON.stringify({
+                config,
+                dry_run_summary: dryRunSummary || {},
+                warnings: warnings || [],
+            }),
+        }),
+
     // Multi-Lens Identity
     listLenses: () => fetchJson<{
         lenses: Array<{

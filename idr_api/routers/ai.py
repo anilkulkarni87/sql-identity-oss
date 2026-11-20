@@ -11,12 +11,13 @@ from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from idr_api.dependencies import get_adapter, get_current_user, get_user_key
 from idr_core.ai_assistant import (
     ask_identity_graph,
     copilot_chat,
+    critique_dry_run_with_ai,
     explain_cluster_with_ai,
     suggest_config_with_ai,
     test_llm_connection,
@@ -319,4 +320,31 @@ def suggest_config_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+class AIDryRunCritiqueRequest(BaseModel):
+    config: dict = Field(default_factory=dict)
+    dry_run_summary: Optional[dict] = None
+    warnings: List[str] = Field(default_factory=list)
+
+
+@router.post("/critique-dry-run")
+def critique_dry_run(
+    payload: AIDryRunCritiqueRequest,
+    adapter=Depends(get_adapter),
+    current_user: dict = Depends(get_current_user),
+    store: LLMConfigStore = Depends(get_llm_config_store),
+):
+    """Analyze zero-PII Dry Run graph telemetry and return actionable one-click refinement patches."""
+    try:
+        cfg = store.get(get_user_key(current_user))
+        return critique_dry_run_with_ai(
+            adapter=adapter,
+            draft_config=payload.config or {},
+            dry_run_summary=payload.dry_run_summary,
+            warnings=payload.warnings,
+            client=LLMClient(cfg),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 

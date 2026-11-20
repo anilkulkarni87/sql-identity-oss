@@ -483,4 +483,75 @@ def test_phase2_pushdown_stats_heavy_hitters_and_progress_events(adapter):
     assert plan.profile_summary.get("discovered_exclusions_count", 0) >= 1
 
 
+def test_phase3_dry_run_critique_telemetry_and_patches(adapter):
+    """
+    Verify Phase 3 closed-loop Dry Run critique:
+    - Collects zero-PII cluster size histogram, per-source singleton rates, and zero-edge rules.
+    - Proposes actionable one-click patches (remove unused rule, exclude high-singleton source,
+      raise permissive fuzzy threshold).
+    """
+    from idr_core.ai_assistant import critique_dry_run_with_ai
+
+    adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    adapter.execute("CREATE TABLE raw.customers (id VARCHAR, email VARCHAR)")
+    adapter.execute("CREATE TABLE raw.clickstream (id VARCHAR, email VARCHAR, order_id VARCHAR)")
+
+    cust_rows = [f"('c{i}', 'u{i}@corp.io')" for i in range(10)]
+    click_rows = [f"('e{i}', 'u{i}@corp.io', 'o{i}')" for i in range(5)] + [
+        f"('anon{i}', NULL, 'ao{i}')" for i in range(30)
+    ]
+    adapter.execute(f"INSERT INTO raw.customers VALUES {', '.join(cust_rows)}")
+    adapter.execute(f"INSERT INTO raw.clickstream VALUES {', '.join(click_rows)}")
+
+    cfg = {
+        "use_default_exclusions": False,
+        "sources": [
+            {
+                "id": "customers",
+                "table": "raw.customers",
+                "entity_key": "id",
+                "identifiers": [{"type": "email", "expr": "email"}],
+            },
+            {
+                "id": "clickstream",
+                "table": "raw.clickstream",
+                "entity_key": "id",
+                "identifiers": [
+                    {"type": "email", "expr": "email"},
+                    {"type": "order_id", "expr": "order_id"},
+                ],
+            },
+        ],
+        "rules": [
+            {"id": "r_email", "match_keys": ["email"], "canonicalize": "EMAIL_STANDARD"},
+            {"id": "r_order", "match_keys": ["order_id"], "canonicalize": "EXACT"},
+        ],
+        "fuzzy_rules": [
+            {"id": "f_name", "name": "Name Fuzzy", "blocking_key": "x", "score_expr": "1.0", "threshold": 0.80}
+        ],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    dry_res = IDRRunner(adapter).run(RunConfig(run_mode="FULL", dry_run=True))
+    assert dry_res.status == "DRY_RUN_COMPLETE"
+
+    critique = critique_dry_run_with_ai(
+        adapter=adapter,
+        draft_config=cfg,
+        dry_run_summary={},
+        warnings=dry_res.warnings,
+    )
+    assert critique["pii_masked"] is True
+    assert critique["health"] in ("needs_tuning", "over_merged_risk")
+    assert critique["telemetry"]["total_entities"] == 45
+    assert any(z["identifier_type"] == "order_id" for z in critique["telemetry"]["zero_edge_rules"])
+
+    actions = {f["patch"]["action"] for f in critique["findings"] if f.get("patch")}
+    assert "remove_rule" in actions
+    assert "remove_source" in actions
+    assert "raise_fuzzy_threshold" in actions
+
+
+
 

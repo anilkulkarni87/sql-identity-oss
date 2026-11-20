@@ -4,7 +4,7 @@ import {
     Loader2, CheckCircle2, Settings, Play, Save, ClipboardList,
     ChevronDown, ChevronRight, Database, Shield, Layers, Code,
     Activity, Clock, Cpu, FileSpreadsheet, GitMerge, Network,
-    ArrowRight, Copy, Check, Edit3, AlertCircle, RotateCcw
+    ArrowRight, Copy, Check, Edit3, AlertCircle, RotateCcw, Bot, Sparkles
 } from "lucide-react";
 import { IDRConfig } from '../../types';
 import { api } from '../../api/client';
@@ -76,6 +76,61 @@ export default function StepReview({
     const [selectedLens, setSelectedLens] = useState('');
     const [dryRun, setDryRun] = useState(false);
     const [runResult, setRunResult] = useState<any>(null);
+    const [critiqueLoading, setCritiqueLoading] = useState(false);
+    const [critiqueReport, setCritiqueReport] = useState<Awaited<ReturnType<typeof api.critiqueDryRunAi>> | null>(null);
+    const [appliedPatches, setAppliedPatches] = useState<Set<string>>(new Set());
+
+    const handleCritiqueDryRun = async () => {
+        if (!runResult) return;
+        setCritiqueLoading(true);
+        try {
+            const res = await api.critiqueDryRunAi(
+                config as unknown as Record<string, unknown>,
+                runResult.dry_run_summary || {},
+                runResult.warnings || []
+            );
+            setCritiqueReport(res);
+            setAppliedPatches(new Set());
+        } catch (err: any) {
+            toast('error', 'Dry Run Critique failed', String(err?.message || err));
+        } finally {
+            setCritiqueLoading(false);
+        }
+    };
+
+    const applyCritiquePatch = (
+        patchKey: string,
+        patch: { action: string; label: string; target: string; value: unknown }
+    ) => {
+        if (!onUpdateConfig) return;
+        const next: IDRConfig = { ...config };
+        if (patch.action === 'enable_default_exclusions') {
+            next.use_default_exclusions = true;
+        } else if (patch.action === 'remove_rule') {
+            const targetType = String(patch.target || '').toLowerCase();
+            next.rules = (config.rules || []).filter((r) => {
+                const mks = (r.match_keys || []).map((k) => String(k).toLowerCase());
+                return !mks.includes(targetType);
+            });
+        } else if (patch.action === 'remove_source') {
+            const targetId = String(patch.target || '');
+            next.sources = (config.sources || []).filter(
+                (s) => s.id !== targetId && s.table !== String(patch.value || '')
+            );
+        } else if (patch.action === 'raise_fuzzy_threshold') {
+            const thr = Number(patch.value) || 0.9;
+            next.fuzzy_rules = (config.fuzzy_rules || []).map((fr) =>
+                String(fr.id) === String(patch.target) ? { ...fr, threshold: thr } : fr
+            );
+        }
+        onUpdateConfig(next);
+        setAppliedPatches((prev) => {
+            const s = new Set(prev);
+            s.add(patchKey);
+            return s;
+        });
+        toast('success', 'Draft config updated', `${patch.label} — re-run Dry Run to verify impact.`);
+    };
 
     // Collapsible sections (all collapsed by default so Run Controls are immediately visible!)
     const [openSection, setOpenSection] = useState<'sources' | 'rules' | 'survivorship' | 'json' | null>(null);
@@ -240,6 +295,8 @@ export default function StepReview({
         }
         setPhase('running');
         setError(null);
+        setCritiqueReport(null);
+        setAppliedPatches(new Set());
         setLiveProgress({
             status: 'RUNNING',
             elapsed_seconds: 0,
@@ -694,6 +751,19 @@ export default function StepReview({
                                     )}
                                     <div className="flex flex-wrap gap-3 pt-1">
                                         <button
+                                            type="button"
+                                            disabled={critiqueLoading}
+                                            onClick={handleCritiqueDryRun}
+                                            className={`${btnOutlineClass} border-purple-500/60 text-purple-300 hover:bg-purple-950/40`}
+                                        >
+                                            {critiqueLoading ? (
+                                                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                                            ) : (
+                                                <Sparkles className="w-4 h-4 mr-1.5" />
+                                            )}
+                                            {critiqueLoading ? 'Analyzing Graph…' : 'Analyze & Refine with AI'}
+                                        </button>
+                                        <button
                                             className={btnClass}
                                             onClick={() => handleRun(false)}
                                         >
@@ -719,6 +789,7 @@ export default function StepReview({
                                                     onDiscardDraft();
                                                     setPhase('idle');
                                                     setRunResult(null);
+                                                    setCritiqueReport(null);
                                                 }}
                                             >
                                                 <RotateCcw className="w-4 h-4 mr-1.5" />
@@ -732,6 +803,97 @@ export default function StepReview({
                                             Edit Configuration
                                         </button>
                                     </div>
+
+                                    {/* AI Dry-Run Graph Critique Scorecard & One-Click Patches */}
+                                    {critiqueReport && (
+                                        <div className="mt-3 p-4 rounded-xl bg-gray-900/80 border border-purple-500/40 space-y-3 text-xs">
+                                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-2.5">
+                                                <div className="flex items-center gap-2">
+                                                    <Bot className="w-4 h-4 text-purple-400" />
+                                                    <span className="font-semibold text-white">AI Graph Critique</span>
+                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase border ${
+                                                        critiqueReport.health === 'healthy'
+                                                            ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40'
+                                                            : critiqueReport.health === 'over_merged_risk'
+                                                            ? 'bg-rose-950/70 text-rose-300 border-rose-500/40'
+                                                            : 'bg-amber-950/70 text-amber-300 border-amber-500/40'
+                                                    }`}>
+                                                        {critiqueReport.health.replace(/_/g, ' ')}
+                                                    </span>
+                                                    <span className="text-[10px] font-mono text-gray-400">
+                                                        {critiqueReport.provider}:{critiqueReport.model} · Zero-PII
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-3 font-mono text-[11px] text-gray-400">
+                                                    <span>Singletons: {critiqueReport.telemetry.singleton_pct}%</span>
+                                                    <span>Max Cluster: {critiqueReport.telemetry.max_cluster_size.toLocaleString()}</span>
+                                                </div>
+                                            </div>
+
+                                            <p className="text-gray-200 leading-relaxed">{critiqueReport.headline}</p>
+
+                                            {critiqueReport.findings.length > 0 && (
+                                                <div className="space-y-2">
+                                                    {critiqueReport.findings.map((f, idx) => {
+                                                        const pKey = `${idx}:${f.patch?.action || ''}:${f.patch?.target || ''}`;
+                                                        const isApplied = appliedPatches.has(pKey);
+                                                        return (
+                                                            <div
+                                                                key={pKey}
+                                                                className="p-2.5 rounded-lg bg-gray-950/70 border border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                                                            >
+                                                                <div className="space-y-0.5 min-w-0">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                                                                            f.severity === 'high'
+                                                                                ? 'bg-rose-500/20 text-rose-300'
+                                                                                : f.severity === 'medium'
+                                                                                ? 'bg-amber-500/20 text-amber-300'
+                                                                                : 'bg-blue-500/20 text-blue-300'
+                                                                        }`}>
+                                                                            {f.severity}
+                                                                        </span>
+                                                                        <span className="font-semibold text-gray-100">{f.title}</span>
+                                                                        <span className="font-mono text-[10px] text-gray-500">{f.metric}</span>
+                                                                    </div>
+                                                                    <p className="text-gray-400 leading-relaxed">{f.detail}</p>
+                                                                </div>
+                                                                {f.patch && onUpdateConfig && (
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={isApplied}
+                                                                        onClick={() => applyCritiquePatch(pKey, f.patch!)}
+                                                                        className={`shrink-0 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border transition-colors ${
+                                                                            isApplied
+                                                                                ? 'bg-emerald-950/60 border-emerald-600/50 text-emerald-300'
+                                                                                : 'bg-purple-600/20 border-purple-500/50 text-purple-200 hover:bg-purple-600/35'
+                                                                        }`}
+                                                                    >
+                                                                        {isApplied ? 'Applied ✓' : f.patch.label}
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            {appliedPatches.size > 0 && (
+                                                <div className="pt-1 flex items-center justify-between gap-2 border-t border-gray-800">
+                                                    <span className="text-emerald-300">
+                                                        {appliedPatches.size} patch(es) applied to draft config.
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRun(true)}
+                                                        className="px-3 py-1 rounded-md bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs"
+                                                    >
+                                                        Re-Run Dry Run →
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-3">

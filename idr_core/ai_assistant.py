@@ -442,6 +442,360 @@ def suggest_config_with_ai(
     }
 
 
+def collect_dry_run_telemetry(
+    adapter: Any,
+    draft_config: Dict[str, Any],
+    dry_run_summary: Optional[Dict[str, Any]] = None,
+    warnings: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Collect strictly zero-PII aggregate graph diagnostics from the most recent Dry Run
+    (`idr_work.lp_labels`, `idr_work.edges_new`, `idr_out.skipped_identifier_groups`).
+    """
+    telemetry: Dict[str, Any] = {
+        "total_entities": 0,
+        "total_clusters": 0,
+        "singletons": 0,
+        "singleton_pct": 0.0,
+        "max_cluster_size": 0,
+        "size_buckets": {"1": 0, "2_5": 0, "6_20": 0, "21_100": 0, "100_plus": 0},
+        "edges_by_type": {},
+        "zero_edge_rules": [],
+        "source_singletons": [],
+        "skipped_supernodes": [],
+        "warnings": list(warnings or []),
+        "dry_run_summary": dry_run_summary or {},
+    }
+
+    try:
+        if adapter.table_exists("idr_work.lp_labels"):
+            rows = adapter.query("""
+                WITH cluster_sizes AS (
+                    SELECT label, COUNT(*) AS sz
+                    FROM idr_work.lp_labels
+                    GROUP BY label
+                )
+                SELECT
+                    COUNT(*) AS total_clusters,
+                    COALESCE(SUM(sz), 0) AS total_entities,
+                    COALESCE(MAX(sz), 0) AS max_sz,
+                    SUM(CASE WHEN sz = 1 THEN 1 ELSE 0 END) AS b1,
+                    SUM(CASE WHEN sz BETWEEN 2 AND 5 THEN 1 ELSE 0 END) AS b2_5,
+                    SUM(CASE WHEN sz BETWEEN 6 AND 20 THEN 1 ELSE 0 END) AS b6_20,
+                    SUM(CASE WHEN sz BETWEEN 21 AND 100 THEN 1 ELSE 0 END) AS b21_100,
+                    SUM(CASE WHEN sz > 100 THEN 1 ELSE 0 END) AS b100_plus
+                FROM cluster_sizes
+            """)
+            if rows:
+                r = {k.lower(): v for k, v in rows[0].items()} if isinstance(rows[0], dict) else {}
+                tc = int(r.get("total_clusters") or 0)
+                te = int(r.get("total_entities") or 0)
+                b1 = int(r.get("b1") or 0)
+                telemetry["total_clusters"] = tc
+                telemetry["total_entities"] = te
+                telemetry["singletons"] = b1
+                telemetry["singleton_pct"] = round((b1 / tc) * 100.0, 1) if tc > 0 else 0.0
+                telemetry["max_cluster_size"] = int(r.get("max_sz") or 0)
+                telemetry["size_buckets"] = {
+                    "1": b1,
+                    "2_5": int(r.get("b2_5") or 0),
+                    "6_20": int(r.get("b6_20") or 0),
+                    "21_100": int(r.get("b21_100") or 0),
+                    "100_plus": int(r.get("b100_plus") or 0),
+                }
+
+            dialect = getattr(adapter, "dialect", "duckdb")
+            split_expr = (
+                "SPLIT(l.entity_key, ':')[OFFSET(0)]"
+                if dialect == "bigquery"
+                else "SPLIT_PART(l.entity_key, ':', 1)"
+            )
+            src_rows = adapter.query(f"""
+                WITH csz AS (
+                    SELECT label, COUNT(*) AS sz FROM idr_work.lp_labels GROUP BY label
+                )
+                SELECT
+                    {split_expr} AS source_id,
+                    COUNT(*) AS total_entities,
+                    SUM(CASE WHEN c.sz = 1 THEN 1 ELSE 0 END) AS singleton_entities
+                FROM idr_work.lp_labels l
+                JOIN csz c ON l.label = c.label
+                GROUP BY 1
+                ORDER BY 3 DESC
+                LIMIT 20
+            """)
+            for sr in src_rows or []:
+                srl = {k.lower(): v for k, v in sr.items()} if isinstance(sr, dict) else {}
+                tot = int(srl.get("total_entities") or 0)
+                sing = int(srl.get("singleton_entities") or 0)
+                telemetry["source_singletons"].append(
+                    {
+                        "source_id": str(srl.get("source_id") or ""),
+                        "total_entities": tot,
+                        "singleton_entities": sing,
+                        "singleton_pct": round((sing / tot) * 100.0, 1) if tot > 0 else 0.0,
+                    }
+                )
+    except Exception:
+        pass
+
+    try:
+        if adapter.table_exists("idr_work.edges_new"):
+            erows = adapter.query("""
+                SELECT LOWER(identifier_type) AS id_type, COUNT(*) AS cnt
+                FROM idr_work.edges_new
+                GROUP BY 1
+                ORDER BY 2 DESC
+            """)
+            for er in erows or []:
+                erl = {k.lower(): v for k, v in er.items()} if isinstance(er, dict) else {}
+                if erl.get("id_type"):
+                    telemetry["edges_by_type"][str(erl["id_type"])] = int(erl.get("cnt") or 0)
+    except Exception:
+        pass
+
+    for rule in draft_config.get("rules") or []:
+        mks = rule.get("match_keys") or ([rule["match_key"]] if rule.get("match_key") else [])
+        for mk in mks:
+            mk_l = str(mk).strip().lower()
+            if mk_l and telemetry["edges_by_type"].get(mk_l, 0) == 0:
+                telemetry["zero_edge_rules"].append(
+                    {"rule_id": str(rule.get("id", "")), "identifier_type": mk_l}
+                )
+
+    try:
+        if adapter.table_exists("idr_out.skipped_identifier_groups"):
+            srows = adapter.query("""
+                SELECT
+                    LOWER(identifier_type) AS id_type,
+                    COUNT(*) AS skipped_groups,
+                    COALESCE(MAX(group_size), 0) AS max_group_size_seen
+                FROM idr_out.skipped_identifier_groups
+                WHERE run_id = (
+                    SELECT run_id FROM idr_out.skipped_identifier_groups
+                    ORDER BY skipped_at DESC LIMIT 1
+                )
+                GROUP BY 1
+                ORDER BY 2 DESC
+            """)
+            for sr in srows or []:
+                srl = {k.lower(): v for k, v in sr.items()} if isinstance(sr, dict) else {}
+                telemetry["skipped_supernodes"].append(
+                    {
+                        "identifier_type": str(srl.get("id_type") or ""),
+                        "skipped_groups": int(srl.get("skipped_groups") or 0),
+                        "max_group_size_seen": int(srl.get("max_group_size_seen") or 0),
+                    }
+                )
+    except Exception:
+        pass
+
+    return telemetry
+
+
+def critique_dry_run_with_ai(
+    adapter: Any,
+    draft_config: Dict[str, Any],
+    dry_run_summary: Optional[Dict[str, Any]] = None,
+    warnings: Optional[List[str]] = None,
+    client: Optional[LLMClient] = None,
+) -> Dict[str, Any]:
+    """
+    Analyze zero-PII Dry Run graph telemetry and produce a Graph Health Scorecard
+    with concrete, one-click draft patches (plus optional LLM narrative synthesis).
+    """
+    client = client or LLMClient()
+    telemetry = collect_dry_run_telemetry(
+        adapter, draft_config, dry_run_summary=dry_run_summary, warnings=warnings
+    )
+
+    findings: List[Dict[str, Any]] = []
+    severity_score = 0
+
+    mega_cnt = telemetry["size_buckets"].get("100_plus", 0)
+    if mega_cnt > 0 or telemetry["max_cluster_size"] > 100:
+        severity_score += 3
+        findings.append(
+            {
+                "severity": "high",
+                "title": f"Large cluster risk detected (max size {telemetry['max_cluster_size']:,})",
+                "detail": (
+                    f"{mega_cnt} cluster(s) exceed 100 entities. This typically indicates a shared/placeholder "
+                    f"identifier or a high-volume event table inflating clusters."
+                ),
+                "metric": f"max_cluster={telemetry['max_cluster_size']:,}",
+                "patch": (
+                    {
+                        "action": "enable_default_exclusions",
+                        "label": "Enable Default Placeholder Exclusions",
+                        "target": "use_default_exclusions",
+                        "value": True,
+                    }
+                    if not draft_config.get("use_default_exclusions")
+                    else None
+                ),
+            }
+        )
+
+    for sn in telemetry["skipped_supernodes"]:
+        severity_score += 1
+        id_type = sn["identifier_type"]
+        findings.append(
+            {
+                "severity": "medium",
+                "title": f"Supernode cap triggered on '{id_type}' ({sn['skipped_groups']} skipped group(s))",
+                "detail": (
+                    f"Up to {sn['max_group_size_seen']:,} entities shared a single '{id_type}' value and were skipped "
+                    f"by max_group_size. Consider enabling default exclusions or tightening max_group_size."
+                ),
+                "metric": f"{sn['skipped_groups']} skipped · max {sn['max_group_size_seen']:,}",
+                "patch": (
+                    {
+                        "action": "enable_default_exclusions",
+                        "label": "Enable Default Exclusions",
+                        "target": "use_default_exclusions",
+                        "value": True,
+                    }
+                    if not draft_config.get("use_default_exclusions")
+                    else None
+                ),
+            }
+        )
+
+    for zr in telemetry["zero_edge_rules"]:
+        severity_score += 1
+        findings.append(
+            {
+                "severity": "medium",
+                "title": f"Rule '{zr['identifier_type']}' produced 0 edges",
+                "detail": (
+                    f"Identifier '{zr['identifier_type']}' formed no edges in the dry run—either it is only mapped "
+                    f"on one source table or values do not overlap across sources."
+                ),
+                "metric": "0 edges",
+                "patch": {
+                    "action": "remove_rule",
+                    "label": f"Remove unused '{zr['identifier_type']}' rule",
+                    "target": zr["identifier_type"],
+                    "value": zr["rule_id"],
+                },
+            }
+        )
+
+    source_ids_in_cfg = {str(s.get("id") or ""): s for s in (draft_config.get("sources") or [])}
+    for src_stat in telemetry["source_singletons"]:
+        sid = src_stat["source_id"]
+        if src_stat["singleton_entities"] >= 25 and src_stat["singleton_pct"] >= 50.0 and len(source_ids_in_cfg) > 1:
+            severity_score += 1
+            findings.append(
+                {
+                    "severity": "medium",
+                    "title": f"Source '{sid}' generated {src_stat['singleton_entities']:,} singletons ({src_stat['singleton_pct']}%)",
+                    "detail": (
+                        f"Over half of '{sid}' entities did not link to any other record—often caused by "
+                        f"anonymous event/session rows or a missing cross-table join key."
+                    ),
+                    "metric": f"{src_stat['singleton_pct']}% singletons",
+                    "patch": (
+                        {
+                            "action": "remove_source",
+                            "label": f"Exclude '{sid}' from draft",
+                            "target": sid,
+                            "value": source_ids_in_cfg[sid].get("table") if sid in source_ids_in_cfg else sid,
+                        }
+                        if sid in source_ids_in_cfg
+                        else None
+                    ),
+                }
+            )
+
+    for fr in draft_config.get("fuzzy_rules") or []:
+        thr = float(fr.get("threshold") or 0.85)
+        if thr < 0.88:
+            severity_score += 1
+            findings.append(
+                {
+                    "severity": "info",
+                    "title": f"Fuzzy rule '{fr.get('id')}' has a permissive threshold ({thr})",
+                    "detail": "Thresholds below 0.88 can introduce false-positive merges on short names; raising to 0.90 improves precision.",
+                    "metric": f"threshold={thr}",
+                    "patch": {
+                        "action": "raise_fuzzy_threshold",
+                        "label": f"Raise '{fr.get('id')}' threshold to 0.90",
+                        "target": str(fr.get("id") or ""),
+                        "value": 0.90,
+                    },
+                }
+            )
+
+    health = (
+        "over_merged_risk"
+        if severity_score >= 3
+        else ("needs_tuning" if findings else "healthy")
+    )
+    headline = (
+        f"Dry run looks healthy: {telemetry['total_entities']:,} entities resolved into "
+        f"{telemetry['total_clusters']:,} clusters (max size {telemetry['max_cluster_size']:,}, "
+        f"{telemetry['singleton_pct']}% singletons)."
+        if not findings
+        else f"Found {len(findings)} tuning opportunity(ies) across {telemetry['total_entities']:,} entities "
+        f"and {telemetry['total_clusters']:,} proposed clusters."
+    )
+
+    provider_used = "deterministic"
+    model_used = "graph_analyzer"
+    if client.config.is_enabled:
+        try:
+            prompt_payload = {
+                "health": health,
+                "telemetry": {
+                    "total_entities": telemetry["total_entities"],
+                    "total_clusters": telemetry["total_clusters"],
+                    "singleton_pct": telemetry["singleton_pct"],
+                    "max_cluster_size": telemetry["max_cluster_size"],
+                    "size_buckets": telemetry["size_buckets"],
+                    "edges_by_type": telemetry["edges_by_type"],
+                    "zero_edge_rules": telemetry["zero_edge_rules"],
+                    "skipped_supernodes": telemetry["skipped_supernodes"],
+                    "top_singleton_sources": telemetry["source_singletons"][:6],
+                },
+                "findings_count": len(findings),
+                "finding_titles": [f["title"] for f in findings[:6]],
+            }
+            llm_summary = client.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an Identity Resolution expert reviewing zero-PII Dry Run graph telemetry. "
+                            "Write a crisp 1-2 sentence executive diagnosis summarizing graph health and the #1 recommended action. "
+                            "Cite exact numbers from the telemetry. Plain text only."
+                        ),
+                    },
+                    {"role": "user", "content": json.dumps(prompt_payload, indent=2)},
+                ],
+                temperature=0.1,
+            ).strip()
+            if llm_summary:
+                headline = llm_summary
+                provider_used = client.config.provider
+                model_used = client.config.resolved_model()
+        except Exception:
+            pass
+
+    return _sanitize_json(
+        {
+            "health": health,
+            "headline": headline,
+            "provider": provider_used,
+            "model": model_used,
+            "pii_masked": True,
+            "telemetry": telemetry,
+            "findings": findings,
+        }
+    )
+
+
 def get_run_runtime_trend(adapter: Any, days: int = 14) -> Dict[str, Any]:
     """Summarize recent IDR run durations, today's runs, and stage-level timing breakdown."""
     runs: List[Dict[str, Any]] = []
