@@ -1108,6 +1108,8 @@ class IDRDataProfiler:
         hashed_sets: Dict[Tuple[str, str, str], Set[str]] = {}
         # Ephemeral generic join-key hash sets (includes entity_keys & unlabeled ID-like columns)
         join_hashed_sets: Dict[Tuple[str, str], Set[str]] = {}
+        # Ephemeral set of (table_fqn, col_name) columns proven to bridge multiple distinct people/anchors
+        dimension_fk_cols: Set[Tuple[str, str]] = set()
         # Ephemeral categorical attribute hash sets for zero-PII homonym collision detection
         attr_hashed_sets: Dict[str, Dict[str, Set[str]]] = {}
 
@@ -1118,6 +1120,7 @@ class IDRDataProfiler:
                 SafeTableProfile,
                 Dict[Tuple[str, str, str], Set[str]],
                 Dict[Tuple[str, str], Set[str]],
+                Set[Tuple[str, str]],
                 Dict[str, Set[str]],
             ]
         ]:
@@ -1212,6 +1215,45 @@ class IDRDataProfiler:
             if row_count > len(sample_rows):
                 self._pushdown_full_table_stats(fqn, safe_cols, row_count, dialect)
 
+            # Domain-agnostic Bipartite Cross-Anchor Fanout Test:
+            # If this table has a direct identity anchor (e.g., email, phone, customer_id),
+            # any other non-PK column whose single value co-occurs with many distinct anchors
+            # (e.g., product_id, store_id, facility_id, merchant_id) is a shared dimension FK,
+            # NOT a person/entity identity key.
+            local_dimension_fks: Set[Tuple[str, str]] = set()
+            anchor_cols = [
+                c.name.lower()
+                for c in safe_cols
+                if c.hint_role == "identifier"
+                and c.hint_identifier_type in ("email", "phone", "customer_id", "email_hash", "phone_hash")
+            ]
+            if anchor_cols and sample_rows:
+                anchor_col = anchor_cols[0]
+                for (_, cand_col) in list(local_join_hashes.keys()):
+                    if cand_col == anchor_col or cand_col == (hint_ek or "").lower():
+                        continue
+                    key_to_anchors: Dict[str, Set[str]] = {}
+                    for r in sample_rows:
+                        if not isinstance(r, dict):
+                            continue
+                        kv = r.get(cand_col)
+                        av = r.get(anchor_col)
+                        if kv is None or av is None:
+                            continue
+                        ks = str(kv).strip().lower()
+                        ans = str(av).strip().lower()
+                        if not ks or not ans or ks in ("null", "none") or ans in ("null", "none"):
+                            continue
+                        kh = hashlib.sha256(ks.encode("utf-8")).hexdigest()[:12]
+                        ah = hashlib.sha256(ans.encode("utf-8")).hexdigest()[:12]
+                        key_to_anchors.setdefault(kh, set()).add(ah)
+                    if key_to_anchors:
+                        counts = [len(s) for s in key_to_anchors.values()]
+                        max_anchors = max(counts)
+                        avg_anchors = sum(counts) / len(counts)
+                        if max_anchors >= 5 or (max_anchors >= 3 and avg_anchors >= 2.0):
+                            local_dimension_fks.add((fqn, cand_col))
+
             tbl_desc = None
             if hasattr(self.adapter, "get_table_description"):
                 try:
@@ -1236,6 +1278,7 @@ class IDRDataProfiler:
                 ),
                 local_hashes,
                 local_join_hashes,
+                local_dimension_fks,
                 local_attr_hashes,
             )
 
@@ -1251,10 +1294,11 @@ class IDRDataProfiler:
         for res in results:
             if res is None:
                 continue
-            tprof, local_hashes, local_join_hashes, local_attr_hashes = res
+            tprof, local_hashes, local_join_hashes, local_dimension_fks, local_attr_hashes = res
             safe_tables.append(tprof)
             hashed_sets.update(local_hashes)
             join_hashed_sets.update(local_join_hashes)
+            dimension_fk_cols.update(local_dimension_fks)
             for col_l, hset in local_attr_hashes.items():
                 attr_hashed_sets.setdefault(col_l, {})[tprof.table_fqn] = hset
 
@@ -1302,6 +1346,8 @@ class IDRDataProfiler:
                 (tp.table_fqn, c.name.lower()): c for tp in safe_tables for c in tp.columns
             }
             tbl_lookup: Dict[str, SafeTableProfile] = {tp.table_fqn: tp for tp in safe_tables}
+            # Snapshot tables that already have direct identity anchors before PK->FK promotion
+            anchored_tables: Set[str] = {tp.table_fqn for tp in safe_tables if tp.has_candidate_identifiers}
             join_items = list(join_hashed_sets.items())
             for i in range(len(join_items)):
                 (tbl_a, col_a), set_a = join_items[i]
@@ -1320,6 +1366,11 @@ class IDRDataProfiler:
                     if sp_b is None:
                         continue
 
+                    # Guard 1: Bipartite Cross-Anchor Fanout Test (blocks shared dimension FKs
+                    # like product_id, facility_id, merchant_id that bridge multiple distinct people)
+                    if (tbl_a, col_a) in dimension_fk_cols or (tbl_b, col_b) in dimension_fk_cols:
+                        continue
+
                     shared = len(set_a & set_b)
                     if shared < 2:
                         continue
@@ -1328,6 +1379,16 @@ class IDRDataProfiler:
                     max_ov = max(ov_a, ov_b)
 
                     is_pk_pair = sp_a.hint_role == "entity_key" or sp_b.hint_role == "entity_key"
+                    # Guard 2: Unanchored Dimension PK Guard — if a PK table has zero direct
+                    # identity anchors AND the FK side has high fanout (many rows per key),
+                    # it is a catalog/reference table (e.g. products, stores, facilities), not a person entity.
+                    if is_pk_pair and anchored_tables:
+                        if sp_a.hint_role == "entity_key" and tbl_a not in anchored_tables:
+                            if sp_b.max_frequency_count >= 5 and sp_b.uniqueness_ratio < 0.5:
+                                continue
+                        if sp_b.hint_role == "entity_key" and tbl_b not in anchored_tables:
+                            if sp_a.max_frequency_count >= 5 and sp_a.uniqueness_ratio < 0.5:
+                                continue
                     same_name = col_a == col_b
                     key_like = any(col_a.endswith(sfx) for sfx in _KEY_LIKE_SUFFIXES) or any(
                         col_b.endswith(sfx) for sfx in _KEY_LIKE_SUFFIXES

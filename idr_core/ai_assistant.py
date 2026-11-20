@@ -461,6 +461,7 @@ def collect_dry_run_telemetry(
         "size_buckets": {"1": 0, "2_5": 0, "6_20": 0, "21_100": 0, "100_plus": 0},
         "edges_by_type": {},
         "zero_edge_rules": [],
+        "mega_cluster_culprits": [],
         "source_singletons": [],
         "skipped_supernodes": [],
         "warnings": list(warnings or []),
@@ -494,7 +495,10 @@ def collect_dry_run_telemetry(
                 telemetry["total_clusters"] = tc
                 telemetry["total_entities"] = te
                 telemetry["singletons"] = b1
-                telemetry["singleton_pct"] = round((b1 / tc) * 100.0, 1) if tc > 0 else 0.0
+                raw_pct = (b1 / tc) * 100.0 if tc > 0 else 0.0
+                telemetry["singleton_pct"] = (
+                    99.9 if (0 < b1 < tc and round(raw_pct, 1) >= 100.0) else round(raw_pct, 1)
+                )
                 telemetry["max_cluster_size"] = int(r.get("max_sz") or 0)
                 telemetry["size_buckets"] = {
                     "1": b1,
@@ -551,6 +555,34 @@ def collect_dry_run_telemetry(
                 erl = {k.lower(): v for k, v in er.items()} if isinstance(er, dict) else {}
                 if erl.get("id_type"):
                     telemetry["edges_by_type"][str(erl["id_type"])] = int(erl.get("cnt") or 0)
+
+            # Pinpoint which identifier_type(s) drive edges inside any mega-cluster (>100 entities)
+            if telemetry["max_cluster_size"] > 100 and adapter.table_exists("idr_work.lp_labels"):
+                crows = adapter.query("""
+                    WITH mega_clusters AS (
+                        SELECT label FROM idr_work.lp_labels GROUP BY label HAVING COUNT(*) > 100
+                    ),
+                    mega_entities AS (
+                        SELECT l.entity_key
+                        FROM idr_work.lp_labels l
+                        JOIN mega_clusters mc ON l.label = mc.label
+                    )
+                    SELECT LOWER(e.identifier_type) AS id_type, COUNT(*) AS edge_cnt
+                    FROM idr_work.edges_new e
+                    JOIN mega_entities m ON e.left_entity_key = m.entity_key
+                    GROUP BY 1
+                    ORDER BY 2 DESC
+                    LIMIT 5
+                """)
+                for cr in crows or []:
+                    crl = {k.lower(): v for k, v in cr.items()} if isinstance(cr, dict) else {}
+                    if crl.get("id_type"):
+                        telemetry["mega_cluster_culprits"].append(
+                            {
+                                "identifier_type": str(crl["id_type"]),
+                                "edge_count": int(crl.get("edge_cnt") or 0),
+                            }
+                        )
     except Exception:
         pass
 
@@ -615,25 +647,52 @@ def critique_dry_run_with_ai(
     mega_cnt = telemetry["size_buckets"].get("100_plus", 0)
     if mega_cnt > 0 or telemetry["max_cluster_size"] > 100:
         severity_score += 3
+        culprits = telemetry.get("mega_cluster_culprits") or []
+        top_culprit = culprits[0] if culprits else None
+        culprit_summary = (
+            " Top connecting identifier(s): "
+            + ", ".join(f"'{c['identifier_type']}' ({c['edge_count']:,} edges)" for c in culprits[:3])
+            + "."
+            if culprits
+            else ""
+        )
+        # Prefer a direct one-click patch to remove the top culprit rule if it's in draft_config
+        configured_rule_types = {
+            str(mk).strip().lower()
+            for r in (draft_config.get("rules") or [])
+            for mk in (r.get("match_keys") or ([r["match_key"]] if r.get("match_key") else []))
+        }
+        mega_patch = None
+        if top_culprit and top_culprit["identifier_type"] in configured_rule_types:
+            cid = top_culprit["identifier_type"]
+            mega_patch = {
+                "action": "remove_rule",
+                "label": f"Remove '{cid}' rule from draft",
+                "target": cid,
+                "value": cid,
+            }
+        elif not draft_config.get("use_default_exclusions"):
+            mega_patch = {
+                "action": "enable_default_exclusions",
+                "label": "Enable Default Placeholder Exclusions",
+                "target": "use_default_exclusions",
+                "value": True,
+            }
         findings.append(
             {
                 "severity": "high",
                 "title": f"Large cluster risk detected (max size {telemetry['max_cluster_size']:,})",
                 "detail": (
                     f"{mega_cnt} cluster(s) exceed 100 entities. This typically indicates a shared/placeholder "
-                    f"identifier or a high-volume event table inflating clusters."
+                    f"identifier, a non-person dimension key (e.g. product/store ID), or a high-volume event table inflating clusters."
+                    f"{culprit_summary}"
                 ),
-                "metric": f"max_cluster={telemetry['max_cluster_size']:,}",
-                "patch": (
-                    {
-                        "action": "enable_default_exclusions",
-                        "label": "Enable Default Placeholder Exclusions",
-                        "target": "use_default_exclusions",
-                        "value": True,
-                    }
-                    if not draft_config.get("use_default_exclusions")
-                    else None
+                "metric": (
+                    f"max_cluster={telemetry['max_cluster_size']:,} · culprit={top_culprit['identifier_type']}"
+                    if top_culprit
+                    else f"max_cluster={telemetry['max_cluster_size']:,}"
                 ),
+                "patch": mega_patch,
             }
         )
 
@@ -755,6 +814,7 @@ def critique_dry_run_with_ai(
                     "max_cluster_size": telemetry["max_cluster_size"],
                     "size_buckets": telemetry["size_buckets"],
                     "edges_by_type": telemetry["edges_by_type"],
+                    "mega_cluster_culprits": telemetry["mega_cluster_culprits"],
                     "zero_edge_rules": telemetry["zero_edge_rules"],
                     "skipped_supernodes": telemetry["skipped_supernodes"],
                     "top_singleton_sources": telemetry["source_singletons"][:6],

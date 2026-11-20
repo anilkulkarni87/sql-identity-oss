@@ -553,5 +553,96 @@ def test_phase3_dry_run_critique_telemetry_and_patches(adapter):
     assert "raise_fuzzy_threshold" in actions
 
 
+def test_critique_pinpoints_mega_cluster_culprit_and_caps_singleton_pct(adapter):
+    """
+    Verify mega-cluster culprit detection & singleton_pct rounding fix:
+    - When 120 unrelated rows merge via a shared dimension key ('product_id') alongside 1,500 singletons,
+      singleton_pct is capped at 99.9% (never falsely 100.0%).
+    - The HIGH mega-cluster finding pinpoints 'product_id' and offers a 1-click remove_rule patch.
+    """
+    from idr_core.ai_assistant import critique_dry_run_with_ai
+
+    adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    adapter.execute("CREATE TABLE raw.orders (id VARCHAR, product_id VARCHAR)")
+    # 120 rows sharing the same product_id -> 1 mega-cluster of 120, plus 1500 distinct singletons -> 1500/1501 = 99.93%
+    vals = [f"('m{i}', 'PROD_POPULAR')" for i in range(120)] + [
+        f"('s{i}', 'UNIQUE_{i}')" for i in range(1500)
+    ]
+    adapter.execute(f"INSERT INTO raw.orders VALUES {', '.join(vals)}")
+
+    cfg = {
+        "use_default_exclusions": True,
+        "sources": [
+            {
+                "id": "orders",
+                "table": "raw.orders",
+                "entity_key": "id",
+                "identifiers": [{"type": "product_id", "expr": "product_id"}],
+            }
+        ],
+        "rules": [{"id": "r_prod", "match_keys": ["product_id"], "canonicalize": "EXACT"}],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        adapter.execute(stmt)
+
+    dry_res = IDRRunner(adapter).run(RunConfig(run_mode="FULL", dry_run=True))
+    assert dry_res.status == "DRY_RUN_COMPLETE"
+
+    critique = critique_dry_run_with_ai(adapter=adapter, draft_config=cfg, dry_run_summary={})
+    assert critique["health"] == "over_merged_risk"
+    assert critique["telemetry"]["singleton_pct"] == 99.9
+    assert critique["telemetry"]["mega_cluster_culprits"][0]["identifier_type"] == "product_id"
+    high_finding = next(f for f in critique["findings"] if f["severity"] == "high")
+    assert "product_id" in high_finding["detail"]
+    assert high_finding["patch"]["action"] == "remove_rule"
+    assert high_finding["patch"]["target"] == "product_id"
+
+
+def test_dimension_fk_guard_blocks_product_and_facility_keys_generically(adapter):
+    """
+    Verify domain-agnostic dimension FK guards (zero hardcoded names):
+    - E-commerce: products.product_id <-> reviews.product_id is NOT promoted because one product_id
+      co-occurs with many distinct customers (bipartite fanout) AND products has no identity anchor.
+    - Healthcare: facilities.facility_id <-> visits.facility_id is NOT promoted for the exact same
+      structural reason, while visits.email / customers.customer_id still promote cleanly.
+    """
+    from idr_core.profiler import IDRDataProfiler
+
+    adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    adapter.execute("CREATE TABLE raw.products (product_id VARCHAR, title VARCHAR)")
+    adapter.execute("CREATE TABLE raw.reviews (review_id VARCHAR, email VARCHAR, product_id VARCHAR)")
+    adapter.execute("CREATE TABLE raw.facilities (facility_id VARCHAR, facility_name VARCHAR)")
+    adapter.execute("CREATE TABLE raw.visits (visit_id VARCHAR, email VARCHAR, facility_id VARCHAR)")
+
+    adapter.execute("INSERT INTO raw.products VALUES ('P1', 'Shoe'), ('P2', 'Hat'), ('P3', 'Coat')")
+    adapter.execute("INSERT INTO raw.facilities VALUES ('H1', 'General'), ('H2', 'Mercy'), ('H3', 'Metro')")
+
+    # 18 distinct customers reviewing just 3 products -> 6 distinct emails per product_id
+    rev_rows = [f"('R{i}', 'cust{i}@shop.io', 'P{(i % 3) + 1}')" for i in range(18)]
+    vis_rows = [f"('V{i}', 'pat{i}@clinic.org', 'H{(i % 3) + 1}')" for i in range(18)]
+    adapter.execute(f"INSERT INTO raw.reviews VALUES {', '.join(rev_rows)}")
+    adapter.execute(f"INSERT INTO raw.visits VALUES {', '.join(vis_rows)}")
+
+    prof = IDRDataProfiler(adapter).profile_tables_safe(
+        ["raw.products", "raw.reviews", "raw.facilities", "raw.visits"]
+    )
+    tmap = prof.table_map()
+
+    # Neither product_id nor facility_id was promoted as an identity key!
+    prod_col = {c.name: c for c in tmap["raw.products"].columns}["product_id"]
+    rev_prod_col = {c.name: c for c in tmap["raw.reviews"].columns}["product_id"]
+    fac_col = {c.name: c for c in tmap["raw.facilities"].columns}["facility_id"]
+    vis_fac_col = {c.name: c for c in tmap["raw.visits"].columns}["facility_id"]
+
+    assert prod_col.hint_identifier_type is None
+    assert rev_prod_col.hint_identifier_type is None
+    assert fac_col.hint_identifier_type is None
+    assert vis_fac_col.hint_identifier_type is None
+    assert tmap["raw.products"].table_role == "REFERENCE_LOOKUP"
+    assert tmap["raw.facilities"].table_role == "REFERENCE_LOOKUP"
+
+
+
+
 
 
