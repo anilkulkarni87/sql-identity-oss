@@ -210,7 +210,7 @@ class BigQueryAdapter(IDRAdapter):
             return False
 
     def get_table_columns(self, table_fqn: str) -> List[Dict[str, str]]:
-        """Get column names for a table (lowercase)."""
+        """Get column names, types, and optional catalog descriptions for a table (lowercase)."""
         parts = table_fqn.replace("`", "").split(".")
         if len(parts) == 2:
             # Handle schema alias if present
@@ -223,9 +223,27 @@ class BigQueryAdapter(IDRAdapter):
             table = self.client.get_table(table_ref)
             if not table or not table.schema:
                 return []
-            return [{"name": field.name.lower(), "type": field.field_type} for field in table.schema]
+            tbl_desc = getattr(table, "description", None)
+            if isinstance(tbl_desc, str) and tbl_desc.strip():
+                cache = getattr(self, "_table_descriptions", None)
+                if cache is None:
+                    cache = {}
+                    self._table_descriptions = cache
+                cache[table_fqn] = tbl_desc.strip()[:240]
+            cols: List[Dict[str, str]] = []
+            for field in table.schema:
+                entry: Dict[str, str] = {"name": field.name.lower(), "type": field.field_type}
+                f_desc = getattr(field, "description", None)
+                if isinstance(f_desc, str) and f_desc.strip():
+                    entry["description"] = f_desc.strip()[:200]
+                cols.append(entry)
+            return cols
         except Exception:
             return []
+
+    def get_table_description(self, table_fqn: str) -> Optional[str]:
+        """Return cached table-level description when present in BigQuery metadata."""
+        return getattr(self, "_table_descriptions", {}).get(table_fqn)
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
         """List tables in a dataset, or all datasets if schema is None."""

@@ -177,27 +177,24 @@ class DatabricksAdapter(IDRAdapter):
             return False
 
     def get_table_columns(self, table_fqn: str) -> List[Dict[str, str]]:
-        """Get column names for a table (lowercase)."""
+        """Get column names, types, and optional Unity Catalog comments for a table (lowercase)."""
         # DESCRIBE returns col_name (0), data_type (1), comment (2)
         table_fqn = self._rewrite_table_fqn(table_fqn)
         if self.is_spark:
             result = self.conn_obj.sql(f"DESCRIBE TABLE {table_fqn}").collect()
-            columns = []
-            for row in result:
-                col_name = row[0]
-                if col_name and not col_name.startswith("#"):
-                    columns.append({"name": col_name.lower(), "type": row[1]})
-            return columns
         else:
             with self.conn_obj.cursor() as cur:
                 cur.execute(f"DESCRIBE TABLE {table_fqn}")
                 result = cur.fetchall()
-                columns = []
-                for row in result:
-                    col_name = row[0]
-                    if col_name and not col_name.startswith("#"):
-                        columns.append({"name": col_name.lower(), "type": row[1]})
-                return columns
+        columns: List[Dict[str, str]] = []
+        for row in result:
+            col_name = row[0]
+            if col_name and not col_name.startswith("#"):
+                entry: Dict[str, str] = {"name": col_name.lower(), "type": row[1]}
+                if len(row) > 2 and isinstance(row[2], str) and row[2].strip():
+                    entry["description"] = row[2].strip()[:200]
+                columns.append(entry)
+        return columns
 
     def list_schemas(self) -> List[str]:
         """List available schemas/databases in the active catalog."""

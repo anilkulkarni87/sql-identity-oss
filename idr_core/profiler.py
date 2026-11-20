@@ -81,6 +81,8 @@ class SafeColumnProfile:
 
     name: str
     declared_type: str = ""
+    description: Optional[str] = None
+    is_declared_pk: bool = False
     sample_count: int = 0
     non_null_count: int = 0
     null_rate: float = 1.0
@@ -109,12 +111,15 @@ class SafeColumnProfile:
     def to_compact_dict(self, verbose: bool = True) -> Dict[str, Any]:
         """Serialize to a token-efficient dict for LLM prompts (zero raw PII)."""
         if not verbose:
-            return {
+            out_min: Dict[str, Any] = {
                 "name": self.name,
                 "type": self.declared_type,
                 "null_rate": round(self.null_rate, 3),
                 "hint_role": self.hint_role,
             }
+            if self.description:
+                out_min["description"] = self.description[:160]
+            return out_min
         out: Dict[str, Any] = {
             "name": self.name,
             "type": self.declared_type,
@@ -124,6 +129,10 @@ class SafeColumnProfile:
             "top1_share_pct": round(self.top1_share_pct, 3),
             "hint_role": self.hint_role,
         }
+        if self.description:
+            out["description"] = self.description[:160]
+        if self.is_declared_pk:
+            out["declared_pk"] = True
         if self.hint_identifier_type:
             out["hint_identifier_type"] = self.hint_identifier_type
         if self.hint_canonicalizer:
@@ -158,6 +167,7 @@ class SafeTableProfile:
     """Zero-PII statistical profile of a warehouse table."""
 
     table_fqn: str
+    description: Optional[str] = None
     row_count: int = 0
     sample_rows_analyzed: int = 0
     columns: List[SafeColumnProfile] = field(default_factory=list)
@@ -181,7 +191,7 @@ class SafeTableProfile:
                 key_cols.append(col.to_compact_dict(verbose=True))
             else:
                 passive_cols.append(col.to_compact_dict(verbose=False))
-        return {
+        out: Dict[str, Any] = {
             "table": self.table_fqn,
             "row_count": self.row_count,
             "sample_rows": self.sample_rows_analyzed,
@@ -196,6 +206,9 @@ class SafeTableProfile:
                 else {}
             ),
         }
+        if self.description:
+            out["description"] = self.description[:240]
+        return out
 
 
 @dataclass
@@ -257,9 +270,17 @@ def is_system_table(table_name: str) -> bool:
 class ColumnProfile:
     """Statistical summary of a single column computed from a live sample."""
 
-    def __init__(self, name: str, declared_type: str = ""):
+    def __init__(
+        self,
+        name: str,
+        declared_type: str = "",
+        description: Optional[str] = None,
+        is_declared_pk: bool = False,
+    ):
         self.name = name.lower()
         self.declared_type = declared_type.lower()
+        self.description = description.strip()[:200] if isinstance(description, str) and description.strip() else None
+        self.is_declared_pk = bool(is_declared_pk)
         self.sample_count: int = 0
         self.non_null_count: int = 0
         self.distinct_count: int = 0
@@ -344,7 +365,9 @@ class IDRDataProfiler:
         for col_info in columns:
             col_name = col_info["name"].lower()
             col_type = col_info.get("type", "").lower()
-            prof = ColumnProfile(col_name, col_type)
+            col_desc = col_info.get("description") or col_info.get("comment")
+            col_is_pk = bool(col_info.get("is_pk"))
+            prof = ColumnProfile(col_name, col_type, description=col_desc, is_declared_pk=col_is_pk)
             prof.sample_count = sample_count
 
             if sample_count == 0:
@@ -387,6 +410,9 @@ class IDRDataProfiler:
             def _score_pk(p: ColumnProfile) -> int:
                 score = int(p.uniqueness_ratio * 100)
                 name = p.name
+                desc_l = (p.description or "").lower()
+                if p.is_declared_pk or any(k in desc_l for k in ("primary key", "unique row", "row identifier")):
+                    score += 250
                 # If name matches singular table name + "_id" (e.g. customer_id in customers)
                 table_clean = table_name_short.rstrip("s")
                 if name == f"{table_clean}_id" or name == f"{table_name_short}_id":
@@ -433,6 +459,22 @@ class IDRDataProfiler:
 
         # Temporal columns are never identifiers
         if prof.is_temporal:
+            return None, 0.0
+
+        # Opportunistic catalog description guardrails (zero penalty when description is absent)
+        desc_l = (prof.description or "").lower()
+        if desc_l and any(
+            bad in desc_l
+            for bad in (
+                "deprecated",
+                "do not use",
+                "internal test",
+                "sales rep",
+                "account executive",
+                "agent email",
+                "employee email",
+            )
+        ):
             return None, 0.0
 
         # Numeric metric columns are never identifiers (price, cost, amount, quantity, rating, etc.)
@@ -742,6 +784,8 @@ class IDRDataProfiler:
         sp = SafeColumnProfile(
             name=col_prof.name,
             declared_type=col_prof.declared_type,
+            description=col_prof.description,
+            is_declared_pk=col_prof.is_declared_pk,
             sample_count=col_prof.sample_count,
             non_null_count=col_prof.non_null_count,
             null_rate=round(col_prof.null_ratio, 4),
@@ -930,9 +974,19 @@ class IDRDataProfiler:
                             has_dup_keys = True
                         seen_k.add(hv)
 
+            tbl_desc = None
+            if hasattr(self.adapter, "get_table_description"):
+                try:
+                    raw_td = self.adapter.get_table_description(fqn)
+                    if isinstance(raw_td, str) and raw_td.strip():
+                        tbl_desc = raw_td.strip()[:240]
+                except Exception:
+                    tbl_desc = None
+
             return (
                 SafeTableProfile(
                     table_fqn=fqn,
+                    description=tbl_desc,
                     row_count=row_count,
                     sample_rows_analyzed=len(sample_rows),
                     columns=safe_cols,

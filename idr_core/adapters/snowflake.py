@@ -126,19 +126,26 @@ class SnowflakeAdapter(IDRAdapter):
         except Exception:
             return False
 
-    def get_table_columns(self, table_fqn: str) -> List[Dict[str, str]]:
-        """Get column names for a table (lowercase)."""
-        # DESCRIBE returns: name, type, kind, null?, default, primary key, unique key, check, expression, comment
-        # We need name (0) and type (1)
+    def get_table_columns(self, table_fqn: str) -> List[Dict[str, Any]]:
+        """Get column names, types, and optional PK/comment metadata for a table (lowercase)."""
+        # DESCRIBE returns: name (0), type (1), kind (2), null? (3), default (4),
+        # primary key (5), unique key (6), check (7), expression (8), comment (9)
         table_fqn = self._rewrite_table_fqn(table_fqn)
         if self.is_snowpark:
             result = self.conn_obj.sql(f"DESCRIBE TABLE {table_fqn}").collect()
-            return [{"name": row[0].lower(), "type": row[1]} for row in result]
         else:
             with self.conn_obj.cursor() as cur:
                 cur.execute(f"DESCRIBE TABLE {table_fqn}")
                 result = cur.fetchall()
-                return [{"name": row[0].lower(), "type": row[1]} for row in result]
+        cols: List[Dict[str, Any]] = []
+        for row in result:
+            entry: Dict[str, Any] = {"name": row[0].lower(), "type": row[1]}
+            if len(row) > 5 and isinstance(row[5], str) and row[5].strip().upper() == "Y":
+                entry["is_pk"] = True
+            if len(row) > 9 and isinstance(row[9], str) and row[9].strip():
+                entry["description"] = row[9].strip()[:200]
+            cols.append(entry)
+        return cols
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
         """List tables in a schema (case-insensitive, supports optional db.schema)."""

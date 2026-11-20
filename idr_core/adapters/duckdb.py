@@ -97,13 +97,19 @@ class DuckDBAdapter(IDRAdapter):
             except Exception:
                 return False
 
-    def get_table_columns(self, table_fqn: str) -> List[Dict[str, str]]:
-        """Get column names for a table (lowercase)."""
-        # DESCRIBE returns: column_name, column_type, null, key, default, extra
+    def get_table_columns(self, table_fqn: str) -> List[Dict[str, Any]]:
+        """Get column names, types, and optional PK metadata for a table (lowercase)."""
+        # DESCRIBE returns: column_name (0), column_type (1), null (2), key (3), default (4), extra (5)
         table_fqn = self._rewrite_table_fqn(table_fqn)
         with self._lock:
             result = self.conn.execute(f"DESCRIBE {table_fqn}").fetchall()
-            return [{"name": row[0].lower(), "type": row[1]} for row in result]
+            cols: List[Dict[str, Any]] = []
+            for row in result:
+                entry: Dict[str, Any] = {"name": row[0].lower(), "type": row[1]}
+                if len(row) > 3 and isinstance(row[3], str) and "PRI" in row[3].upper():
+                    entry["is_pk"] = True
+                cols.append(entry)
+            return cols
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
         """List tables in a schema."""
