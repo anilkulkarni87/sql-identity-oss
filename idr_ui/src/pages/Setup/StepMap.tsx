@@ -583,10 +583,15 @@ export default function StepMap({
                                     }
                                 }}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs font-medium transition-colors"
-                                title="Use configured Local AI (Ollama) / LLM to suggest mappings, rules, survivorship, and lenses from schema metadata"
+                                title="Profiles selected tables with zero PII, discovers cross-table join keys & table roles, and drafts mappings, rules, survivorship, and lenses"
                             >
                                 {aiSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
                                 {aiSuggesting ? 'AI Suggesting...' : 'AI Suggest Config'}
+                                {!aiSuggesting && (
+                                    <span className="px-1.5 py-0.2 rounded bg-white/20 text-[10px] font-semibold uppercase tracking-wide">
+                                        Beta
+                                    </span>
+                                )}
                             </button>
                         </>
                     )}
@@ -607,10 +612,21 @@ export default function StepMap({
             </div>
 
             {tables.length > 0 && (
-                <div className="bg-subtle border border-line-default rounded-md px-3 py-2 space-y-2">
+                <div className="bg-subtle border border-line-default rounded-md px-3 py-2.5 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-muted">
+                        <span className="inline-flex items-center gap-1.5">
+                            <Bot className="w-3.5 h-3.5 text-accent shrink-0" />
+                            <strong className="text-ink-primary font-semibold">AI-Assisted Configuration</strong>
+                            <span className="px-1.5 py-0.2 rounded bg-accent/15 text-accent border border-accent/30 text-[10px] font-semibold uppercase">
+                                Beta
+                            </span>
+                            <span className="hidden md:inline">
+                                — Profiles column shapes &amp; cross-table overlaps (zero raw PII sent), detects table roles, and drafts mappings, rules, survivorship &amp; lenses for review.
+                            </span>
+                        </span>
+                    </div>
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                        <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-                            <Bot className="w-3.5 h-3.5" />
+                        <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0">
                             AI Goal (Optional)
                         </span>
                         <input

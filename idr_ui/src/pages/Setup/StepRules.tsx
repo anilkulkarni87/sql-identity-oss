@@ -543,6 +543,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                             type="button"
                             disabled={aiGenerating}
                             onClick={handleAiGenerateRules}
+                            title="Profiles your mapped tables (zero PII) and drafts deterministic rules, fuzzy rules, and multi-lens views"
                             className="btn-secondary text-xs shrink-0"
                         >
                             {aiGenerating ? (
@@ -554,6 +555,9 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                 <>
                                     <Bot className="w-3.5 h-3.5 text-accent" />
                                     AI Suggest Rules
+                                    <span className="px-1.5 py-0.2 rounded bg-accent/15 text-accent border border-accent/30 text-[10px] font-semibold uppercase">
+                                        Beta
+                                    </span>
                                 </>
                             )}
                         </button>

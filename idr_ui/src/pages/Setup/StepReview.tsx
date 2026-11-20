@@ -754,6 +754,7 @@ export default function StepReview({
                                             type="button"
                                             disabled={critiqueLoading}
                                             onClick={handleCritiqueDryRun}
+                                            title="Inspects zero-PII Dry Run graph metrics (cluster sizes, singletons, zero-edge rules, supernodes) and suggests one-click draft fixes"
                                             className={`${btnOutlineClass} border-purple-500/60 text-purple-300 hover:bg-purple-950/40`}
                                         >
                                             {critiqueLoading ? (
@@ -762,6 +763,11 @@ export default function StepReview({
                                                 <Sparkles className="w-4 h-4 mr-1.5" />
                                             )}
                                             {critiqueLoading ? 'Analyzing Graph…' : 'Analyze & Refine with AI'}
+                                            {!critiqueLoading && (
+                                                <span className="ml-1.5 px-1.5 py-0.2 rounded bg-purple-500/20 border border-purple-500/40 text-[10px] font-semibold uppercase tracking-wide">
+                                                    Beta
+                                                </span>
+                                            )}
                                         </button>
                                         <button
                                             className={btnClass}
@@ -805,12 +811,20 @@ export default function StepReview({
                                     </div>
 
                                     {/* AI Dry-Run Graph Critique Scorecard & One-Click Patches */}
+                                    {!critiqueReport && !critiqueLoading && (
+                                        <p className="text-[11px] text-gray-400">
+                                            <strong className="text-purple-300">Analyze &amp; Refine with AI (Beta)</strong> inspects aggregate Dry Run graph metrics (cluster sizes, singletons, zero-edge rules &amp; supernodes — zero raw PII) and recommends one-click draft fixes before you commit.
+                                        </p>
+                                    )}
                                     {critiqueReport && (
                                         <div className="mt-3 p-4 rounded-xl bg-gray-900/80 border border-purple-500/40 space-y-3 text-xs">
                                             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-2.5">
                                                 <div className="flex items-center gap-2">
                                                     <Bot className="w-4 h-4 text-purple-400" />
                                                     <span className="font-semibold text-white">AI Graph Critique</span>
+                                                    <span className="px-1.5 py-0.2 rounded bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[10px] font-semibold uppercase">
+                                                        Beta
+                                                    </span>
                                                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase border ${
                                                         critiqueReport.health === 'healthy'
                                                             ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40'
