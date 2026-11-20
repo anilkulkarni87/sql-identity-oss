@@ -80,6 +80,11 @@ Examples:
         "--dry-run", action="store_true", help="Preview changes without committing"
     )
     run_parser.add_argument(
+        "--critique",
+        action="store_true",
+        help="Run zero-PII AI Graph Critique after a --dry-run to diagnose mega-clusters, singletons, and unused rules",
+    )
+    run_parser.add_argument(
         "--strict",
         action="store_true",
         help="Deterministic mode: disable fuzzy matching for exact-match-only resolution",
@@ -457,6 +462,23 @@ Examples:
                 "--goal",
                 default="Unify customer records accurately across sources with safe supernode guardrails and practical golden-profile survivorship.",
                 help="Business goal or domain guidance for the AI architect",
+            )
+            p.add_argument(
+                "--grain",
+                choices=["individual", "household", "account"],
+                default="individual",
+                help="Primary resolution grain policy (default: individual)",
+            )
+            p.add_argument(
+                "--event-policy",
+                choices=["bridge", "include", "exclude"],
+                default="bridge",
+                help="How to treat EVENT_FACT tables (bridge=link only without profile attrs, include=full, exclude=skip)",
+            )
+            p.add_argument(
+                "--system-of-record",
+                default="",
+                help="Optional table FQN to prioritize #1 for Survivorship tie-breaking",
             )
             p.add_argument(
                 "--output",
@@ -1038,9 +1060,44 @@ def handle_run(args) -> int:
                 print(f"  Shadow-Kept:     {shadow_kept:,} entities{corr_suffix}")
             if ephemeral_dry_run:
                 print("  Config Mode:     Ephemeral (--dry-run restored prior idr_meta state)")
+        if result.warnings:
+            print(f"  {'-' * 56}")
+            print("  Warnings:")
+            for w in result.warnings:
+                print(f"    ! {w}")
         if result.error:
             print(f"  Error:           {result.error}")
         print(f"{'=' * 60}\n")
+
+        if getattr(args, "critique", False) and args.dry_run and result.status == "DRY_RUN_COMPLETE":
+            from idr_core.ai_assistant import critique_dry_run_with_ai
+            from idr_core.config import sql_to_config
+
+            draft_cfg = config_data if args.config else sql_to_config(adapter)
+            critique = critique_dry_run_with_ai(
+                adapter=adapter,
+                draft_config=draft_cfg,
+                dry_run_summary=dry_summary or {},
+                warnings=result.warnings,
+            )
+            tel = critique.get("telemetry") or {}
+            print(f"{'=' * 60}")
+            print(
+                f"  AI Graph Critique (Beta) — {str(critique.get('health', 'unknown')).upper().replace('_', ' ')}"
+            )
+            print(
+                f"  Provider: {critique.get('provider')}:{critique.get('model')} | "
+                f"Singletons: {tel.get('singleton_pct', 0)}% | Max Cluster: {tel.get('max_cluster_size', 0):,}"
+            )
+            print(f"{'=' * 60}")
+            print(f"  {critique.get('headline', '')}")
+            for f in critique.get("findings") or []:
+                sev = str(f.get("severity", "info")).upper()
+                print(f"\n  [{sev}] {f.get('title')} ({f.get('metric', '')})")
+                print(f"    {f.get('detail')}")
+                if f.get("patch"):
+                    print(f"    -> Suggested fix: {f['patch'].get('label')}")
+            print(f"{'=' * 60}\n")
 
         return 0 if ("SUCCESS" in result.status or result.status == "DRY_RUN_COMPLETE") else 1
 
@@ -1421,17 +1478,40 @@ def handle_ai(args) -> int:
             return 1
 
         print("=" * 72)
-        print("⚡ SQL Identity Resolution — AI Rule & Config Generator (Zero-PII)")
+        print("⚡ SQL Identity Resolution — AI Rule & Config Generator (Zero-PII · Beta)")
         print("=" * 72)
         print(f"Tables ({len(tables)}): {', '.join(tables)}")
         print(f"Model:  {client.config.provider}:{client.config.resolved_model()}")
-        print("Profiling & synthesizing validated IDR configuration...")
+
+        policy_parts = []
+        grain = getattr(args, "grain", "individual")
+        event_policy = getattr(args, "event_policy", "bridge")
+        sor = (getattr(args, "system_of_record", "") or "").strip()
+        if grain == "individual":
+            policy_parts.append("Primary resolution grain: Strict Individual.")
+        elif grain == "household":
+            policy_parts.append("Primary resolution grain: Household (include shared phone/address identifiers).")
+        else:
+            policy_parts.append("Primary resolution grain: B2B Account / Organization.")
+        if event_policy == "bridge":
+            policy_parts.append("Event/fact tables: link for bridging only without mapping transactional attributes.")
+        elif event_policy == "exclude":
+            policy_parts.append("Event/fact tables: set include_in_idr=false for high-volume event/telemetry tables.")
+        else:
+            policy_parts.append("Event/fact tables: include fully in IDR.")
+        if sor:
+            policy_parts.append(f"System of Record for Survivorship source_priority #1: {sor}.")
+        full_goal = f"{getattr(args, 'goal', '').strip()} {' '.join(policy_parts)}".strip()
+
+        def _cli_progress(evt: dict) -> None:
+            print(f"  [{evt.get('step', '?')}/{evt.get('total_steps', 5)}] {evt.get('message', '')}", flush=True)
 
         plan = AIRuleGenerator(adapter, client=client).generate(
             tables=tables,
-            goal=getattr(args, "goal", ""),
+            goal=full_goal,
             sample_size=getattr(args, "sample_size", 2000),
             verify_sql=not getattr(args, "no_verify_sql", False),
+            on_progress=_cli_progress,
         )
 
         yaml_text = render_config_yaml_with_reasoning(plan)

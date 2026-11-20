@@ -20,7 +20,8 @@ title: Interfaces, Web UI, MCP & dbt
 | `idr apply-config` / `idr config apply` | Compile and load a declarative YAML manifest into `idr_meta.*` and archive a snapshot in `idr_out.config_snapshot`. | `idr config apply --db demo.duckdb --file config.yaml` |
 | `idr config history` | List saved configuration snapshots (`config_hash`, timestamp, source/rule/survivorship counts). | `idr config history --db demo.duckdb` |
 | `idr config rollback` | Restore `idr_meta.*` to the previous saved snapshot (or a specific `--hash` prefix). | `idr config rollback --db demo.duckdb [--hash a1b2c3d4]` |
-| `idr run` | Execute the 8-stage resolution pipeline (`--mode FULL\|INCR`, `--dry-run`, `--config <yaml>`, `--strict`). Pass `--config` with `--dry-run` for ephemeral candidate evaluation. | `idr run --db demo.duckdb --mode FULL --config candidate.yaml --dry-run` |
+| `idr run` | Execute the 8-stage resolution pipeline (`--mode FULL\|INCR`, `--dry-run`, `--critique`, `--config <yaml>`, `--strict`). Pass `--dry-run --critique` for ephemeral evaluation + zero-PII AI Graph Critique (Beta). | `idr run --db demo.duckdb --mode FULL --config candidate.yaml --dry-run --critique` |
+| `idr ai generate-config` | Zero-PII AI Rule & Config Generator (Beta) with live 5-step progress (`--grain`, `--event-policy`, `--system-of-record`, `--goal`). | `idr ai generate-config --db demo.duckdb --grain individual --event-policy bridge -o idr_config.yaml` |
 | `idr privacy forget` | Execute GDPR/CCPA right-to-be-forgotten erasure by `--entity-key` or `--identifier-value`. | `idr privacy forget --db demo.duckdb --entity-key crm:101` |
 | `idr ui` / `idr serve` | Launch the FastAPI backend and bundled React Web UI (`http://127.0.0.1:8000`). | `idr ui --db demo.duckdb --port 8000` |
 | `idr mcp` | Launch the FastMCP server for Claude Desktop, Cursor, and AI coding agents. | `idr mcp --db demo.duckdb` |

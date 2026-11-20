@@ -642,6 +642,51 @@ def test_dimension_fk_guard_blocks_product_and_facility_keys_generically(adapter
     assert tmap["raw.facilities"].table_role == "REFERENCE_LOOKUP"
 
 
+def test_cli_flags_for_ai_generate_config_and_dry_run_critique(tmp_path, capsys):
+    """Verify new CLI flags (--grain, --event-policy, --system-of-record, --critique) work end-to-end."""
+    from idr_core.cli import main as cli_main
+
+    db_file = str(tmp_path / "cli_test.duckdb")
+    db = DuckDBAdapter(db_file)
+    SchemaManager(db).initialize()
+    db.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    db.execute("CREATE TABLE raw.customers (id VARCHAR, email VARCHAR, first_name VARCHAR)")
+    db.execute("INSERT INTO raw.customers VALUES ('c1', 'a@corp.io', 'Alice'), ('c2', 'a@corp.io', 'Alice')")
+    db.close()
+
+    out_yaml = str(tmp_path / "gen.yaml")
+    rc1 = cli_main(
+        [
+            "ai", "generate-config",
+            "--platform", "duckdb", "--db", db_file,
+            "--tables", "raw.customers",
+            "--grain", "household",
+            "--event-policy", "exclude",
+            "--system-of-record", "raw.customers",
+            "--output", out_yaml,
+            "--provider", "disabled",
+        ]
+    )
+    out1 = capsys.readouterr().out
+    assert rc1 == 0
+    assert "[1/5]" in out1
+
+    rc2 = cli_main(
+        [
+            "run",
+            "--platform", "duckdb", "--db", db_file,
+            "--config", out_yaml,
+            "--mode", "FULL",
+            "--dry-run",
+            "--critique",
+        ]
+    )
+    out2 = capsys.readouterr().out
+    assert rc2 == 0
+    assert "AI Graph Critique (Beta)" in out2
+
+
+
 
 
 
