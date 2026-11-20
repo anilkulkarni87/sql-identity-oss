@@ -50,7 +50,7 @@ class TableListRequest(BaseModel):
 
 
 @router.post("/connect")
-async def connect_database(request: ConnectRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
+def connect_database(request: ConnectRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Establish a temporary connection for the session.
     Credentials are NOT persisted to disk, only in memory.
@@ -136,7 +136,7 @@ async def connect_database(request: ConnectRequest, current_user: Dict[str, Any]
 
 
 @router.get("/status")
-async def get_status(current_user: Dict[str, Any] = Depends(get_current_user)):
+def get_status(current_user: Dict[str, Any] = Depends(get_current_user)):
     """Check connection and configuration lifecycle status."""
     user_key = get_user_key(current_user)
     connected = manager.is_connected(user_key)
@@ -197,7 +197,7 @@ async def get_status(current_user: Dict[str, Any] = Depends(get_current_user)):
 
 
 @router.get("/discovered-connections")
-async def get_discovered_connections():
+def get_discovered_connections():
     """Discover available warehouse connections from CLI configs, dbt profiles, env, and ADC."""
     from idr_core.credential_discovery import discover_all_connections
 
@@ -272,7 +272,7 @@ def get_config_history(
 
 
 @router.get("/discover/tables")
-async def list_tables(
+def list_tables(
     schema: Optional[str] = None, current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """List tables in the given schema/dataset."""
@@ -286,7 +286,7 @@ async def list_tables(
 
 
 @router.get("/discover/columns")
-async def list_columns(table: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+def list_columns(table: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """List columns for a specific table."""
     adapter, _ = _require_user_adapter(current_user)
 
@@ -320,7 +320,7 @@ def _execute_save_config(
 
 
 @router.post("/config/save")
-async def save_config(
+def save_config(
     request: ConfigSaveRequest, current_user: Dict[str, Any] = Depends(require_write_access)
 ):
     """Save configuration to idr_meta tables using batched SQL writes."""
@@ -338,7 +338,7 @@ async def save_config(
 
 
 @router.post("/config/save/async")
-async def save_config_async(
+def save_config_async(
     request: ConfigSaveRequest, current_user: Dict[str, Any] = Depends(require_write_access)
 ):
     """Start saving configuration asynchronously with live progress tracking."""

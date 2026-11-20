@@ -147,20 +147,22 @@ Each deterministic rule in `rules` specifies a `canonicalize` strategy (`idr_cor
 | `EMAIL_STRIP_PLUS` | Performs all `EMAIL_STANDARD` normalizations **plus** strips `+tag` sub-addressing from the local part across all email domains. | `'John.Doe+promo@gmail.com'` → `'johndoe@gmail.com'` |
 | `PHONE_DIGITS` | Strips all non-numeric characters (`[^0-9]`); returns `NULL` if fewer than 7 digits remain. | `'+1 (800) 555-0199'` → `'18005550199'` |
 | `PHONE_US_10` | Strips non-digits, removes a leading US country code `1` from 11-digit numbers, and returns the 10-digit subscriber number (or `NULL` if `< 7` digits). | `'+1 (415) 555-2671'` → `'4155552671'` |
-| `ALPHANUMERIC_UPPER` | Uppercases and strips all non-alphanumeric characters (`[^A-Z0-9]`). Ideal for loyalty cards, VINs, and tax/device IDs. | `'vip-9901 a'` → `'VIP9901A'` |
+| `ALPHANUMERIC_UPPER` | Uppercases and strips all non-alphanumeric characters (`[^A-Z0-9]`); returns `NULL` if empty. Ideal for loyalty cards, VINs, and tax/device IDs. | `'vip-9901 a'` → `'VIP9901A'` |
 | `LOWERCASE` | `LOWER(TRIM(val))` | `' Alice@Example.com '` → `'alice@example.com'` |
 | `UPPERCASE` | `UPPER(TRIM(val))` | `'abc-123'` → `'ABC-123'` |
 | `EXACT` / `NONE` | `TRIM(val)` (preserves case and internal punctuation) | `' Token_AbC '` → `'Token_AbC'` |
 | **Custom SQL (`{val}`)** | Any SQL expression containing `{val}` (where `{val}` is replaced by `CAST(<identifier_expr> AS VARCHAR)`). | `"REGEXP_REPLACE(LOWER(TRIM({val})), '^0+', '')"` |
 
+> **Empty-Value & Preflight Guardrails**: Any identifier value that normalizes to `NULL` or `''` (e.g., `'REDACTED'` or `'---'` after stripping non-digits) is automatically dropped **before PII hashing and edge building** so redacted records never merge. Stage #1 (**Preflight**) also emits non-blocking warnings when an `identifier_mapping` has no active `idr_meta.rule` or is only mapped on a single source table, and `FULL` runs automatically prune stale memberships for removed or deactivated source tables.
+
 ---
 
 ## 3. Poison-Pill Exclusions (`idr_meta.identifier_exclusion`)
 
-Bad placeholder identifiers (`null`, `unknown`, `0000000000`, `noreply@...`) can link thousands of unrelated customers into a single giant cluster. `sql-identity-resolution` provides three layers of protection:
+Bad placeholder identifiers (`null`, `unknown`, `redacted`, `0000000000`, `noreply@...`, `erased_*@anonymized.local`) can link thousands of unrelated customers into a single giant cluster. `sql-identity-resolution` provides three layers of protection:
 
 1. **Built-In Default Exclusion Library (`use_default_exclusions: true`)**:
-   - Seeds 30+ battle-tested exclusions across `ANY` (`null`, `none`, `n/a`, `na`, `unknown`, `tbd`, `test`, `dummy`, `anonymous`, `redacted`, `0`, `-1`), `EMAIL` (`%@example.%`, `%@test.%`, `%@mailinator.com`, `noreply@%`, `no-reply@%`, `donotreply@%`, `info@%`, `support@%`, `admin@%`, `sales@%`, `billing@%`), and `PHONE` (`0000000000`–`9999999999`, `1234567890`, `11234567890`, `0000000`).
+   - Seeds 33 battle-tested exclusions across `ANY` (`null`, `none`, `n/a`, `na`, `unknown`, `anonymous`, `refused`, `redacted`, `---`), `EMAIL` (`test@%`, `noreply@%`, `no-reply@%`, `noemail@%`, `null@%`, `none@%`, `unknown@%`, `na@%`, `%@example.com`, `%@test.com`, `erased_%@%`, `%@anonymized.%`, `redacted@%`), and `PHONE` (`0000000000`–`9999999999`, `1234567890`).
 2. **Custom YAML Exclusions**:
    - Add domain-specific patterns under `exclusions:` with `type` (`EMAIL`, `PHONE`, or `ANY` / `*` for all types) and `match` (`EXACT` or `LIKE`).
    - For `match: LIKE`, SQL wildcards (`%`, `_`) are respected when provided, while bare strings without wildcards (e.g. `value: "donald"`) automatically match substrings (`%donald%`) case-insensitively across DuckDB, Snowflake, BigQuery, and Databricks.

@@ -188,4 +188,66 @@ def test_profiler_detects_phones_with_extensions_and_excludes_session_id(profile
     assert "session_id" in attr_names
 
 
+def test_profiler_opportunistic_catalog_descriptions_and_pk_hints():
+    """Verify catalog descriptions & declared PK hints enrich SafeTableProfile and filter rep/deprecated columns when present."""
+    from unittest.mock import MagicMock
+
+    adapter = MagicMock()
+    adapter.dialect = "bigquery"
+    adapter.get_table_description.return_value = "Core B2C customer master table"
+    adapter.get_table_columns.return_value = [
+        {"name": "row_uuid", "type": "STRING", "is_pk": True, "description": "Unique row primary key"},
+        {"name": "customer_id", "type": "STRING", "description": "Global customer identifier"},
+        {"name": "email", "type": "STRING", "description": "Customer login email"},
+        {"name": "rep_email", "type": "STRING", "description": "Assigned sales rep email - internal"},
+        {"name": "updated_at", "type": "TIMESTAMP"},
+    ]
+    adapter.query_one.return_value = 3
+    adapter.query.return_value = [
+        {
+            "row_uuid": "u1",
+            "customer_id": "c1",
+            "email": "alice@gmail.com",
+            "rep_email": "rep1@company.com",
+            "updated_at": "2026-01-01 00:00:00",
+        },
+        {
+            "row_uuid": "u2",
+            "customer_id": "c2",
+            "email": "bob@gmail.com",
+            "rep_email": "rep2@company.com",
+            "updated_at": "2026-01-02 00:00:00",
+        },
+        {
+            "row_uuid": "u3",
+            "customer_id": "c3",
+            "email": "carol@gmail.com",
+            "rep_email": "rep3@company.com",
+            "updated_at": "2026-01-03 00:00:00",
+        },
+    ]
+
+    profiler = IDRDataProfiler(adapter)
+    schema_prof = profiler.profile_tables_safe(["crm.customers"], sample_size=50, compute_overlap=False)
+    assert len(schema_prof.tables) == 1
+    tprof = schema_prof.tables[0]
+    assert tprof.description == "Core B2C customer master table"
+    # Declared PK hint prefers row_uuid over customer_id even though both are 100% unique
+    assert tprof.hint_entity_key == "row_uuid"
+
+    col_by_name = {c.name: c for c in tprof.columns}
+    # email is classified as identifier, while rep_email is excluded due to "sales rep" description
+    assert col_by_name["email"].hint_role == "identifier"
+    assert col_by_name["rep_email"].hint_role == "attribute"
+
+    prompt_dict = tprof.to_prompt_dict()
+    assert prompt_dict["description"] == "Core B2C customer master table"
+    # updated_at has no description, so "description" key is omitted to save tokens
+    wm_entry = next(c for c in prompt_dict["key_and_signal_columns"] if c["name"] == "updated_at")
+    assert "description" not in wm_entry
+    email_entry = next(c for c in prompt_dict["key_and_signal_columns"] if c["name"] == "email")
+    assert email_entry["description"] == "Customer login email"
+
+
+
 

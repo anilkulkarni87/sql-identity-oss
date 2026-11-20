@@ -11,12 +11,13 @@ from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from idr_api.dependencies import get_adapter, get_current_user, get_user_key
 from idr_core.ai_assistant import (
     ask_identity_graph,
     copilot_chat,
+    critique_dry_run_with_ai,
     explain_cluster_with_ai,
     suggest_config_with_ai,
     test_llm_connection,
@@ -245,6 +246,103 @@ def suggest_config(
         return suggest_config_with_ai(
             profile,
             goal_text,
+            client=LLMClient(cfg),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/suggest-config/stream")
+def suggest_config_stream(
+    payload: AISuggestConfigRequest,
+    adapter=Depends(get_adapter),
+    current_user: dict = Depends(get_current_user),
+    store: LLMConfigStore = Depends(get_llm_config_store),
+):
+    """Stream live stage-by-stage progress events (SSE) followed by the final suggested config."""
+    import json
+    import queue
+    import threading
+    from fastapi.responses import StreamingResponse
+    from idr_core.profiler import is_system_table
+
+    tables = [t for t in (payload.tables or []) if t and not is_system_table(t)]
+    if not tables and hasattr(adapter, "list_tables"):
+        tables = [t for t in adapter.list_tables() if not is_system_table(t)][:15]
+    cfg = store.get(get_user_key(current_user))
+    goal_text = (payload.goal or payload.prompt or "").strip()
+
+    ev_queue: queue.Queue = queue.Queue()
+
+    def _on_progress(evt: dict) -> None:
+        ev_queue.put(("progress", evt))
+
+    def _worker() -> None:
+        try:
+            if tables:
+                res = suggest_config_with_ai(
+                    {},
+                    goal_text,
+                    client=LLMClient(cfg),
+                    adapter=adapter,
+                    tables=tables,
+                    sample_size=payload.sample_size,
+                    verify_sql=payload.verify_sql,
+                    on_progress=_on_progress,
+                )
+            else:
+                res = suggest_config_with_ai({}, goal_text, client=LLMClient(cfg))
+            ev_queue.put(("result", res))
+        except Exception as exc:
+            ev_queue.put(("error", {"detail": str(exc)}))
+        finally:
+            ev_queue.put(("done", None))
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    def _event_generator():
+        while True:
+            try:
+                kind, data = ev_queue.get(timeout=15.0)
+            except queue.Empty:
+                yield ": keepalive\n\n"
+                continue
+            if kind == "done":
+                break
+            yield f"event: {kind}\ndata: {json.dumps(data, default=str)}\n\n"
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class AIDryRunCritiqueRequest(BaseModel):
+    config: dict = Field(default_factory=dict)
+    dry_run_summary: Optional[dict] = None
+    warnings: List[str] = Field(default_factory=list)
+
+
+@router.post("/critique-dry-run")
+def critique_dry_run(
+    payload: AIDryRunCritiqueRequest,
+    adapter=Depends(get_adapter),
+    current_user: dict = Depends(get_current_user),
+    store: LLMConfigStore = Depends(get_llm_config_store),
+):
+    """Analyze zero-PII Dry Run graph telemetry and return actionable one-click refinement patches."""
+    try:
+        cfg = store.get(get_user_key(current_user))
+        return critique_dry_run_with_ai(
+            adapter=adapter,
+            draft_config=payload.config or {},
+            dry_run_summary=payload.dry_run_summary,
+            warnings=payload.warnings,
             client=LLMClient(cfg),
         )
     except Exception as exc:

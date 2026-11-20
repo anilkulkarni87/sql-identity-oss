@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import {
     Loader2, Key, Tag, Fingerprint, Clock, CheckSquare, Square,
-    Plus, Search, Sparkles, Table as TableIcon, Trash2, ChevronDown,
-    ChevronUp, Wand2, AlertCircle, Check
+    Plus, Search, Bot, Table as TableIcon, Trash2, ChevronDown,
+    ChevronUp, AlertCircle, Check
 } from "lucide-react";
 import { IDRConfig, SourceConfig, TableColumn, Identifier, Attribute } from '../../types';
 import { api } from '../../api/client';
 import { CustomSelect } from '../../components/CustomSelect';
+import { AiProgressStepper, AiProgressEvent } from '../../components/AiProgressStepper';
 
 interface StepMapProps {
     tables: string[];
@@ -28,21 +29,23 @@ const IDENTIFIER_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
     { pattern: /crm_id|salesforce_id|hubspot_id|external_id/i, type: 'external_id' },
 ];
 
-const ATTRIBUTE_PATTERNS = [
-    /first_name|fname|given_name/i,
-    /last_name|lname|surname|family_name/i,
-    /full_name|^name$/i,
-    /city|town|locality/i,
-    /state|province|region/i,
-    /country|nation/i,
-    /zip|postal/i,
-    /address|street/i,
-    /company|org|employer/i,
-    /status|tier|segment|plan/i,
-    /ltv|lifetime_value|spend|revenue|balance/i,
-    /opt_in|consent|marketing|subscribed|do_not/i,
-    /dob|birth|gender/i,
-];
+const GENERIC_HOMONYM_ATTRS = new Set([
+    'status', 'state', 'type', 'category', 'channel', 'source', 'reason',
+    'stage', 'code', 'notes', 'description', 'comments', 'comment',
+    'created_at', 'updated_at', 'timestamp', 'event_time', 'event_date',
+    'amount', 'total', 'subtotal', 'price', 'value', 'score', 'rating',
+    'count', 'quantity', 'qty',
+]);
+
+function suggestAliasedAttrName(tableFqn: string, attrName: string): string {
+    const shortTbl = (tableFqn.split('.').pop() || tableFqn)
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    const cleanAttr = attrName.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!shortTbl || cleanAttr.startsWith(`${shortTbl}_`)) return cleanAttr;
+    return `${shortTbl}_${cleanAttr}`;
+}
 
 function guessDefaultWatermark(cols: TableColumn[], entityKey?: string): string {
     const wmKeywords = [
@@ -113,8 +116,12 @@ export default function StepMap({
     const [scanError, setScanError] = useState<string | null>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
     const [aiSuggesting, setAiSuggesting] = useState(false);
+    const [aiProgress, setAiProgress] = useState<AiProgressEvent | null>(null);
     const [aiNotice, setAiNotice] = useState<string | null>(null);
     const [aiGoal, setAiGoal] = useState<string>('');
+    const [aiGrain, setAiGrain] = useState<'individual' | 'household' | 'account'>('individual');
+    const [aiEventPolicy, setAiEventPolicy] = useState<'bridge' | 'include' | 'exclude'>('bridge');
+    const [aiSystemOfRecord, setAiSystemOfRecord] = useState<string>('');
     const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null);
     const [aiReportOpen, setAiReportOpen] = useState<boolean>(true);
 
@@ -385,11 +392,11 @@ export default function StepMap({
         const curr = config[table];
         if (!curr) return;
         const currentAttrs = curr.attributes || [];
-        const exists = currentAttrs.find(a => a.name === colName);
+        const exists = currentAttrs.find(a => (a.column || a.expr || a.name) === colName);
         const colMeta = (columns[table] || []).find(c => c.name === colName);
 
         const newAttrs: Attribute[] = exists
-            ? currentAttrs.filter(a => a.name !== colName)
+            ? currentAttrs.filter(a => (a.column || a.expr || a.name) !== colName)
             : [...currentAttrs, { name: colName, column: colName, expr: colName, data_type: colMeta?.type }];
         const newIds = exists ? (curr.identifiers || []) : (curr.identifiers || []).filter(i => i.column !== colName);
 
@@ -397,6 +404,16 @@ export default function StepMap({
             ...config,
             [table]: { ...curr, attributes: newAttrs, identifiers: newIds },
         });
+    };
+
+    const updateAttributeName = (table: string, colName: string, newName: string) => {
+        const curr = config[table];
+        if (!curr) return;
+        const safeName = newName.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+        const newAttrs = (curr.attributes || []).map(a =>
+            (a.column || a.expr || a.name) === colName ? { ...a, name: safeName } : a
+        );
+        commitUpdate({ ...config, [table]: { ...curr, attributes: newAttrs } });
     };
 
     const toggleIdentifier = (table: string, colName: string) => {
@@ -413,7 +430,7 @@ export default function StepMap({
             const defaultType = matchedPattern ? matchedPattern.type : colName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
             newIds = [...currentIds, { column: colName, type: defaultType, expr: colName, is_match_key: true }];
         }
-        const newAttrs = exists ? (curr.attributes || []) : (curr.attributes || []).filter(a => a.name !== colName);
+        const newAttrs = exists ? (curr.attributes || []) : (curr.attributes || []).filter(a => (a.column || a.expr || a.name) !== colName);
 
         commitUpdate({
             ...config,
@@ -440,48 +457,10 @@ export default function StepMap({
         commitUpdate({ ...config, [table]: { ...curr, identifiers: newIds } });
     };
 
-    const applyAutoMapForTables = (targetTables: string[]) => {
-        const nextMap = { ...config };
-        for (const table of targetTables) {
-            const curr = nextMap[table];
-            const cols = columns[table] || [];
-            if (!curr || cols.length === 0) continue;
-
-            const existingIds = [...(curr.identifiers || [])];
-            const existingAttrs = [...(curr.attributes || [])];
-            const mappedCols = new Set<string>([
-                ...existingIds.map(i => i.column || i.expr || ''),
-                ...existingAttrs.map(a => a.column || a.name),
-            ]);
-
-            for (const c of cols) {
-                if (c.name === curr.entity_key || c.name === curr.watermark_column || mappedCols.has(c.name)) {
-                    continue;
-                }
-                const idMatch = IDENTIFIER_PATTERNS.find(p => p.pattern.test(c.name));
-                if (idMatch) {
-                    existingIds.push({ column: c.name, type: idMatch.type, expr: c.name, is_match_key: true });
-                    mappedCols.add(c.name);
-                    continue;
-                }
-                if (ATTRIBUTE_PATTERNS.some(p => p.test(c.name))) {
-                    existingAttrs.push({ name: c.name, column: c.name, expr: c.name, data_type: c.type });
-                    mappedCols.add(c.name);
-                }
-            }
-
-            nextMap[table] = {
-                ...curr,
-                identifiers: existingIds,
-                attributes: existingAttrs,
-            };
-        }
-        commitUpdate(nextMap);
-    };
-
     const getColumnState = (table: string, colName: string) => {
         const attrs = config[table]?.attributes || [];
-        if (attrs.find(a => (a.column || a.name) === colName)) return { isAttr: true };
+        const attrMatch = attrs.find(a => (a.column || a.expr || a.name) === colName);
+        if (attrMatch) return { isAttr: true, attrName: attrMatch.name };
 
         const ids = config[table]?.identifiers || [];
         const idMatch = ids.find(i => (i.column || i.expr) === colName);
@@ -489,6 +468,19 @@ export default function StepMap({
 
         return {};
     };
+
+    // Track which target attribute names appear on multiple tables so we can flag homonym collisions
+    const sharedAttrTables: Record<string, string[]> = {};
+    for (const t of tables) {
+        const seenInTable = new Set<string>();
+        for (const a of config[t]?.attributes || []) {
+            const k = (a.name || '').trim().toLowerCase();
+            if (k && !seenInTable.has(k)) {
+                seenInTable.add(k);
+                sharedAttrTables[k] = [...(sharedAttrTables[k] || []), t];
+            }
+        }
+    }
 
     const handleNext = () => {
         const allIdentifiers = tables.flatMap(t => config[t]?.identifiers || []);
@@ -529,11 +521,38 @@ export default function StepMap({
                                 disabled={aiSuggesting}
                                 onClick={async () => {
                                     setAiSuggesting(true);
+                                    setAiProgress({
+                                        stage: 'profiling',
+                                        step: 1,
+                                        total_steps: 5,
+                                        message: `Connecting to warehouse to profile ${tables.length} table(s)…`,
+                                    });
                                     setValidationError(null);
                                     setAiNotice(null);
                                     try {
-                                        const goalPrompt = aiGoal.trim() || 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views (strict_person vs household) for these tables.';
-                                        const res = await api.suggestConfigAi(tables, goalPrompt);
+                                        const policyParts: string[] = [];
+                                        if (aiGrain === 'individual') {
+                                            policyParts.push('Primary resolution grain: Strict Individual (person-level; keep household/shared identifiers in a separate household lens).');
+                                        } else if (aiGrain === 'household') {
+                                            policyParts.push('Primary resolution grain: Household (include shared phone/address identifiers in primary matching).');
+                                        } else {
+                                            policyParts.push('Primary resolution grain: B2B Account / Organization (prioritize company/account/domain identifiers).');
+                                        }
+                                        if (aiEventPolicy === 'bridge') {
+                                            policyParts.push('Event/fact tables: include only for cross-channel bridging without mapping transactional attributes into golden_profile.');
+                                        } else if (aiEventPolicy === 'exclude') {
+                                            policyParts.push('Event/fact tables: set include_in_idr=false for high-volume clickstream/telemetry/event tables.');
+                                        } else {
+                                            policyParts.push('Event/fact tables: include fully in IDR.');
+                                        }
+                                        if (aiSystemOfRecord) {
+                                            policyParts.push(`System of Record for Survivorship source_priority #1: ${aiSystemOfRecord}.`);
+                                        }
+                                        const baseGoal = aiGoal.trim() || 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views.';
+                                        const goalPrompt = `${baseGoal} ${policyParts.join(' ')}`;
+                                        const res = await api.suggestConfigAiStream(tables, goalPrompt, (evt) => {
+                                            setAiProgress(evt);
+                                        });
                                         setAiReport(res);
                                         setAiReportOpen(true);
                                         const suggested = res.suggested_config as unknown as IDRConfig;
@@ -560,32 +579,29 @@ export default function StepMap({
                                         setValidationError(`AI Suggest failed: ${err?.message || err}`);
                                     } finally {
                                         setAiSuggesting(false);
+                                        setAiProgress(null);
                                     }
                                 }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 disabled:opacity-50 text-purple-200 border border-purple-500/40 text-xs font-semibold transition-colors"
-                                title="Use configured Local AI (Ollama) / LLM to suggest mappings, rules, survivorship, and lenses from schema metadata"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs font-medium transition-colors"
+                                title="Profiles selected tables with zero PII, discovers cross-table join keys & table roles, and drafts mappings, rules, survivorship, and lenses"
                             >
-                                {aiSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                                {aiSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
                                 {aiSuggesting ? 'AI Suggesting...' : 'AI Suggest Config'}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => applyAutoMapForTables(tables)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold transition-colors"
-                                title="Automatically classify common identifier and profile columns across all sources"
-                            >
-                                <Wand2 className="w-3.5 h-3.5" />
-                                Auto-Map All
+                                {!aiSuggesting && (
+                                    <span className="px-1.5 py-0.2 rounded bg-white/20 text-[10px] font-semibold uppercase tracking-wide">
+                                        Beta
+                                    </span>
+                                )}
                             </button>
                         </>
                     )}
                     <button
                         type="button"
                         onClick={() => setDiscoveryOpen(prev => !prev)}
-                        className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
                             discoveryOpen
-                                ? 'bg-blue-600 text-white border-blue-500'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                                ? 'bg-accent text-white border-accent'
+                                : 'bg-surface hover:bg-hover text-ink-primary border-line-default'
                         }`}
                     >
                         <Plus className="w-3.5 h-3.5" />
@@ -596,25 +612,81 @@ export default function StepMap({
             </div>
 
             {tables.length > 0 && (
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
-                    <span className="text-[11px] font-semibold text-purple-300 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5" />
-                        AI Goal (Optional)
-                    </span>
-                    <input
-                        type="text"
-                        value={aiGoal}
-                        onChange={e => setAiGoal(e.target.value)}
-                        placeholder="e.g. Strict B2C person matching on email & loyalty, prioritize CRM over web for names..."
-                        className="flex-1 bg-slate-950/70 border border-slate-700/70 rounded-lg px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-                    />
+                <div className="bg-subtle border border-line-default rounded-md px-3 py-2.5 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-muted">
+                        <span className="inline-flex items-center gap-1.5">
+                            <Bot className="w-3.5 h-3.5 text-accent shrink-0" />
+                            <strong className="text-ink-primary font-semibold">AI-Assisted Configuration</strong>
+                            <span className="px-1.5 py-0.2 rounded bg-accent/15 text-accent border border-accent/30 text-[10px] font-semibold uppercase">
+                                Beta
+                            </span>
+                            <span className="hidden md:inline">
+                                — Profiles column shapes &amp; cross-table overlaps (zero raw PII sent), detects table roles, and drafts mappings, rules, survivorship &amp; lenses for review.
+                            </span>
+                        </span>
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0">
+                            AI Goal (Optional)
+                        </span>
+                        <input
+                            type="text"
+                            value={aiGoal}
+                            onChange={e => setAiGoal(e.target.value)}
+                            placeholder="e.g. Strict B2C person matching on email & loyalty, prioritize CRM over web for names..."
+                            className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
+                        />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-line-default/60 text-[11px]">
+                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                            <span className="font-medium">Grain:</span>
+                            <select
+                                value={aiGrain}
+                                onChange={e => setAiGrain(e.target.value as 'individual' | 'household' | 'account')}
+                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
+                            >
+                                <option value="individual">Strict Individual</option>
+                                <option value="household">Household</option>
+                                <option value="account">Account / B2B</option>
+                            </select>
+                        </label>
+                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                            <span className="font-medium">Event Tables:</span>
+                            <select
+                                value={aiEventPolicy}
+                                onChange={e => setAiEventPolicy(e.target.value as 'bridge' | 'include' | 'exclude')}
+                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
+                            >
+                                <option value="bridge">Bridge Only (Clean Profile)</option>
+                                <option value="include">Include Fully</option>
+                                <option value="exclude">Exclude Event Tables</option>
+                            </select>
+                        </label>
+                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                            <span className="font-medium">System of Record:</span>
+                            <select
+                                value={aiSystemOfRecord}
+                                onChange={e => setAiSystemOfRecord(e.target.value)}
+                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent max-w-[200px]"
+                            >
+                                <option value="">Auto (Master Entity)</option>
+                                {tables.map(t => (
+                                    <option key={t} value={t}>{t}</option>
+                                ))}
+                            </select>
+                        </label>
+                    </div>
                 </div>
             )}
 
+            {aiSuggesting && (
+                <AiProgressStepper progress={aiProgress} tableCount={tables.length} />
+            )}
+
             {aiNotice && (
-                <div className="bg-purple-950/40 border border-purple-500/40 rounded-xl p-3 text-xs text-purple-200 flex items-center justify-between gap-2">
+                <div className="bg-selected border border-accent/40 rounded-md p-3 text-xs text-ink-primary flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 shrink-0 text-purple-300" />
+                        <Bot className="w-4 h-4 shrink-0 text-accent" />
                         {aiNotice}
                     </span>
                     <div className="flex items-center gap-2 shrink-0">
@@ -622,12 +694,12 @@ export default function StepMap({
                             <button
                                 type="button"
                                 onClick={() => setAiReportOpen(prev => !prev)}
-                                className="px-2 py-0.5 rounded bg-purple-900/60 hover:bg-purple-800/70 text-purple-200 text-[11px] font-medium"
+                                className="px-2 py-0.5 rounded bg-surface hover:bg-hover border border-line-default text-ink-primary text-[11px] font-medium"
                             >
                                 {aiReportOpen ? 'Hide Reasoning' : 'Show Reasoning'}
                             </button>
                         )}
-                        <button type="button" onClick={() => { setAiNotice(null); setAiReport(null); }} className="text-purple-300 hover:text-white">✕</button>
+                        <button type="button" onClick={() => { setAiNotice(null); setAiReport(null); }} className="text-ink-muted hover:text-ink-primary">✕</button>
                     </div>
                 </div>
             )}
@@ -965,14 +1037,6 @@ export default function StepMap({
                                     <span className="text-[11px] uppercase tracking-wider font-semibold text-blue-400">Active Source Table</span>
                                     <h3 className="text-base font-bold font-mono text-white">{activeTable}</h3>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => applyAutoMapForTables([activeTable])}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 text-xs font-medium transition-colors"
-                                >
-                                    <Wand2 className="w-3.5 h-3.5" />
-                                    Auto-Map This Table
-                                </button>
                             </div>
 
                             {/* Source Extraction Settings */}
@@ -1078,6 +1142,15 @@ export default function StepMap({
 
                                     {filteredActiveCols.map(c => {
                                         const state = getColumnState(activeTable, c.name);
+                                        const attrKey = (state.attrName || '').trim().toLowerCase();
+                                        const collidingTables = state.isAttr && attrKey ? (sharedAttrTables[attrKey] || []) : [];
+                                        const isHomonymCollision =
+                                            state.isAttr &&
+                                            collidingTables.length > 1 &&
+                                            GENERIC_HOMONYM_ATTRS.has(attrKey);
+                                        const suggestedAlias = isHomonymCollision
+                                            ? suggestAliasedAttrName(activeTable, state.attrName || c.name)
+                                            : '';
                                         return (
                                             <div key={c.name} className="grid grid-cols-12 gap-2 px-3.5 py-2 items-center hover:bg-slate-900/80 border-b border-slate-800/50 last:border-0">
                                                 <div className="col-span-4 text-xs font-mono font-medium text-slate-200 truncate" title={c.name}>
@@ -1098,7 +1171,7 @@ export default function StepMap({
                                                         </button>
                                                     )}
                                                 </div>
-                                                <div className="col-span-5 flex items-center justify-end gap-1.5">
+                                                <div className="col-span-5 flex items-center justify-end gap-1.5 flex-wrap">
                                                     {state.isId && (
                                                         <input
                                                             type="text"
@@ -1107,6 +1180,32 @@ export default function StepMap({
                                                             className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs font-mono text-blue-300 w-24 focus:outline-none focus:border-blue-500"
                                                             placeholder="id type"
                                                         />
+                                                    )}
+                                                    {state.isAttr && (
+                                                        <div className="flex items-center gap-1">
+                                                            <input
+                                                                type="text"
+                                                                value={state.attrName || ''}
+                                                                onChange={(e) => updateAttributeName(activeTable, c.name, e.target.value)}
+                                                                className={`bg-slate-900 border rounded-md px-2 py-1 text-xs font-mono w-28 focus:outline-none ${
+                                                                    isHomonymCollision
+                                                                        ? 'border-amber-500/70 text-amber-300 focus:border-amber-400'
+                                                                        : 'border-slate-700 text-emerald-300 focus:border-emerald-500'
+                                                                }`}
+                                                                placeholder="attr name"
+                                                                title="Target attribute name in golden_profile_current (rename to alias colliding columns)"
+                                                            />
+                                                            {isHomonymCollision && suggestedAlias && suggestedAlias !== attrKey && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => updateAttributeName(activeTable, c.name, suggestedAlias)}
+                                                                    title={`'${attrKey}' is mapped on ${collidingTables.length} tables (${collidingTables.join(', ')}). Click to alias as '${suggestedAlias}'.`}
+                                                                    className="px-1.5 py-1 text-[10px] font-mono rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 whitespace-nowrap"
+                                                                >
+                                                                    → {suggestedAlias}
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     )}
                                                     <button
                                                         type="button"

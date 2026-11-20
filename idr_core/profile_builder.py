@@ -147,6 +147,8 @@ class ProfileBuilder:
             tblproperties_clause = ""
             if self.dialect_name == "databricks":
                 tblproperties_clause = "\n            TBLPROPERTIES ('delta.feature.timestampNtz' = 'supported')"
+            elif self.dialect_name == "bigquery":
+                tblproperties_clause = " CLUSTER BY resolved_id"
 
             final_sql = f"""
                 CREATE OR REPLACE TABLE idr_out.golden_profiles{tblproperties_clause} AS

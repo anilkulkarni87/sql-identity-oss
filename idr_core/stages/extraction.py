@@ -429,13 +429,15 @@ class ExtractionStage(BaseStage):
 
     def extract_identifiers(self, run_mode: str = "FULL") -> int:
         """Extract and canonicalize identifiers from entities."""
-        # Get identifier mappings
+        # Get identifier mappings (joined with source_table to avoid N+1 lookup queries)
         mappings = self.adapter.query("""
             SELECT
                 im.table_id, im.identifier_type, im.identifier_value_expr, im.is_hashed,
-                r.canonicalize, r.max_group_size
+                r.canonicalize, r.max_group_size,
+                st.table_fqn, st.entity_key_expr
             FROM idr_meta.identifier_mapping im
             JOIN idr_meta.rule r ON im.identifier_type = r.identifier_type
+            LEFT JOIN idr_meta.source_table st ON im.table_id = st.table_id
             WHERE r.is_active = TRUE
         """)
 
@@ -479,7 +481,10 @@ class ExtractionStage(BaseStage):
             raw_expr = f"TRIM(CAST(({value_expr}) AS {str_type}))"
 
             # Apply canonicalization (built-in preset, registered fn, or inline SQL with {val})
-            norm_expr = build_canonicalize_expr(raw_expr, canonicalize, self.adapter.dialect)
+            pre_hash_norm_expr = build_canonicalize_expr(
+                raw_expr, canonicalize, self.adapter.dialect
+            )
+            norm_expr = pre_hash_norm_expr
 
             # Apply PII hashing if enabled
             is_hashed = bool(m.get("is_hashed", False))
@@ -496,18 +501,31 @@ class ExtractionStage(BaseStage):
                 else self._dialect.get("bool_false", "FALSE")
             )
 
-            # Robust null, empty string, and sentinel check
+            # Robust null, empty string, sentinel, and post-canonicalization non-empty check
             where_condition = f"""
                 ({value_expr}) IS NOT NULL
                 AND LENGTH({raw_expr}) > 0
-                AND LOWER({raw_expr}) NOT IN ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', '0', 'default', '')
+                AND LOWER({raw_expr}) NOT IN ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', 'redacted', '0', 'default', '')
+                AND ({pre_hash_norm_expr}) IS NOT NULL
+                AND LENGTH(TRIM({pre_hash_norm_expr})) > 0
             """
 
             dedup_meta = getattr(self, "_source_dedup_meta", {}).get(table_id)
             if dedup_meta:
                 source_rel = self._source_relation_sql(*dedup_meta)
+            elif m.get("table_fqn"):
+                source_rel = self._validate_metadata_value(
+                    m["table_fqn"], "fqn", "source_table.table_fqn"
+                )
             else:
                 source_rel = self.get_source_fqn(table_id)
+
+            if m.get("entity_key_expr"):
+                key_expr = self._validate_metadata_value(
+                    m["entity_key_expr"], "expr", "source_table.entity_key_expr"
+                )
+            else:
+                key_expr = self.get_entity_key_expr(table_id)
 
             union_parts.append(f"""
                 SELECT
@@ -519,7 +537,7 @@ class ExtractionStage(BaseStage):
                 FROM idr_work.entities_delta e
                 JOIN {source_rel} src
                     ON e.table_id = '{table_id}'
-                   AND e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {str_type}))
+                   AND e.entity_key = CONCAT('{table_id}', ':', CAST(({key_expr}) AS {str_type}))
                 WHERE {where_condition}
             """)
 
@@ -780,8 +798,11 @@ class ExtractionStage(BaseStage):
             return 0
 
         mappings = self.adapter.query("""
-            SELECT table_id, attribute_name, attribute_expr
-            FROM idr_meta.entity_attribute_mapping
+            SELECT
+                eam.table_id, eam.attribute_name, eam.attribute_expr,
+                st.table_fqn, st.entity_key_expr
+            FROM idr_meta.entity_attribute_mapping eam
+            LEFT JOIN idr_meta.source_table st ON eam.table_id = st.table_id
         """)
 
         if not mappings:
@@ -802,6 +823,18 @@ class ExtractionStage(BaseStage):
 
             # Cast everything to string for generic processing
             val_expr = f"CAST({expr} AS {str_type})"
+            source_fqn = (
+                self._validate_metadata_value(m["table_fqn"], "fqn", "source_table.table_fqn")
+                if m.get("table_fqn")
+                else self.get_source_fqn(table_id)
+            )
+            key_expr = (
+                self._validate_metadata_value(
+                    m["entity_key_expr"], "expr", "source_table.entity_key_expr"
+                )
+                if m.get("entity_key_expr")
+                else self.get_entity_key_expr(table_id)
+            )
 
             union_parts.append(f"""
                 SELECT
@@ -809,9 +842,9 @@ class ExtractionStage(BaseStage):
                     '{attr_name}' AS attribute_name,
                     {val_expr} AS attribute_value
                 FROM idr_work.entities_delta e
-                JOIN {self.get_source_fqn(table_id)} src
+                JOIN {source_fqn} src
                     ON e.table_id = '{table_id}'
-                   AND e.entity_key = CONCAT('{table_id}', ':', CAST(({self.get_entity_key_expr(table_id)}) AS {str_type}))
+                   AND e.entity_key = CONCAT('{table_id}', ':', CAST(({key_expr}) AS {str_type}))
                 WHERE {expr} IS NOT NULL
             """)
 
@@ -828,25 +861,37 @@ class ExtractionStage(BaseStage):
         return self.adapter.query_one("SELECT COUNT(*) FROM idr_work.entity_attributes") or 0
 
     def get_source_fqn(self, table_id: str) -> str:
-        """Get fully qualified table name for a source."""
-        # Validate table_id before interpolation
+        """Get fully qualified table name for a source (cached per stage instance)."""
         safe_id = self._validate_metadata_value(table_id, "identifier", "table_id")
+        cache = getattr(self, "_fqn_cache", None)
+        if cache is None:
+            cache = {}
+            self._fqn_cache = cache
+        if safe_id in cache:
+            return cache[safe_id]
         result = self.adapter.query_one(f"""
             SELECT table_fqn FROM idr_meta.source_table WHERE table_id = '{safe_id}'
         """)
         if result:
-            # Validate the returned FQN too
             self._validate_metadata_value(result, "fqn", "source_table.table_fqn")
-        return result or table_id
+        val = result or table_id
+        cache[safe_id] = val
+        return val
 
     def get_entity_key_expr(self, table_id: str) -> str:
-        """Get entity key expression for a source."""
-        # Validate table_id before interpolation
+        """Get entity key expression for a source (cached per stage instance)."""
         safe_id = self._validate_metadata_value(table_id, "identifier", "table_id")
+        cache = getattr(self, "_key_expr_cache", None)
+        if cache is None:
+            cache = {}
+            self._key_expr_cache = cache
+        if safe_id in cache:
+            return cache[safe_id]
         result = self.adapter.query_one(f"""
             SELECT entity_key_expr FROM idr_meta.source_table WHERE table_id = '{safe_id}'
         """)
         if result:
-            # Validate the returned expression too
             self._validate_metadata_value(result, "expr", "source_table.entity_key_expr")
-        return result or "id"
+        val = result or "id"
+        cache[safe_id] = val
+        return val

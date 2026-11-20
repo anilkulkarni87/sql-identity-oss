@@ -73,10 +73,28 @@ class BigQueryAdapter(IDRAdapter):
         return sql
 
     def execute(self, sql: str) -> None:
-        """Execute a single SQL statement."""
-        sql = self._prepare_sql_simple(sql)
-        job = self.client.query(sql, location=self.location)
-        job.result()  # Wait for completion
+        """Execute a single SQL statement, auto-migrating clustering spec on CREATE OR REPLACE TABLE."""
+        prepared = self._prepare_sql_simple(sql)
+        try:
+            job = self.client.query(prepared, location=self.location)
+            job.result()  # Wait for completion
+        except Exception as exc:
+            if "Cannot replace a table with a different partitioning spec" in str(exc):
+                m = re.search(
+                    r"\bCREATE\s+OR\s+REPLACE\s+TABLE\s+([`A-Za-z0-9_.\-]+)",
+                    prepared,
+                    flags=re.IGNORECASE,
+                )
+                if m:
+                    target_table = m.group(1)
+                    drop_job = self.client.query(
+                        f"DROP TABLE IF EXISTS {target_table}", location=self.location
+                    )
+                    drop_job.result()
+                    retry_job = self.client.query(prepared, location=self.location)
+                    retry_job.result()
+                    return
+            raise
 
     def execute_script(self, sql: str) -> None:
         """Execute multiple SQL statements as a script."""
@@ -133,6 +151,12 @@ class BigQueryAdapter(IDRAdapter):
             )
 
         job = self.client.query(sql, location=self.location, job_config=job_config)
+        res_iter = job.result()
+        rows_list = list(res_iter)
+        if rows_list and hasattr(rows_list[0], "keys"):
+            return [{str(k).lower(): row[k] for k in row.keys()} for row in rows_list]
+        if not rows_list and hasattr(res_iter, "total_rows"):
+            return []
         df = job.to_dataframe()
         df.columns = [str(c).lower() for c in df.columns]
         return df.to_dict("records")
@@ -186,7 +210,7 @@ class BigQueryAdapter(IDRAdapter):
             return False
 
     def get_table_columns(self, table_fqn: str) -> List[Dict[str, str]]:
-        """Get column names for a table (lowercase)."""
+        """Get column names, types, and optional catalog descriptions for a table (lowercase)."""
         parts = table_fqn.replace("`", "").split(".")
         if len(parts) == 2:
             # Handle schema alias if present
@@ -199,9 +223,27 @@ class BigQueryAdapter(IDRAdapter):
             table = self.client.get_table(table_ref)
             if not table or not table.schema:
                 return []
-            return [{"name": field.name.lower(), "type": field.field_type} for field in table.schema]
+            tbl_desc = getattr(table, "description", None)
+            if isinstance(tbl_desc, str) and tbl_desc.strip():
+                cache = getattr(self, "_table_descriptions", None)
+                if cache is None:
+                    cache = {}
+                    self._table_descriptions = cache
+                cache[table_fqn] = tbl_desc.strip()[:240]
+            cols: List[Dict[str, str]] = []
+            for field in table.schema:
+                entry: Dict[str, str] = {"name": field.name.lower(), "type": field.field_type}
+                f_desc = getattr(field, "description", None)
+                if isinstance(f_desc, str) and f_desc.strip():
+                    entry["description"] = f_desc.strip()[:200]
+                cols.append(entry)
+            return cols
         except Exception:
             return []
+
+    def get_table_description(self, table_fqn: str) -> Optional[str]:
+        """Return cached table-level description when present in BigQuery metadata."""
+        return getattr(self, "_table_descriptions", {}).get(table_fqn)
 
     def list_tables(self, schema: Optional[str] = None) -> List[str]:
         """List tables in a dataset, or all datasets if schema is None."""

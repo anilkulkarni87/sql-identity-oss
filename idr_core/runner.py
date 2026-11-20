@@ -239,8 +239,8 @@ class IDRRunner:
         try:
             # 1. Preflight validation (before recording run or locking)
             self._start_stage("preflight")
-            preflight.run()
-            self._end_stage("preflight")
+            sources_verified = preflight.run() or 0
+            self._end_stage("preflight", sources_verified)
 
             # Acquire advisory run lock in idr_meta.run_state so concurrent runs / dry runs
             # do not overwrite shared idr_work staging tables or idr_meta config tables.
@@ -370,7 +370,7 @@ class IDRRunner:
                     extra={"run_id": self.run_id, "stage": "dry_run_analysis"},
                 )
                 output.generate_dry_run_output()
-                self._end_stage("dry_run_analysis")
+                self._end_stage("dry_run_analysis", entities)
                 status = "DRY_RUN_COMPLETE"
 
             return self._complete_run(

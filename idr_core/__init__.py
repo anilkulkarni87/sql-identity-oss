@@ -13,7 +13,7 @@ Usage:
     result = runner.run()
 """
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 
 from .canonicalizers import list_canonicalizers, register_canonicalizer
 from .config import DEFAULT_EXCLUSIONS, load_config, validate_config

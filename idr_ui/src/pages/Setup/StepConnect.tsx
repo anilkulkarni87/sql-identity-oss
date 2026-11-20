@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-    Loader2, Sparkles, Check, Database, ShieldCheck,
+    Loader2, Check, Database, ShieldCheck,
     Server, KeyRound, ArrowLeft
 } from "lucide-react";
 import { api } from '../../api/client';
@@ -162,13 +162,13 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
             <div className={`grid grid-cols-1 ${hasDiscovered ? 'lg:grid-cols-12 gap-6 items-start' : 'max-w-2xl mx-auto'}`}>
                 {/* Left Column: Auto-Discovered Profiles */}
                 {hasDiscovered && (
-                    <div className="lg:col-span-5 bg-gradient-to-b from-blue-950/35 via-indigo-950/20 to-slate-900/70 border border-blue-500/30 rounded-xl p-4 space-y-3.5">
+                    <div className="lg:col-span-5 bg-surface border border-line-default rounded-md p-4 space-y-3.5">
                         <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
-                                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                            <span className="text-xs font-semibold text-accent uppercase tracking-wider flex items-center gap-1.5">
+                                <Database className="w-3.5 h-3.5 text-accent" />
                                 Auto-Detected Profiles ({discoveredConnections.length})
                             </span>
-                            <span className="text-[11px] text-slate-400">CLI &amp; dbt</span>
+                            <span className="text-[11px] text-ink-muted font-mono">CLI &amp; dbt</span>
                         </div>
 
                         <div className="space-y-2.5">

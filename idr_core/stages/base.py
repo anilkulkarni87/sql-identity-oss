@@ -96,37 +96,48 @@ class BaseStage:
 
     @staticmethod
     def _exclusion_match_predicate(type_expr: str, value_expr: str) -> str:
-        """Build cross-dialect EXISTS predicate matching idr_meta.identifier_exclusion.
+        """Build cross-dialect predicate matching idr_meta.identifier_exclusion.
 
-        Supports EXACT and LIKE patterns, automatically treating bare LIKE patterns
-        without '%' or '_' wildcards (e.g. 'donald') as substring '%donald%' matches.
+        Separates EXACT exclusions into hash-joinable semi-joins (1-column for ANY/*,
+        2-column for type-specific) so cloud warehouses (BigQuery, Snowflake, Databricks)
+        avoid correlated nested-loop scans unless LIKE rows are actually present.
         """
         return f"""
-            EXISTS (
-                SELECT 1 FROM idr_meta.identifier_exclusion ex
-                WHERE (
-                    UPPER({type_expr}) = UPPER(ex.identifier_type)
-                    OR UPPER(ex.identifier_type) IN ('ANY', '*')
+            (
+                LOWER({value_expr}) IN (
+                    SELECT LOWER(ex.identifier_value_pattern)
+                    FROM idr_meta.identifier_exclusion ex
+                    WHERE UPPER(ex.identifier_type) IN ('ANY', '*')
+                      AND UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT'
+                      AND REPLACE(ex.identifier_value_pattern, '%', '') = ex.identifier_value_pattern
+                      AND REPLACE(ex.identifier_value_pattern, '_', '') = ex.identifier_value_pattern
                 )
-                AND (
-                    (
-                        UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT'
-                        AND REPLACE(ex.identifier_value_pattern, '%', '') = ex.identifier_value_pattern
-                        AND LOWER({value_expr}) = LOWER(ex.identifier_value_pattern)
+                OR EXISTS (
+                    SELECT 1 FROM idr_meta.identifier_exclusion ex
+                    WHERE UPPER(ex.identifier_type) = UPPER({type_expr})
+                      AND LOWER(ex.identifier_value_pattern) = LOWER({value_expr})
+                      AND UPPER(COALESCE(ex.match_type, 'EXACT')) = 'EXACT'
+                      AND REPLACE(ex.identifier_value_pattern, '%', '') = ex.identifier_value_pattern
+                      AND REPLACE(ex.identifier_value_pattern, '_', '') = ex.identifier_value_pattern
+                )
+                OR EXISTS (
+                    SELECT 1 FROM idr_meta.identifier_exclusion ex
+                    WHERE (
+                        UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE'
+                        OR REPLACE(ex.identifier_value_pattern, '%', '') != ex.identifier_value_pattern
+                        OR REPLACE(ex.identifier_value_pattern, '_', '') != ex.identifier_value_pattern
                     )
-                    OR (
-                        (
-                            UPPER(COALESCE(ex.match_type, 'EXACT')) = 'LIKE'
-                            OR REPLACE(ex.identifier_value_pattern, '%', '') != ex.identifier_value_pattern
-                        )
-                        AND LOWER({value_expr}) LIKE (
-                            CASE
-                                WHEN REPLACE(ex.identifier_value_pattern, '%', '') != ex.identifier_value_pattern
-                                  OR REPLACE(ex.identifier_value_pattern, '_', '') != ex.identifier_value_pattern
-                                THEN LOWER(ex.identifier_value_pattern)
-                                ELSE CONCAT('%', LOWER(ex.identifier_value_pattern), '%')
-                            END
-                        )
+                    AND (
+                        UPPER({type_expr}) = UPPER(ex.identifier_type)
+                        OR UPPER(ex.identifier_type) IN ('ANY', '*')
+                    )
+                    AND LOWER({value_expr}) LIKE (
+                        CASE
+                            WHEN REPLACE(ex.identifier_value_pattern, '%', '') != ex.identifier_value_pattern
+                              OR REPLACE(ex.identifier_value_pattern, '_', '') != ex.identifier_value_pattern
+                            THEN LOWER(ex.identifier_value_pattern)
+                            ELSE CONCAT('%', LOWER(ex.identifier_value_pattern), '%')
+                        END
                     )
                 )
             )

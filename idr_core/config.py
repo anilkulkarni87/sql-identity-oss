@@ -37,6 +37,9 @@ DEFAULT_EXCLUSIONS: List[Dict[str, str]] = [
     {"identifier_type": "EMAIL", "identifier_value_pattern": "na@%", "match_type": "LIKE", "reason": "Default pack: NA email"},
     {"identifier_type": "EMAIL", "identifier_value_pattern": "%@example.com", "match_type": "LIKE", "reason": "Default pack: RFC 2606 example domain"},
     {"identifier_type": "EMAIL", "identifier_value_pattern": "%@test.com", "match_type": "LIKE", "reason": "Default pack: test domain"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "erased_%@%", "match_type": "LIKE", "reason": "Default pack: GDPR-erased email"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "%@anonymized.%", "match_type": "LIKE", "reason": "Default pack: anonymized email domain"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "redacted@%", "match_type": "LIKE", "reason": "Default pack: redacted email"},
     # Bogus / Repeated-Digit Phone Numbers
     {"identifier_type": "PHONE", "identifier_value_pattern": "0000000000", "match_type": "EXACT", "reason": "Default pack: all-zeros phone"},
     {"identifier_type": "PHONE", "identifier_value_pattern": "1111111111", "match_type": "EXACT", "reason": "Default pack: repeated-1s phone"},
@@ -56,6 +59,9 @@ DEFAULT_EXCLUSIONS: List[Dict[str, str]] = [
     {"identifier_type": "ANY", "identifier_value_pattern": "unknown", "match_type": "EXACT", "reason": "Default pack: literal unknown"},
     {"identifier_type": "ANY", "identifier_value_pattern": "anonymous", "match_type": "EXACT", "reason": "Default pack: literal anonymous"},
     {"identifier_type": "ANY", "identifier_value_pattern": "refused", "match_type": "EXACT", "reason": "Default pack: literal refused"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "redacted", "match_type": "EXACT", "reason": "Default pack: literal redacted"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "---", "match_type": "EXACT", "reason": "Default pack: dash placeholder"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "na", "match_type": "EXACT", "reason": "Default pack: literal na"},
 ]
 
 
@@ -1635,7 +1641,9 @@ def get_config_snapshots(adapter, limit: int = 15) -> List[Dict[str, Any]]:
         except Exception:
             continue
         rules_cnt = len(cfg.get("rules") or []) + len(cfg.get("fuzzy_rules") or [])
-        excl_cnt = len(cfg.get("exclusions") or []) + (33 if cfg.get("use_default_exclusions") else 0)
+        excl_cnt = len(cfg.get("exclusions") or []) + (
+            len(DEFAULT_EXCLUSIONS) if cfg.get("use_default_exclusions") else 0
+        )
         snapshots.append(
             {
                 "config_hash": str(row.get("config_hash") or ""),
@@ -1812,8 +1820,8 @@ def compute_dry_run_summary(
             current_edges = int(
                 adapter.query_one(
                     "SELECT COUNT(*) FROM idr_out.identity_edges_current e "
-                    "WHERE EXISTS (SELECT 1 FROM idr_work.lp_labels l "
-                    "WHERE l.entity_key = e.left_entity_key OR l.entity_key = e.right_entity_key)"
+                    "WHERE e.left_entity_key IN (SELECT entity_key FROM idr_work.lp_labels) "
+                    "   OR e.right_entity_key IN (SELECT entity_key FROM idr_work.lp_labels)"
                 )
                 or 0
             )
@@ -1849,8 +1857,8 @@ def compute_dry_run_summary(
         edge_scope_where = "1=1"
         if normalized_mode != "FULL" and adapter.table_exists("idr_work.lp_labels"):
             edge_scope_where = (
-                "EXISTS (SELECT 1 FROM idr_work.lp_labels l "
-                "WHERE l.entity_key = e.left_entity_key OR l.entity_key = e.right_entity_key)"
+                "(e.left_entity_key IN (SELECT entity_key FROM idr_work.lp_labels) "
+                "OR e.right_entity_key IN (SELECT entity_key FROM idr_work.lp_labels))"
             )
 
         curr_by_type_rows = adapter.query(
@@ -1881,27 +1889,44 @@ def compute_dry_run_summary(
 
         # Corroborating-edge shadow attribution: unchanged entities that lost at least
         # one historical edge yet remain connected through surviving identifier types.
+        # Uses canonicalized endpoints + unpivoted endpoint types for 100% hash equi-joins (no OR joins).
         shadow_rows = adapter.query(f"""
-            WITH removed_edges AS (
+            WITH curr_norm AS (
                 SELECT
-                    e.left_entity_key,
-                    e.right_entity_key,
+                    CASE WHEN e.left_entity_key <= e.right_entity_key THEN e.left_entity_key ELSE e.right_entity_key END AS k1,
+                    CASE WHEN e.left_entity_key <= e.right_entity_key THEN e.right_entity_key ELSE e.left_entity_key END AS k2,
                     UPPER(e.identifier_type) AS identifier_type
                 FROM idr_out.identity_edges_current e
                 WHERE {edge_scope_where}
-                  AND NOT EXISTS (
-                      SELECT 1 FROM idr_work.edges_new n
-                      WHERE UPPER(n.identifier_type) = UPPER(e.identifier_type)
-                        AND (
-                            (n.left_entity_key = e.left_entity_key AND n.right_entity_key = e.right_entity_key)
-                            OR (n.left_entity_key = e.right_entity_key AND n.right_entity_key = e.left_entity_key)
-                        )
-                  )
+            ),
+            new_norm AS (
+                SELECT
+                    CASE WHEN n.left_entity_key <= n.right_entity_key THEN n.left_entity_key ELSE n.right_entity_key END AS k1,
+                    CASE WHEN n.left_entity_key <= n.right_entity_key THEN n.right_entity_key ELSE n.left_entity_key END AS k2,
+                    UPPER(n.identifier_type) AS identifier_type
+                FROM idr_work.edges_new n
+                GROUP BY 1, 2, 3
+            ),
+            removed_edges AS (
+                SELECT
+                    c.k1 AS left_entity_key,
+                    c.k2 AS right_entity_key,
+                    c.identifier_type
+                FROM curr_norm c
+                LEFT JOIN new_norm n
+                  ON c.k1 = n.k1
+                 AND c.k2 = n.k2
+                 AND c.identifier_type = n.identifier_type
+                WHERE n.k1 IS NULL
             ),
             removed_endpoints AS (
-                SELECT left_entity_key AS entity_key, identifier_type AS removed_type FROM removed_edges
-                UNION DISTINCT
-                SELECT right_entity_key AS entity_key, identifier_type AS removed_type FROM removed_edges
+                SELECT entity_key, removed_type
+                FROM (
+                    SELECT left_entity_key AS entity_key, identifier_type AS removed_type FROM removed_edges
+                    UNION ALL
+                    SELECT right_entity_key AS entity_key, identifier_type AS removed_type FROM removed_edges
+                ) re
+                GROUP BY entity_key, removed_type
             ),
             unchanged_removed AS (
                 SELECT r.entity_key, r.removed_type
@@ -1910,14 +1935,25 @@ def compute_dry_run_summary(
                   ON d.entity_key = r.entity_key
                 WHERE d.run_id = '{run_id}'
                   AND d.change_type = 'UNCHANGED'
+            ),
+            new_endpoint_types AS (
+                SELECT entity_key, corroborating_type
+                FROM (
+                    SELECT left_entity_key AS entity_key, UPPER(identifier_type) AS corroborating_type
+                    FROM idr_work.edges_new
+                    UNION ALL
+                    SELECT right_entity_key AS entity_key, UPPER(identifier_type) AS corroborating_type
+                    FROM idr_work.edges_new
+                ) ne
+                GROUP BY entity_key, corroborating_type
             )
             SELECT DISTINCT
                 u.entity_key,
-                UPPER(n.identifier_type) AS corroborating_type
+                n.corroborating_type
             FROM unchanged_removed u
-            JOIN idr_work.edges_new n
-              ON (u.entity_key = n.left_entity_key OR u.entity_key = n.right_entity_key)
-             AND UPPER(n.identifier_type) != u.removed_type
+            JOIN new_endpoint_types n
+              ON u.entity_key = n.entity_key
+             AND n.corroborating_type != u.removed_type
         """)
         if shadow_rows:
             shadow_preserved_entities = len({str(r["entity_key"]) for r in shadow_rows})

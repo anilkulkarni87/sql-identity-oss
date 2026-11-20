@@ -84,7 +84,7 @@ class OutputStage(BaseStage):
         """)
 
         # 1. Edge stats per cluster with calibrated identifier fidelity & diversity
-        self.adapter.execute(f"""
+        self.adapter.execute("""
             CREATE OR REPLACE TABLE idr_work.cluster_edge_stats AS
             SELECT
                 m.resolved_id,
@@ -461,6 +461,14 @@ class OutputStage(BaseStage):
                 insert_cols=["entity_key", "resolved_id", "updated_at", "run_id", "super_cluster_id"],
             )
 
+            # 2b. Cleanup stale memberships (FULL run only) so removed/inactive source tables
+            # or hard-deleted source rows do not leave ghost memberships behind.
+            if self.config and self.config.run_mode == "FULL":
+                self.adapter.execute(f"""
+                    DELETE FROM idr_out.identity_resolved_membership_current
+                    WHERE run_id != '{self.run_id}'
+                """)
+
             # 3. Update edges table (Insert / Upsert) BEFORE clusters to enable scoring.
             # In INCR mode, remove stale historical edges for re-extracted entities and
             # any edges invalidated by new exclusions before upserting freshly computed edges.
@@ -684,9 +692,14 @@ class OutputStage(BaseStage):
 
     def generate_dry_run_output(self) -> None:
         """Generate dry run analysis without updating production tables."""
+        dry_run_cluster = (
+            "CLUSTER BY run_id, change_type, entity_key "
+            if self.adapter.dialect == "bigquery"
+            else ""
+        )
         # Analyze what would change
         self.adapter.execute(f"""
-            CREATE OR REPLACE TABLE idr_out.dry_run_results AS
+            CREATE OR REPLACE TABLE idr_out.dry_run_results {dry_run_cluster}AS
             SELECT
                 lp.entity_key,
                 m.resolved_id AS current_resolved_id,

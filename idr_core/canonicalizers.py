@@ -62,26 +62,29 @@ def _canon_email_strip_plus(raw_expr: str, dialect: str) -> str:
 
 
 def _canon_phone_digits(raw_expr: str, dialect: str) -> str:
-    """Strip all non-numeric characters."""
-    return _regexp_replace_all(raw_expr, "[^0-9]", "", dialect)
+    """Strip all non-numeric characters; return NULL if fewer than 7 digits remain."""
+    digits = _regexp_replace_all(raw_expr, "[^0-9]", "", dialect)
+    return f"CASE WHEN LENGTH({digits}) < 7 THEN NULL ELSE {digits} END"
 
 
 def _canon_phone_us_10(raw_expr: str, dialect: str) -> str:
     """
     Strip non-digits and normalize 11-digit numbers starting with '1' to 10 digits.
+    Returns NULL if fewer than 7 digits remain.
     Matches `+1 (555) 123-4567`, `1-555-123-4567`, and `5551234567` to `5551234567`.
     """
-    digits = _canon_phone_digits(raw_expr, dialect)
+    digits = _regexp_replace_all(raw_expr, "[^0-9]", "", dialect)
     return (
-        f"CASE WHEN LENGTH({digits}) = 11 AND SUBSTR({digits}, 1, 1) = '1' "
+        f"CASE WHEN LENGTH({digits}) < 7 THEN NULL "
+        f"WHEN LENGTH({digits}) = 11 AND SUBSTR({digits}, 1, 1) = '1' "
         f"THEN SUBSTR({digits}, 2, 10) ELSE {digits} END"
     )
 
 
 def _canon_alphanumeric_upper(raw_expr: str, dialect: str) -> str:
-    """Strip spaces, hyphens, and punctuation, then uppercase (ideal for loyalty/account IDs)."""
+    """Strip spaces, hyphens, and punctuation, then uppercase; return NULL if empty."""
     cleaned = _regexp_replace_all(raw_expr, "[^a-zA-Z0-9]", "", dialect)
-    return f"UPPER({cleaned})"
+    return f"NULLIF(UPPER({cleaned}), '')"
 
 
 _CANONICALIZER_REGISTRY: Dict[str, CanonicalizerFn] = {

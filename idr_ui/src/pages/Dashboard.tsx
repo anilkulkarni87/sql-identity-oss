@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
@@ -5,77 +6,90 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts'
-import { Users, GitBranch, Activity, Clock, AlertTriangle, Play, Network, Sparkles, ArrowRight, ShieldCheck, Layers } from 'lucide-react'
+import { AlertTriangle, Play, Network, ArrowRight, RefreshCw } from 'lucide-react'
 import { api } from '../api/client'
-import { formatSourceName } from '../utils/colors'
+import { ENTITY_PALETTE, formatSourceName } from '../utils/colors'
+import { useTheme } from '../utils/theme'
+import { useRunDrawer } from '../components/RunPipelineDrawer'
 
 export default function Dashboard() {
     const navigate = useNavigate()
+    const { theme } = useTheme()
+    const { openRunDrawer } = useRunDrawer()
 
-    // Check setup status
     const { data: setupStatus } = useQuery({
         queryKey: ['setupStatus'],
-        queryFn: () => api.getSetupStatus()
+        queryFn: () => api.getSetupStatus(),
     })
 
     const isConfigured = Boolean(setupStatus?.configured)
 
-    const { data: metrics, isLoading: metricsLoading } = useQuery({
+    const { data: metrics, isLoading: metricsLoading, isError: metricsError, refetch: refetchMetrics } = useQuery({
         queryKey: ['metrics'],
         queryFn: () => api.getMetricsSummary(),
-        enabled: isConfigured
+        enabled: isConfigured,
     })
 
     const { data: distribution } = useQuery({
         queryKey: ['distribution'],
         queryFn: () => api.getClusterDistribution(),
-        enabled: isConfigured
+        enabled: isConfigured,
     })
 
     const { data: rules } = useQuery({
         queryKey: ['rules'],
         queryFn: () => api.getRuleStats(),
-        enabled: isConfigured
+        enabled: isConfigured,
     })
 
     const { data: alerts } = useQuery({
         queryKey: ['alerts'],
         queryFn: () => api.getAlerts(),
-        enabled: isConfigured
+        enabled: isConfigured,
     })
 
     const { data: confidenceDist } = useQuery({
         queryKey: ['confidenceDist'],
         queryFn: () => api.getConfidenceDistribution(),
-        enabled: isConfigured
+        enabled: isConfigured,
     })
 
     const { data: sourceContrib } = useQuery({
         queryKey: ['sourceContrib'],
         queryFn: () => api.getSourceContribution(),
-        enabled: isConfigured
+        enabled: isConfigured,
     })
 
     const { data: recentRuns } = useQuery({
         queryKey: ['dashboardRuns'],
         queryFn: () => api.getRuns(10),
-        enabled: isConfigured
+        enabled: isConfigured,
     })
 
-    const runTrendData = (recentRuns || [])
-        .slice()
-        .reverse()
-        .map((r, idx) => ({
-            label: r.started_at ? new Date(r.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : `#${idx + 1}`,
-            duration: r.duration_seconds ?? 0,
-            entities: r.entities_processed ?? 0,
-            mode: r.run_mode,
-        }))
+    const runTrendData = useMemo(
+        () =>
+            (recentRuns || [])
+                .slice()
+                .reverse()
+                .map((r, idx) => ({
+                    label: r.started_at
+                        ? new Date(r.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                        : `#${idx + 1}`,
+                    duration: r.duration_seconds ?? 0,
+                    entities: r.entities_processed ?? 0,
+                    mode: r.run_mode,
+                })),
+        [recentRuns]
+    )
 
-    const sourceChartData = (sourceContrib || []).map((s) => ({
-        ...s,
-        label: formatSourceName(s.source_id),
-    }))
+    const sourceChartData = useMemo(
+        () =>
+            (sourceContrib || []).map((s) => ({
+                ...s,
+                label: formatSourceName(s.source_id),
+            })),
+        [sourceContrib]
+    )
 
     const formatCompact = (value: number) => {
         if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`
@@ -83,342 +97,412 @@ export default function Dashboard() {
         return value.toString()
     }
 
-    const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
+    const chartTokens = useMemo(
+        () =>
+            theme === 'dark'
+                ? {
+                      grid: '#1e293b',
+                      axis: '#94a3b8',
+                      bar: '#60a5fa',
+                      areaStroke: '#60a5fa',
+                      tooltipBg: '#111620',
+                      tooltipBorder: '#334155',
+                      tooltipInk: '#f1f5f9',
+                  }
+                : {
+                      grid: '#e2e8f0',
+                      axis: '#64748b',
+                      bar: '#1d4ed8',
+                      areaStroke: '#1d4ed8',
+                      tooltipBg: '#ffffff',
+                      tooltipBorder: '#cbd5e1',
+                      tooltipInk: '#0f172a',
+                  },
+        [theme]
+    )
+
+    const tooltipStyle = {
+        backgroundColor: chartTokens.tooltipBg,
+        border: `1px solid ${chartTokens.tooltipBorder}`,
+        borderRadius: '6px',
+        fontSize: '12px',
+        color: chartTokens.tooltipInk,
+        boxShadow: 'var(--shadow-popover)',
+    }
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-                        <Activity className="w-6 h-6 text-blue-400" />
+                    <h1 className="text-[18px] font-semibold tracking-[-0.015em] text-ink">
                         Match Quality Dashboard
                     </h1>
-                    <p className="text-sm text-gray-400 mt-1">
-                        High-level identity resolution telemetry, cluster distribution, and rule metrics.
+                    <p className="text-[13px] text-ink-muted mt-0.5">
+                        Cluster distribution, match rule attribution, confidence tiers, and run latency.
                     </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 shrink-0">
                     <button
+                        type="button"
                         onClick={() => navigate('/explorer')}
-                        className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 px-4 py-2 rounded-xl text-sm font-medium transition-all shadow-sm"
+                        className="btn-secondary"
                     >
-                        <Network className="w-4 h-4 text-blue-400" />
-                        Explore Graph
+                        <Network className="w-3.5 h-3.5 text-ink-muted" />
+                        Explore Clusters
                     </button>
-                    {isConfigured && (
-                        <button
-                            onClick={() => navigate('/setup')}
-                            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all shadow-md"
-                        >
-                            <Play className="w-4 h-4" />
-                            Run Pipeline
-                        </button>
-                    )}
+                    <button
+                        type="button"
+                        onClick={openRunDrawer}
+                        className="btn-primary"
+                    >
+                        <Play className="w-3.5 h-3.5" />
+                        {isConfigured ? 'Run Pipeline' : 'Configure Pipeline'}
+                    </button>
                 </div>
             </div>
 
-            {/* Setup Callout Banner if not yet configured */}
-            {setupStatus && !setupStatus.configured && (
-                <div className="p-5 bg-gradient-to-r from-blue-950/60 to-purple-950/60 border border-blue-500/40 rounded-2xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                        <div className="flex items-center gap-2 text-blue-300 font-semibold text-sm">
-                            <Sparkles className="w-4 h-4" />
-                            Configuration Required
-                        </div>
-                        <p className="text-xs text-gray-300 max-w-2xl">
-                            Connect your warehouse (Databricks, Snowflake, BigQuery, Postgres), map your identity tables, and run your first identity resolution pipeline.
+            {setupStatus && !setupStatus.configured ? (
+                <div className="surface-panel p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="space-y-1 max-w-2xl">
+                        <h2 className="text-[14px] font-semibold text-ink">
+                            Connect a warehouse to start resolving identities
+                        </h2>
+                        <p className="text-[13px] text-ink-muted">
+                            Configure your warehouse connection (DuckDB, Snowflake, BigQuery, Databricks, or Postgres),
+                            map source tables and identifier rules, and execute your first resolution run.
                         </p>
                     </div>
                     <button
+                        type="button"
                         onClick={() => navigate('/setup')}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-lg transition-all flex-shrink-0"
+                        className="btn-primary shrink-0"
                     >
-                        Launch Setup Wizard
+                        Open Identity Studio
                         <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                 </div>
-            )}
-
-            {/* Metric Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <MetricCard
-                    title="Total Clusters"
-                    value={metrics?.total_clusters ? metrics.total_clusters.toLocaleString() : '—'}
-                    icon={<Users className="w-5 h-5" />}
-                    loading={metricsLoading}
-                    onClick={() => navigate('/explorer')}
-                />
-                <MetricCard
-                    title="Total Edges"
-                    value={metrics?.total_edges ? metrics.total_edges.toLocaleString() : '—'}
-                    icon={<GitBranch className="w-5 h-5" />}
-                    loading={metricsLoading}
-                />
-                <MetricCard
-                    title="Avg Confidence"
-                    value={metrics?.avg_confidence ? `${(metrics.avg_confidence * 100).toFixed(1)}%` : '—'}
-                    icon={<Activity className="w-5 h-5" />}
-                    loading={metricsLoading}
-                />
-                <MetricCard
-                    title="Last Run"
-                    value={
-                        metrics?.last_run_started_at
-                            ? formatDistanceToNow(new Date(metrics.last_run_started_at), { addSuffix: true })
-                            : metrics?.last_run_duration
-                            ? `${metrics.last_run_duration}s`
-                            : '—'
-                    }
-                    icon={<Clock className="w-5 h-5" />}
-                    loading={metricsLoading}
-                    onClick={() => navigate('/runs')}
-                />
-            </div>
-
-            {/* Charts Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Cluster Distribution */}
-                <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl">
-                    <h2 className="text-base font-semibold text-white mb-4">Cluster Size Distribution</h2>
-                    <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={distribution || []}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                            <XAxis dataKey="bucket" stroke="#9ca3af" fontSize={11} />
-                            <YAxis
-                                stroke="#9ca3af"
-                                fontSize={11}
-                                width={60}
-                                tickFormatter={(value: number) => {
-                                    if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`
-                                    if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
-                                    return value.toString()
-                                }}
-                            />
-                            <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
-                                labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
-                                itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
-                                formatter={(value: number) => [value.toLocaleString(), 'Count']}
-                            />
-                            <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Rule Breakdown */}
-                <div className="bg-gray-800/90 rounded-xl p-6 border border-gray-700/80 shadow-xl">
-                    <h2 className="text-base font-semibold text-white mb-4">Match Rule Breakdown</h2>
-                    <div className="flex flex-col sm:flex-row items-center gap-6">
-                        <div className="w-full sm:w-48 h-[220px] shrink-0">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={rules || []}
-                                        dataKey="edges_created"
-                                        nameKey="rule_id"
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={42}
-                                        outerRadius={78}
-                                        paddingAngle={2}
-                                    >
-                                        {(rules || []).map((_, index) => (
-                                            <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
-                                        labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
-                                        itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
-                                        formatter={(val: number) => [val.toLocaleString(), 'Edges Created']}
-                                    />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
-                        <div className="flex-1 w-full min-w-0 space-y-2 max-h-56 overflow-y-auto pr-1">
-                            {(rules || []).map((rule, i) => (
-                                <div key={rule.rule_id} className="flex items-center justify-between p-2 rounded-lg bg-gray-900/50 border border-gray-700/50 text-xs">
-                                    <div className="flex items-center gap-2">
-                                        <div
-                                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                                            style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                                        />
-                                        <span className="font-medium text-gray-200 truncate">{rule.identifier_type || rule.rule_id}</span>
-                                    </div>
-                                    <span className="font-mono text-gray-400 font-semibold">{rule.percentage}%</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Row 2: Quality, Source Coverage & Run Trend */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Multi-Entity Confidence Tiers */}
-                <div className="bg-slate-900/90 rounded-xl p-6 border border-slate-800 shadow-xl">
-                    <div className="flex items-center justify-between mb-1">
-                        <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                            Multi-Entity Confidence
-                        </h2>
-                    </div>
-                    <p className="text-xs text-slate-400 mb-4">
-                        Excludes singletons so risky or over-merged clusters stand out.
-                    </p>
-                    <ResponsiveContainer width="100%" height={220}>
-                        <BarChart data={confidenceDist || []} margin={{ left: -10, right: 8 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                            <XAxis
-                                dataKey="bucket"
-                                stroke="#94a3b8"
-                                fontSize={10}
-                                tickFormatter={(v: string) => v.split(' (')[0]}
-                            />
-                            <YAxis stroke="#94a3b8" fontSize={11} width={50} tickFormatter={formatCompact} />
-                            <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
-                                labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
-                                itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
-                                formatter={(value: number) => [value.toLocaleString(), 'Clusters']}
-                            />
-                            <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                                {(confidenceDist || []).map((entry, idx) => (
-                                    <Cell key={idx} fill={entry.color || '#3b82f6'} />
-                                ))}
-                            </Bar>
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Source System Contribution */}
-                <div className="bg-slate-900/90 rounded-xl p-6 border border-slate-800 shadow-xl">
-                    <h2 className="text-base font-semibold text-white flex items-center gap-2 mb-1">
-                        <Layers className="w-4 h-4 text-blue-400" />
-                        Source System Coverage
-                    </h2>
-                    <p className="text-xs text-slate-400 mb-4">
-                        Entities contributed by each connected source table.
-                    </p>
-                    <ResponsiveContainer width="100%" height={220}>
-                        <BarChart data={sourceChartData} layout="vertical" margin={{ left: 10, right: 12 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                            <XAxis type="number" stroke="#94a3b8" fontSize={11} tickFormatter={formatCompact} />
-                            <YAxis type="category" dataKey="label" stroke="#94a3b8" fontSize={10} width={96} />
-                            <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
-                                labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
-                                itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
-                                formatter={(value: number) => [value.toLocaleString(), 'Entities']}
-                            />
-                            <Bar dataKey="entities" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Run Duration Trend */}
-                <div className="bg-slate-900/90 rounded-xl p-6 border border-slate-800 shadow-xl">
-                    <div className="flex items-center justify-between mb-1">
-                        <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-purple-400" />
-                            Pipeline Latency Trend
-                        </h2>
-                        <button
-                            onClick={() => navigate('/runs')}
-                            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            ) : (
+                <>
+                    {metricsError && (
+                        <div
+                            role="alert"
+                            className="p-3 rounded-md bg-status-danger-soft border border-status-danger-border flex items-center justify-between gap-3"
                         >
-                            View all →
-                        </button>
-                    </div>
-                    <p className="text-xs text-slate-400 mb-4">
-                        Execution time (seconds) across recent pipeline runs.
-                    </p>
-                    <ResponsiveContainer width="100%" height={220}>
-                        <AreaChart data={runTrendData} margin={{ left: -10, right: 8 }}>
-                            <defs>
-                                <linearGradient id="durationGrad" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
-                                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.0} />
-                                </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                            <XAxis dataKey="label" stroke="#94a3b8" fontSize={10} />
-                            <YAxis stroke="#94a3b8" fontSize={11} width={44} tickFormatter={(v: number) => `${v}s`} />
-                            <Tooltip
-                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc' }}
-                                labelStyle={{ color: '#f8fafc', fontSize: '12px', fontWeight: 600 }}
-                                itemStyle={{ color: '#e2e8f0', fontSize: '12px' }}
-                                formatter={(value: number) => [`${value}s`, 'Duration']}
-                            />
-                            <Area
-                                type="monotone"
-                                dataKey="duration"
-                                stroke="#8b5cf6"
-                                strokeWidth={2}
-                                fillOpacity={1}
-                                fill="url(#durationGrad)"
-                            />
-                        </AreaChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
+                            <span className="text-xs text-status-danger">
+                                Unable to load dashboard metrics from the warehouse. Verify your connection and retry.
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => refetchMetrics()}
+                                className="btn-secondary text-xs shrink-0"
+                            >
+                                <RefreshCw className="w-3 h-3" />
+                                Retry
+                            </button>
+                        </div>
+                    )}
 
-            {/* Alerts Panel */}
-            {alerts && alerts.length > 0 && (
-                <div className="bg-amber-950/30 border border-amber-800/60 rounded-xl p-4 shadow-lg space-y-2">
-                    <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-amber-400" />
-                        <h2 className="font-semibold text-amber-300 text-sm">System Alerts ({alerts.length})</h2>
+                    {alerts && alerts.length > 0 && (
+                        <div className="p-3 rounded-md bg-status-warning-soft border border-status-warning-border space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-status-warning">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                <span>System Alerts ({alerts.length})</span>
+                            </div>
+                            <ul className="space-y-1 pl-5 list-disc text-xs text-ink-secondary">
+                                {alerts.map((alert, i) => (
+                                    <li key={i}>
+                                        {alert.message}{' '}
+                                        {alert.count != null && (
+                                            <span className="font-mono tabular-nums font-medium">
+                                                ({alert.count.toLocaleString()})
+                                            </span>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    <div className="surface-panel grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 sm:divide-x divide-line overflow-hidden">
+                        <MetricCell
+                            label="Resolved Clusters"
+                            value={metrics?.total_clusters != null ? metrics.total_clusters.toLocaleString() : '—'}
+                            sub={metrics?.total_entities != null ? `${metrics.total_entities.toLocaleString()} entities` : undefined}
+                            loading={metricsLoading}
+                            onClick={() => navigate('/explorer')}
+                        />
+                        <MetricCell
+                            label="Match Edges"
+                            value={metrics?.total_edges != null ? metrics.total_edges.toLocaleString() : '—'}
+                            sub={rules ? `${rules.length} active rules` : undefined}
+                            loading={metricsLoading}
+                        />
+                        <MetricCell
+                            label="Avg Confidence"
+                            value={metrics?.avg_confidence != null ? `${(metrics.avg_confidence * 100).toFixed(1)}%` : '—'}
+                            sub="Multi-entity mean"
+                            loading={metricsLoading}
+                        />
+                        <MetricCell
+                            label="Last Run"
+                            value={
+                                metrics?.last_run_started_at
+                                    ? formatDistanceToNow(new Date(metrics.last_run_started_at), { addSuffix: true })
+                                    : metrics?.last_run_duration != null
+                                    ? `${metrics.last_run_duration}s`
+                                    : '—'
+                            }
+                            sub={
+                                metrics?.last_run_duration != null
+                                    ? `Duration ${metrics.last_run_duration}s`
+                                    : undefined
+                            }
+                            loading={metricsLoading}
+                            onClick={() => navigate('/runs')}
+                        />
                     </div>
-                    <ul className="space-y-1.5 pl-2">
-                        {alerts.map((alert, i) => (
-                            <li key={i} className="text-xs text-amber-200/90 list-disc list-inside">
-                                {alert.message} {alert.count && `(${alert.count})`}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <section className="surface-panel p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <div>
+                                    <h2 className="text-[13px] font-semibold text-ink">Cluster Size Distribution</h2>
+                                    <p className="text-xs text-ink-muted">Entity count per resolved cluster bucket</p>
+                                </div>
+                            </div>
+                            <ResponsiveContainer width="100%" height={220}>
+                                <BarChart data={distribution || []} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} vertical={false} />
+                                    <XAxis dataKey="bucket" stroke={chartTokens.axis} fontSize={11} tickLine={false} />
+                                    <YAxis
+                                        stroke={chartTokens.axis}
+                                        fontSize={11}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        width={56}
+                                        tickFormatter={formatCompact}
+                                    />
+                                    <Tooltip
+                                        contentStyle={tooltipStyle}
+                                        formatter={(value: number) => [value.toLocaleString(), 'Clusters']}
+                                    />
+                                    <Bar dataKey="count" fill={chartTokens.bar} radius={[3, 3, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </section>
+
+                        <section className="surface-panel p-4">
+                            <div className="mb-3">
+                                <h2 className="text-[13px] font-semibold text-ink">Match Rule Attribution</h2>
+                                <p className="text-xs text-ink-muted">Share of edges created by each deterministic or fuzzy rule</p>
+                            </div>
+                            <div className="flex flex-col sm:flex-row items-center gap-4">
+                                <div className="w-40 h-[196px] shrink-0">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie
+                                                data={rules || []}
+                                                dataKey="edges_created"
+                                                nameKey="rule_id"
+                                                cx="50%"
+                                                cy="50%"
+                                                innerRadius={44}
+                                                outerRadius={72}
+                                                paddingAngle={1.5}
+                                                stroke="none"
+                                            >
+                                                {(rules || []).map((_, index) => (
+                                                    <Cell
+                                                        key={index}
+                                                        fill={ENTITY_PALETTE[index % ENTITY_PALETTE.length].bg}
+                                                    />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip
+                                                contentStyle={tooltipStyle}
+                                                formatter={(val: number) => [val.toLocaleString(), 'Edges']}
+                                            />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div className="flex-1 w-full min-w-0 max-h-[196px] overflow-y-auto border border-line rounded-md divide-y divide-line">
+                                    {(rules || []).length === 0 ? (
+                                        <div className="px-3 py-6 text-center text-xs text-ink-muted">
+                                            No match rule edges recorded yet.
+                                        </div>
+                                    ) : (
+                                        (rules || []).map((rule, i) => (
+                                            <div
+                                                key={rule.rule_id}
+                                                className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs bg-surface hover:bg-subtle transition-colors"
+                                            >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span
+                                                        className="w-2 h-2 rounded-full shrink-0"
+                                                        style={{ backgroundColor: ENTITY_PALETTE[i % ENTITY_PALETTE.length].bg }}
+                                                    />
+                                                    <span className="font-mono text-ink truncate">
+                                                        {rule.identifier_type || rule.rule_id}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2.5 font-mono tabular-nums shrink-0">
+                                                    <span className="text-ink-muted">{rule.edges_created.toLocaleString()}</span>
+                                                    <span className="text-ink font-medium w-10 text-right">{rule.percentage}%</span>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        <section className="surface-panel p-4">
+                            <div className="mb-3">
+                                <h2 className="text-[13px] font-semibold text-ink">Multi-Entity Confidence</h2>
+                                <p className="text-xs text-ink-muted">Excludes singletons to highlight low-confidence merges</p>
+                            </div>
+                            <ResponsiveContainer width="100%" height={200}>
+                                <BarChart data={confidenceDist || []} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} vertical={false} />
+                                    <XAxis
+                                        dataKey="bucket"
+                                        stroke={chartTokens.axis}
+                                        fontSize={10}
+                                        tickLine={false}
+                                        tickFormatter={(v: string) => v.split(' (')[0]}
+                                    />
+                                    <YAxis
+                                        stroke={chartTokens.axis}
+                                        fontSize={11}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        width={48}
+                                        tickFormatter={formatCompact}
+                                    />
+                                    <Tooltip
+                                        contentStyle={tooltipStyle}
+                                        formatter={(value: number) => [value.toLocaleString(), 'Clusters']}
+                                    />
+                                    <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                                        {(confidenceDist || []).map((entry, idx) => (
+                                            <Cell key={idx} fill={entry.color || chartTokens.bar} />
+                                        ))}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </section>
+
+                        <section className="surface-panel p-4">
+                            <div className="mb-3">
+                                <h2 className="text-[13px] font-semibold text-ink">Source System Coverage</h2>
+                                <p className="text-xs text-ink-muted">Entities contributed by each connected source table</p>
+                            </div>
+                            <ResponsiveContainer width="100%" height={200}>
+                                <BarChart data={sourceChartData} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} horizontal={false} />
+                                    <XAxis type="number" stroke={chartTokens.axis} fontSize={11} tickLine={false} tickFormatter={formatCompact} />
+                                    <YAxis type="category" dataKey="label" stroke={chartTokens.axis} fontSize={11} tickLine={false} axisLine={false} width={92} />
+                                    <Tooltip
+                                        contentStyle={tooltipStyle}
+                                        formatter={(value: number) => [value.toLocaleString(), 'Entities']}
+                                    />
+                                    <Bar dataKey="entities" fill={chartTokens.bar} radius={[0, 3, 3, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </section>
+
+                        <section className="surface-panel p-4">
+                            <div className="flex items-start justify-between gap-2 mb-3">
+                                <div>
+                                    <h2 className="text-[13px] font-semibold text-ink">Pipeline Latency Trend</h2>
+                                    <p className="text-xs text-ink-muted">Execution duration (s) across recent runs</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => navigate('/runs')}
+                                    className="text-xs font-medium text-accent hover:underline"
+                                >
+                                    All runs →
+                                </button>
+                            </div>
+                            <ResponsiveContainer width="100%" height={200}>
+                                <AreaChart data={runTrendData} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} vertical={false} />
+                                    <XAxis dataKey="label" stroke={chartTokens.axis} fontSize={10} tickLine={false} />
+                                    <YAxis
+                                        stroke={chartTokens.axis}
+                                        fontSize={11}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        width={44}
+                                        tickFormatter={(v: number) => `${v}s`}
+                                    />
+                                    <Tooltip
+                                        contentStyle={tooltipStyle}
+                                        formatter={(value: number) => [`${value}s`, 'Duration']}
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="duration"
+                                        stroke={chartTokens.areaStroke}
+                                        strokeWidth={1.75}
+                                        fill={chartTokens.areaStroke}
+                                        fillOpacity={theme === 'dark' ? 0.16 : 0.08}
+                                    />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </section>
+                    </div>
+                </>
             )}
         </div>
     )
 }
 
-function MetricCard({
-    title,
+function MetricCell({
+    label,
     value,
-    icon,
+    sub,
     loading,
-    onClick
+    onClick,
 }: {
-    title: string
+    label: string
     value: string
-    icon: React.ReactNode
+    sub?: string
     loading?: boolean
     onClick?: () => void
 }) {
-    return (
-        <div
-            onClick={onClick}
-            className={`bg-slate-900/90 rounded-xl p-5 border border-slate-800 shadow-md hover:border-slate-700 transition-all ${
-                onClick ? 'cursor-pointer hover:bg-slate-900' : ''
-            }`}
-        >
-            <div className="flex items-center justify-between">
-                <div>
-                    <p className="text-xs font-medium text-slate-400">{title}</p>
-                    <p className="text-2xl font-bold tracking-tight tabular-nums text-white mt-1">
-                        {loading ? (
-                            <span className="animate-pulse bg-slate-800 rounded w-20 h-7 block" />
-                        ) : (
-                            value
-                        )}
-                    </p>
-                </div>
-                <div className="p-3 bg-blue-600/15 border border-blue-500/20 rounded-xl text-blue-400">
-                    {icon}
-                </div>
+    const content = (
+        <>
+            <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-ink-muted">{label}</span>
+                {onClick && <ArrowRight className="w-3 h-3 text-ink-subtle" />}
             </div>
-        </div>
+            <div className="text-[22px] leading-7 font-semibold tracking-[-0.02em] tabular-nums text-ink mt-1">
+                {loading ? (
+                    <span className="inline-block h-6 w-20 rounded bg-subtle animate-pulse" />
+                ) : (
+                    value
+                )}
+            </div>
+            {sub && <div className="text-[11px] font-mono text-ink-muted mt-0.5 truncate">{sub}</div>}
+        </>
     )
+
+    if (onClick) {
+        return (
+            <button
+                type="button"
+                onClick={onClick}
+                className="text-left px-4 py-3.5 bg-surface hover:bg-subtle transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+            >
+                {content}
+            </button>
+        )
+    }
+
+    return <div className="px-4 py-3.5 bg-surface">{content}</div>
 }
