@@ -76,8 +76,7 @@ export default function SetupWizard() {
                 }
             }
 
-            machine.resetDraftForUnconfiguredWarehouse();
-            machine.goToStage(preferredStage === 'connect' ? 'connect' : 'map');
+            machine.resetDraftForUnconfiguredWarehouse(preferredStage === 'connect' ? 'connect' : 'map');
         } catch (error) {
             console.error("Failed to load setup config:", error);
         } finally {

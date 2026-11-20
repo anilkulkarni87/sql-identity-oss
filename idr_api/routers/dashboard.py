@@ -116,7 +116,7 @@ def get_cluster_distribution(adapter=Depends(get_adapter)):
 
 
 @router.get("/api/metrics/rules", response_model=List[RuleStats])
-async def get_rule_stats(adapter=Depends(get_adapter)):
+def get_rule_stats(adapter=Depends(get_adapter)):
     """Get edges created per rule."""
 
     rows = []
@@ -161,7 +161,7 @@ async def get_rule_stats(adapter=Depends(get_adapter)):
 
 
 @router.get("/api/alerts", response_model=List[Alert])
-async def get_alerts(adapter=Depends(get_adapter)):
+def get_alerts(adapter=Depends(get_adapter)):
     """Get active warnings and alerts."""
     alerts = []
 
@@ -208,7 +208,7 @@ async def get_alerts(adapter=Depends(get_adapter)):
 
 
 @router.get("/api/metrics/confidence")
-async def get_confidence_distribution(adapter=Depends(get_adapter)):
+def get_confidence_distribution(adapter=Depends(get_adapter)):
     """Get confidence score distribution across multi-entity clusters (excluding singletons)."""
     buckets = [
         ("Over-Merge Risk (<0.30)", "#ef4444"),
@@ -245,7 +245,7 @@ async def get_confidence_distribution(adapter=Depends(get_adapter)):
 
 
 @router.get("/api/metrics/sources")
-async def get_source_contribution(adapter=Depends(get_adapter)):
+def get_source_contribution(adapter=Depends(get_adapter)):
     """Get entity and cluster counts per source system."""
     source_expr = (
         "SPLIT(entity_key, ':')[SAFE_OFFSET(0)]"

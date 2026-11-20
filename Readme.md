@@ -37,15 +37,13 @@ That's it! The engine will:
 
 ## ✨ Key Features
 
-- **Unified Core Package** - Headless-first execution via `idr_core`, CLI, Python, and `dbt_idr`
-- **🤖 Agent-Native MCP Server** - 23 tools + `/mcp` Streamable HTTP, two-step confirmation guardrails, triage loop, `SKILL.md` & `llms.txt`
-- **🖥️ Identity Studio & Explorer UI** - 4-tab Identity Studio (merged multi-schema discovery & auto-mapping, rules, survivorship, dry-run verification), cluster visualizer, config version history, and one-click GDPR Forget
+- **Unified Core Package (`v0.7.0`)** - Headless-first execution via `idr_core`, CLI, Python, and `dbt_idr`
+- **🤖 Agent-Native MCP Server & Zero-PII AI Copilot** - 23 MCP tools + `/mcp` Streamable HTTP, built-in **AI Copilot (`⌘K`)** with local Ollama (zero data movement) or Cloud BYOK (automatic PII masking), and **AI Suggest Config** statistical schema profiler
+- **🖥️ Crisp Daylight / Dark Engineering Workbench (`idr ui`)** - Precision 4-tab Identity Studio, focused `Run Pipeline` slide-over drawer, 7:5 Graph-left / Tabbed Inspector-right Explorer with collapsible Crosswalk Lineage table, Multi-Lens views & cross-lens diff matrix, and one-click GDPR Forget
 - **🪝 Event Webhooks** - Non-blocking `run.completed`, `guardrail.skipped_groups_spike`, and `privacy.erasure_completed` hooks
-- **🎯 Confidence Scoring** - Cluster quality metrics (0-1)
-- **🔒 Ephemeral Dry Run & Config Versioning** - Preview draft YAML/UI rule changes (`--config ... --dry-run`) with `Edges Delta` & `Clusters Delta` metrics without mutating `idr_meta.*`, plus `idr config history` / `idr config rollback`
-- **🛡️ Data Quality Controls** - strict mode, max_group_size, exclusion lists
-- **📈 Incremental Processing** - Watermark-based efficiency at scale
-- **🔍 Full Audit Trail** - Every decision is traceable
+- **🎯 Confidence Scoring & Multi-Lens Identity Views** - Continuous cluster quality metrics (`0.0–1.0`) and policy-scoped identity lenses (`strict_person`, `household`, `b2b_account`) evaluated in a single extraction pass
+- **🔒 Ephemeral Dry Run & Config Versioning** - Preview draft YAML/UI rule changes (`--config ... --dry-run`) with hash equi-join `Edges Delta`, `Clusters Delta`, & corroborating-edge shadow attribution without mutating `idr_meta.*`, plus `idr config history` / `idr config rollback`
+- **⚡ Dialect-Optimized Warehouse Engine** - Canonical `CLUSTER BY` table definitions across BigQuery, Snowflake, and Databricks (with zero-downtime BigQuery clustering auto-migration), pointer ping-pong Label Propagation, and single-query metadata joins
 
 ## 📊 Architecture
 
@@ -124,13 +122,30 @@ idr mcp
 
 See [MCP Documentation](idr_mcp/README.md) or [Interfaces & MCP Guide](docs/interfaces-and-dbt.md#4-fastmcp-server-for-ai-agents-idr-mcp) for Antigravity, Codex, Cursor, and Claude setup guides.
 
-### Option 3: Web UI
+### Option 3: Web UI (`idr ui`)
 
-Visualize your graph and configure rules visually.
+Launch the full-stack Web UI and FastAPI backend with a single command (opens `http://127.0.0.1:8000` automatically):
 
 ```bash
-# Start API only
-idr serve
+# Single-command UI + API server (serves bundled idr_api/static on port 8000)
+idr ui
+
+# Or pre-connect to a specific local DuckDB file
+idr ui --db demo.duckdb --port 8000
+
+# Headless API only (without opening browser)
+idr serve --port 8000
+```
+
+For frontend UI development with Vite hot-module reload (`http://localhost:3000` proxying `/api` to `:8000`):
+```bash
+# Terminal 1: Start FastAPI backend
+idr serve --reload
+
+# Terminal 2: Start Vite dev server (or build static bundle into idr_api/static)
+cd idr_ui && npm run dev
+# To update the bundled static UI served by `idr ui`:
+cd idr_ui && npm run build && rm -rf ../idr_api/static/* && cp -R dist/* ../idr_api/static/
 ```
 
 Open API docs at http://localhost:8000/docs.

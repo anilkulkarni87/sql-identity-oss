@@ -82,11 +82,13 @@ export function useWizardMachine() {
         setStage('map');
     }, []);
 
-    const resetDraftForUnconfiguredWarehouse = useCallback(() => {
+    const resetDraftForUnconfiguredWarehouse = useCallback((targetStage: WizardStage = 'map') => {
+        setIsConnected(true);
         setIsConfigured(false);
         setHasUnsavedChanges(false);
         setSelectedTables([]);
         setMappingConfig({ sources: [] });
+        setStage(targetStage === 'discover' ? 'map' : targetStage);
     }, []);
 
     const updateConfigDraft = useCallback((config: IDRConfig) => {

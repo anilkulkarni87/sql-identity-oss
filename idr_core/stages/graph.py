@@ -145,8 +145,13 @@ class GraphStage(BaseStage):
         # This uses the N-1 edge approach (anchor-based) instead of N² fully connected.
         # Deduplicate (entity_key, identifier_type, identifier_value_norm) first so multiple
         # upstream mappings for the same member cannot emit duplicate edges or inflate counts.
+        edges_cluster = (
+            "CLUSTER BY left_entity_key, right_entity_key, identifier_type "
+            if self.adapter.dialect == "bigquery"
+            else ""
+        )
         self.adapter.execute(f"""
-            CREATE OR REPLACE TABLE idr_work.edges_new AS
+            CREATE OR REPLACE TABLE idr_work.edges_new {edges_cluster}AS
             WITH dedup_identifiers AS (
                 SELECT
                     entity_key,
@@ -304,8 +309,11 @@ class GraphStage(BaseStage):
             except Exception:
                 pass
 
+        lp_edges_cluster = (
+            "CLUSTER BY src, dst " if self.adapter.dialect == "bigquery" else ""
+        )
         self.adapter.execute(f"""
-            CREATE OR REPLACE TABLE idr_work.lp_edges AS
+            CREATE OR REPLACE TABLE idr_work.lp_edges {lp_edges_cluster}AS
             SELECT left_entity_key AS src, right_entity_key AS dst FROM idr_work.edges_new
             UNION ALL
             SELECT right_entity_key AS src, left_entity_key AS dst FROM idr_work.edges_new
@@ -367,22 +375,25 @@ class GraphStage(BaseStage):
             FROM idr_work.lp_edges
         """)
 
-        # Iterative label propagation on connected subgraph
+        # Iterative label propagation on connected subgraph using pointer ping-pong
+        # (avoids full CTAS table copy + DROP on every iteration in BigQuery)
         iterations = 0
         changes = 0
+        curr_tbl = "idr_work.lp_labels"
+        next_tbl = "idr_work.lp_labels_new"
         for i in range(max_iters):
             iterations = i + 1
 
             # Propagate minimum label
-            self.adapter.execute("""
-                CREATE OR REPLACE TABLE idr_work.lp_labels_new AS
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE {next_tbl} AS
                 WITH candidate_labels AS (
                     SELECT l.entity_key, l.label AS candidate_label
-                    FROM idr_work.lp_labels l
+                    FROM {curr_tbl} l
                     UNION ALL
                     SELECT e.src AS entity_key, l2.label AS candidate_label
                     FROM idr_work.lp_edges e
-                    JOIN idr_work.lp_labels l2 ON e.dst = l2.entity_key
+                    JOIN {curr_tbl} l2 ON e.dst = l2.entity_key
                 )
                 SELECT entity_key, MIN(candidate_label) AS label
                 FROM candidate_labels
@@ -390,14 +401,13 @@ class GraphStage(BaseStage):
             """)
 
             # Check for convergence
-            changes = self.adapter.query_one("""
-                SELECT COUNT(*) FROM idr_work.lp_labels prev
-                JOIN idr_work.lp_labels_new curr ON prev.entity_key = curr.entity_key
+            changes = self.adapter.query_one(f"""
+                SELECT COUNT(*) FROM {curr_tbl} prev
+                JOIN {next_tbl} curr ON prev.entity_key = curr.entity_key
                 WHERE prev.label != curr.label
             """) or 0
 
-            # Dialect-safe table swap (supports BigQuery CTAS & Drop and Snowflake/DuckDB rename)
-            self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_new")
+            curr_tbl, next_tbl = next_tbl, curr_tbl
 
             if self.ctx.progress_callback:
                 try:
@@ -416,6 +426,11 @@ class GraphStage(BaseStage):
 
             if changes == 0:
                 break
+
+        if curr_tbl != "idr_work.lp_labels":
+            self._swap_tables("idr_work.lp_labels", curr_tbl)
+        else:
+            self.adapter.execute(f"DROP TABLE IF EXISTS {next_tbl}")
 
         if changes > 0:
             msg = (
@@ -469,19 +484,25 @@ class GraphStage(BaseStage):
             if not conflicts:
                 return 0
 
-            for row in conflicts:
-                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
-                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
-                high_key = max(a, b)
+            high_keys = sorted(
+                {
+                    max(
+                        self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a"),
+                        self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b"),
+                    )
+                    for row in conflicts
+                }
+            )
+            high_keys_in = ", ".join(f"'{k}'" for k in high_keys)
+            self.adapter.execute(f"""
+                DELETE FROM idr_work.lp_edges
+                WHERE src IN ({high_keys_in}) OR dst IN ({high_keys_in})
+            """)
+            if self.adapter.table_exists("idr_work.edges_new"):
                 self.adapter.execute(f"""
-                    DELETE FROM idr_work.lp_edges
-                    WHERE src = '{high_key}' OR dst = '{high_key}'
+                    DELETE FROM idr_work.edges_new
+                    WHERE left_entity_key IN ({high_keys_in}) OR right_entity_key IN ({high_keys_in})
                 """)
-                if self.adapter.table_exists("idr_work.edges_new"):
-                    self.adapter.execute(f"""
-                        DELETE FROM idr_work.edges_new
-                        WHERE left_entity_key = '{high_key}' OR right_entity_key = '{high_key}'
-                    """)
 
             # Re-initialize and re-converge on remaining lp_edges
             edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.lp_edges") or 0
@@ -492,30 +513,36 @@ class GraphStage(BaseStage):
                     SELECT DISTINCT src AS entity_key, src AS label
                     FROM idr_work.lp_edges
                 """)
+                curr_tbl = "idr_work.lp_labels"
+                next_tbl = "idr_work.lp_labels_new"
                 for _ in range(max_iters):
                     extra_iters += 1
-                    self.adapter.execute("""
-                        CREATE OR REPLACE TABLE idr_work.lp_labels_new AS
+                    self.adapter.execute(f"""
+                        CREATE OR REPLACE TABLE {next_tbl} AS
                         WITH candidate_labels AS (
                             SELECT l.entity_key, l.label AS candidate_label
-                            FROM idr_work.lp_labels l
+                            FROM {curr_tbl} l
                             UNION ALL
                             SELECT e.src AS entity_key, l2.label AS candidate_label
                             FROM idr_work.lp_edges e
-                            JOIN idr_work.lp_labels l2 ON e.dst = l2.entity_key
+                            JOIN {curr_tbl} l2 ON e.dst = l2.entity_key
                         )
                         SELECT entity_key, MIN(candidate_label) AS label
                         FROM candidate_labels
                         GROUP BY entity_key
                     """)
-                    changes = self.adapter.query_one("""
-                        SELECT COUNT(*) FROM idr_work.lp_labels prev
-                        JOIN idr_work.lp_labels_new curr ON prev.entity_key = curr.entity_key
+                    changes = self.adapter.query_one(f"""
+                        SELECT COUNT(*) FROM {curr_tbl} prev
+                        JOIN {next_tbl} curr ON prev.entity_key = curr.entity_key
                         WHERE prev.label != curr.label
                     """) or 0
-                    self._swap_tables("idr_work.lp_labels", "idr_work.lp_labels_new")
+                    curr_tbl, next_tbl = next_tbl, curr_tbl
                     if changes == 0:
                         break
+                if curr_tbl != "idr_work.lp_labels":
+                    self._swap_tables("idr_work.lp_labels", curr_tbl)
+                else:
+                    self.adapter.execute(f"DROP TABLE IF EXISTS {next_tbl}")
             else:
                 str_type = self._dialect["string_type"]
                 self.adapter.execute(f"""
@@ -1164,30 +1191,36 @@ class GraphStage(BaseStage):
                 SELECT DISTINCT src AS entity_key, src AS label
                 FROM idr_work.lp_edges_lens
             """)
+            curr_tbl = "idr_work.lp_labels_lens"
+            next_tbl = "idr_work.lp_labels_lens_new"
             for i in range(max_iters):
                 iterations = i + 1
-                self.adapter.execute("""
-                    CREATE OR REPLACE TABLE idr_work.lp_labels_lens_new AS
+                self.adapter.execute(f"""
+                    CREATE OR REPLACE TABLE {next_tbl} AS
                     WITH candidate_labels AS (
                         SELECT l.entity_key, l.label AS candidate_label
-                        FROM idr_work.lp_labels_lens l
+                        FROM {curr_tbl} l
                         UNION ALL
                         SELECT e.src AS entity_key, l2.label AS candidate_label
                         FROM idr_work.lp_edges_lens e
-                        JOIN idr_work.lp_labels_lens l2 ON e.dst = l2.entity_key
+                        JOIN {curr_tbl} l2 ON e.dst = l2.entity_key
                     )
                     SELECT entity_key, MIN(candidate_label) AS label
                     FROM candidate_labels
                     GROUP BY entity_key
                 """)
-                changes = self.adapter.query_one("""
-                    SELECT COUNT(*) FROM idr_work.lp_labels_lens prev
-                    JOIN idr_work.lp_labels_lens_new curr ON prev.entity_key = curr.entity_key
+                changes = self.adapter.query_one(f"""
+                    SELECT COUNT(*) FROM {curr_tbl} prev
+                    JOIN {next_tbl} curr ON prev.entity_key = curr.entity_key
                     WHERE prev.label != curr.label
                 """) or 0
-                self._swap_tables("idr_work.lp_labels_lens", "idr_work.lp_labels_lens_new")
+                curr_tbl, next_tbl = next_tbl, curr_tbl
                 if changes == 0:
                     break
+            if curr_tbl != "idr_work.lp_labels_lens":
+                self._swap_tables("idr_work.lp_labels_lens", curr_tbl)
+            else:
+                self.adapter.execute(f"DROP TABLE IF EXISTS {next_tbl}")
 
             self.adapter.execute("""
                 INSERT INTO idr_work.lp_labels_lens (entity_key, label)
@@ -1220,14 +1253,20 @@ class GraphStage(BaseStage):
             if not conflicts:
                 return 0
 
-            for row in conflicts:
-                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
-                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
-                high_key = max(a, b)
-                self.adapter.execute(f"""
-                    DELETE FROM idr_work.lp_edges_lens
-                    WHERE src = '{high_key}' OR dst = '{high_key}'
-                """)
+            high_keys = sorted(
+                {
+                    max(
+                        self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a"),
+                        self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b"),
+                    )
+                    for row in conflicts
+                }
+            )
+            high_keys_in = ", ".join(f"'{k}'" for k in high_keys)
+            self.adapter.execute(f"""
+                DELETE FROM idr_work.lp_edges_lens
+                WHERE src IN ({high_keys_in}) OR dst IN ({high_keys_in})
+            """)
 
             edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.lp_edges_lens") or 0
             extra_iters = 0
@@ -1237,30 +1276,36 @@ class GraphStage(BaseStage):
                     SELECT DISTINCT src AS entity_key, src AS label
                     FROM idr_work.lp_edges_lens
                 """)
+                curr_tbl = "idr_work.lp_labels_lens"
+                next_tbl = "idr_work.lp_labels_lens_new"
                 for _ in range(max_iters):
                     extra_iters += 1
-                    self.adapter.execute("""
-                        CREATE OR REPLACE TABLE idr_work.lp_labels_lens_new AS
+                    self.adapter.execute(f"""
+                        CREATE OR REPLACE TABLE {next_tbl} AS
                         WITH candidate_labels AS (
                             SELECT l.entity_key, l.label AS candidate_label
-                            FROM idr_work.lp_labels_lens l
+                            FROM {curr_tbl} l
                             UNION ALL
                             SELECT e.src AS entity_key, l2.label AS candidate_label
                             FROM idr_work.lp_edges_lens e
-                            JOIN idr_work.lp_labels_lens l2 ON e.dst = l2.entity_key
+                            JOIN {curr_tbl} l2 ON e.dst = l2.entity_key
                         )
                         SELECT entity_key, MIN(candidate_label) AS label
                         FROM candidate_labels
                         GROUP BY entity_key
                     """)
-                    changes = self.adapter.query_one("""
-                        SELECT COUNT(*) FROM idr_work.lp_labels_lens prev
-                        JOIN idr_work.lp_labels_lens_new curr ON prev.entity_key = curr.entity_key
+                    changes = self.adapter.query_one(f"""
+                        SELECT COUNT(*) FROM {curr_tbl} prev
+                        JOIN {next_tbl} curr ON prev.entity_key = curr.entity_key
                         WHERE prev.label != curr.label
                     """) or 0
-                    self._swap_tables("idr_work.lp_labels_lens", "idr_work.lp_labels_lens_new")
+                    curr_tbl, next_tbl = next_tbl, curr_tbl
                     if changes == 0:
                         break
+                if curr_tbl != "idr_work.lp_labels_lens":
+                    self._swap_tables("idr_work.lp_labels_lens", curr_tbl)
+                else:
+                    self.adapter.execute(f"DROP TABLE IF EXISTS {next_tbl}")
             else:
                 str_type = self._dialect["string_type"]
                 self.adapter.execute(f"""

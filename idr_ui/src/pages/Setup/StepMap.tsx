@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import {
     Loader2, Key, Tag, Fingerprint, Clock, CheckSquare, Square,
-    Plus, Search, Sparkles, Table as TableIcon, Trash2, ChevronDown,
-    ChevronUp, Wand2, AlertCircle, Check
+    Plus, Search, Bot, Table as TableIcon, Trash2, ChevronDown,
+    ChevronUp, AlertCircle, Check
 } from "lucide-react";
 import { IDRConfig, SourceConfig, TableColumn, Identifier, Attribute } from '../../types';
 import { api } from '../../api/client';
@@ -26,22 +26,6 @@ const IDENTIFIER_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
     { pattern: /cookie|maid|idfa|gaid|anonymous_id/i, type: 'cookie_id' },
     { pattern: /loyalty|member_id/i, type: 'loyalty_id' },
     { pattern: /crm_id|salesforce_id|hubspot_id|external_id/i, type: 'external_id' },
-];
-
-const ATTRIBUTE_PATTERNS = [
-    /first_name|fname|given_name/i,
-    /last_name|lname|surname|family_name/i,
-    /full_name|^name$/i,
-    /city|town|locality/i,
-    /state|province|region/i,
-    /country|nation/i,
-    /zip|postal/i,
-    /address|street/i,
-    /company|org|employer/i,
-    /status|tier|segment|plan/i,
-    /ltv|lifetime_value|spend|revenue|balance/i,
-    /opt_in|consent|marketing|subscribed|do_not/i,
-    /dob|birth|gender/i,
 ];
 
 function guessDefaultWatermark(cols: TableColumn[], entityKey?: string): string {
@@ -440,45 +424,6 @@ export default function StepMap({
         commitUpdate({ ...config, [table]: { ...curr, identifiers: newIds } });
     };
 
-    const applyAutoMapForTables = (targetTables: string[]) => {
-        const nextMap = { ...config };
-        for (const table of targetTables) {
-            const curr = nextMap[table];
-            const cols = columns[table] || [];
-            if (!curr || cols.length === 0) continue;
-
-            const existingIds = [...(curr.identifiers || [])];
-            const existingAttrs = [...(curr.attributes || [])];
-            const mappedCols = new Set<string>([
-                ...existingIds.map(i => i.column || i.expr || ''),
-                ...existingAttrs.map(a => a.column || a.name),
-            ]);
-
-            for (const c of cols) {
-                if (c.name === curr.entity_key || c.name === curr.watermark_column || mappedCols.has(c.name)) {
-                    continue;
-                }
-                const idMatch = IDENTIFIER_PATTERNS.find(p => p.pattern.test(c.name));
-                if (idMatch) {
-                    existingIds.push({ column: c.name, type: idMatch.type, expr: c.name, is_match_key: true });
-                    mappedCols.add(c.name);
-                    continue;
-                }
-                if (ATTRIBUTE_PATTERNS.some(p => p.test(c.name))) {
-                    existingAttrs.push({ name: c.name, column: c.name, expr: c.name, data_type: c.type });
-                    mappedCols.add(c.name);
-                }
-            }
-
-            nextMap[table] = {
-                ...curr,
-                identifiers: existingIds,
-                attributes: existingAttrs,
-            };
-        }
-        commitUpdate(nextMap);
-    };
-
     const getColumnState = (table: string, colName: string) => {
         const attrs = config[table]?.attributes || [];
         if (attrs.find(a => (a.column || a.name) === colName)) return { isAttr: true };
@@ -562,30 +507,21 @@ export default function StepMap({
                                         setAiSuggesting(false);
                                     }
                                 }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 disabled:opacity-50 text-purple-200 border border-purple-500/40 text-xs font-semibold transition-colors"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs font-medium transition-colors"
                                 title="Use configured Local AI (Ollama) / LLM to suggest mappings, rules, survivorship, and lenses from schema metadata"
                             >
-                                {aiSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                                {aiSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
                                 {aiSuggesting ? 'AI Suggesting...' : 'AI Suggest Config'}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => applyAutoMapForTables(tables)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold transition-colors"
-                                title="Automatically classify common identifier and profile columns across all sources"
-                            >
-                                <Wand2 className="w-3.5 h-3.5" />
-                                Auto-Map All
                             </button>
                         </>
                     )}
                     <button
                         type="button"
                         onClick={() => setDiscoveryOpen(prev => !prev)}
-                        className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
                             discoveryOpen
-                                ? 'bg-blue-600 text-white border-blue-500'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                                ? 'bg-accent text-white border-accent'
+                                : 'bg-surface hover:bg-hover text-ink-primary border-line-default'
                         }`}
                     >
                         <Plus className="w-3.5 h-3.5" />
@@ -596,9 +532,9 @@ export default function StepMap({
             </div>
 
             {tables.length > 0 && (
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
-                    <span className="text-[11px] font-semibold text-purple-300 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5" />
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-subtle border border-line-default rounded-md px-3 py-2">
+                    <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+                        <Bot className="w-3.5 h-3.5" />
                         AI Goal (Optional)
                     </span>
                     <input
@@ -606,15 +542,15 @@ export default function StepMap({
                         value={aiGoal}
                         onChange={e => setAiGoal(e.target.value)}
                         placeholder="e.g. Strict B2C person matching on email & loyalty, prioritize CRM over web for names..."
-                        className="flex-1 bg-slate-950/70 border border-slate-700/70 rounded-lg px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                        className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
                     />
                 </div>
             )}
 
             {aiNotice && (
-                <div className="bg-purple-950/40 border border-purple-500/40 rounded-xl p-3 text-xs text-purple-200 flex items-center justify-between gap-2">
+                <div className="bg-selected border border-accent/40 rounded-md p-3 text-xs text-ink-primary flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 shrink-0 text-purple-300" />
+                        <Bot className="w-4 h-4 shrink-0 text-accent" />
                         {aiNotice}
                     </span>
                     <div className="flex items-center gap-2 shrink-0">
@@ -622,12 +558,12 @@ export default function StepMap({
                             <button
                                 type="button"
                                 onClick={() => setAiReportOpen(prev => !prev)}
-                                className="px-2 py-0.5 rounded bg-purple-900/60 hover:bg-purple-800/70 text-purple-200 text-[11px] font-medium"
+                                className="px-2 py-0.5 rounded bg-surface hover:bg-hover border border-line-default text-ink-primary text-[11px] font-medium"
                             >
                                 {aiReportOpen ? 'Hide Reasoning' : 'Show Reasoning'}
                             </button>
                         )}
-                        <button type="button" onClick={() => { setAiNotice(null); setAiReport(null); }} className="text-purple-300 hover:text-white">✕</button>
+                        <button type="button" onClick={() => { setAiNotice(null); setAiReport(null); }} className="text-ink-muted hover:text-ink-primary">✕</button>
                     </div>
                 </div>
             )}
@@ -965,14 +901,6 @@ export default function StepMap({
                                     <span className="text-[11px] uppercase tracking-wider font-semibold text-blue-400">Active Source Table</span>
                                     <h3 className="text-base font-bold font-mono text-white">{activeTable}</h3>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => applyAutoMapForTables([activeTable])}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 text-xs font-medium transition-colors"
-                                >
-                                    <Wand2 className="w-3.5 h-3.5" />
-                                    Auto-Map This Table
-                                </button>
                             </div>
 
                             {/* Source Extraction Settings */}

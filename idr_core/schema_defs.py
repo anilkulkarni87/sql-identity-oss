@@ -30,6 +30,7 @@ class TableDef:
     name: str
     columns: List[ColumnDef]
     description: Optional[str] = None
+    cluster_by: Optional[List[str]] = None
 
     @property
     def fqn(self) -> str:
@@ -328,6 +329,7 @@ SYSTEM_TABLES: List[TableDef] = [
         schema="idr_out",
         name="identity_resolved_membership_current",
         description="Current mapping of source entity keys to resolved cluster IDs.",
+        cluster_by=["resolved_id", "entity_key"],
         columns=[
             ColumnDef(
                 "entity_key",
@@ -355,6 +357,7 @@ SYSTEM_TABLES: List[TableDef] = [
         schema="idr_out",
         name="identity_clusters_current",
         description="Master list of identity clusters with size and confidence metrics.",
+        cluster_by=["resolved_id"],
         columns=[
             ColumnDef(
                 "resolved_id",
@@ -414,6 +417,7 @@ SYSTEM_TABLES: List[TableDef] = [
         schema="idr_out",
         name="identity_identifiers_current",
         description="Current registry of all entity identifiers for fast incremental candidate expansion.",
+        cluster_by=["identifier_type", "entity_key"],
         columns=[
             ColumnDef("entity_key", ColumnType.STRING, is_pk=True),
             ColumnDef("identifier_type", ColumnType.STRING, is_pk=True),
@@ -427,6 +431,7 @@ SYSTEM_TABLES: List[TableDef] = [
         schema="idr_out",
         name="identity_lens_membership_current",
         description="Per-lens entity_key to resolved_id cluster membership.",
+        cluster_by=["lens_id", "resolved_id", "entity_key"],
         columns=[
             ColumnDef("lens_id", ColumnType.STRING, is_pk=True),
             ColumnDef("entity_key", ColumnType.STRING, is_pk=True),
@@ -439,6 +444,7 @@ SYSTEM_TABLES: List[TableDef] = [
         schema="idr_out",
         name="identity_lens_clusters_current",
         description="Per-lens cluster summary counts.",
+        cluster_by=["lens_id", "resolved_id"],
         columns=[
             ColumnDef("lens_id", ColumnType.STRING, is_pk=True),
             ColumnDef("resolved_id", ColumnType.STRING, is_pk=True),
@@ -451,6 +457,7 @@ SYSTEM_TABLES: List[TableDef] = [
         schema="idr_out",
         name="identity_edges_current",
         description="Graph edges representing links between entities.",
+        cluster_by=["left_entity_key", "right_entity_key", "identifier_type"],
         columns=[
             # Note: This table is upserted based on (left_entity_key, right_entity_key, identifier_type)
             # So these 3 should be PK or have Unique Constraint for DuckDB ON CONFLICT
@@ -499,6 +506,7 @@ SYSTEM_TABLES: List[TableDef] = [
         schema="idr_out",
         name="golden_profiles",
         description="Unified golden customer profiles resolved by survivorship rules.",
+        cluster_by=["resolved_id"],
         columns=[
             ColumnDef("resolved_id", ColumnType.STRING, is_pk=True),
             ColumnDef("run_id", ColumnType.STRING),
@@ -509,6 +517,7 @@ SYSTEM_TABLES: List[TableDef] = [
         schema="idr_out",
         name="resolved_id_crosswalk",
         description="Crosswalk tracking cluster merges, splits, and retired resolved_ids across runs.",
+        cluster_by=["previous_resolved_id", "current_resolved_id"],
         columns=[
             ColumnDef("previous_resolved_id", ColumnType.STRING, is_pk=True),
             ColumnDef("current_resolved_id", ColumnType.STRING, is_pk=True),

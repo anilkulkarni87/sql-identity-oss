@@ -1,10 +1,9 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-    CheckCircle, XCircle, Clock, AlertCircle, ChevronDown, ChevronRight,
-    AlertTriangle, Network, ArrowRight, Activity, Layers, Database,
-    GitMerge, Cpu, FileSpreadsheet, Sparkles
+    ChevronDown, ChevronRight, AlertTriangle, Network, ArrowRight,
+    Search, RefreshCw, XCircle
 } from 'lucide-react'
 import { api } from '../api/client'
 
@@ -22,329 +21,366 @@ interface RunSummary {
 export default function Runs() {
     const navigate = useNavigate()
     const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+    const [statusFilter, setStatusFilter] = useState<'ALL' | 'SUCCESS' | 'FAILED'>('ALL')
+    const [searchQuery, setSearchQuery] = useState('')
 
-    const { data: setupStatus } = useQuery({
-        queryKey: ['setupStatus'],
-        queryFn: () => api.getSetupStatus(),
-    })
-
-    const isConnected = Boolean(setupStatus?.connected)
-
-    const { data: runs, isLoading, isError } = useQuery({
+    const { data: runs, isLoading, isError, refetch } = useQuery({
         queryKey: ['runs'],
         queryFn: () => api.getRuns(),
-        enabled: isConnected,
     })
 
     const { data: runDetail, isLoading: detailLoading } = useQuery({
         queryKey: ['runDetail', selectedRunId],
         queryFn: () => api.getRunDetail(selectedRunId!),
-        enabled: !!selectedRunId
+        enabled: !!selectedRunId,
     })
 
-    const getStatusIcon = (status: string) => {
-        switch (status.toLowerCase()) {
-            case 'success':
-            case 'completed':
-            case 'completed_with_warnings':
-                return <CheckCircle className="w-5 h-5 text-emerald-400" />
-            case 'failed':
-            case 'error':
-                return <XCircle className="w-5 h-5 text-rose-400" />
-            case 'running':
-                return <Clock className="w-5 h-5 text-blue-400 animate-spin" />
-            default:
-                return <AlertCircle className="w-5 h-5 text-amber-400" />
+    const filteredRuns = useMemo(() => {
+        return (runs || []).filter((r) => {
+            const st = r.status.toLowerCase()
+            if (statusFilter === 'SUCCESS' && !['success', 'completed', 'completed_with_warnings'].includes(st)) {
+                return false
+            }
+            if (statusFilter === 'FAILED' && !['failed', 'error'].includes(st)) {
+                return false
+            }
+            if (searchQuery.trim()) {
+                const q = searchQuery.trim().toLowerCase()
+                return r.run_id.toLowerCase().includes(q) || r.run_mode.toLowerCase().includes(q)
+            }
+            return true
+        })
+    }, [runs, statusFilter, searchQuery])
+
+    const getStatusBadge = (status: string) => {
+        const lower = status.toLowerCase()
+        const label = lower.replace(/_/g, ' ')
+        if (['success', 'completed'].includes(lower)) {
+            return (
+                <span className="badge-success capitalize">
+                    <span className="w-1.5 h-1.5 rounded-full bg-status-success" />
+                    {label}
+                </span>
+            )
         }
+        if (lower === 'completed_with_warnings') {
+            return (
+                <span className="badge-warning capitalize">
+                    <span className="w-1.5 h-1.5 rounded-full bg-status-warning" />
+                    warnings
+                </span>
+            )
+        }
+        if (['failed', 'error'].includes(lower)) {
+            return (
+                <span className="badge-danger capitalize">
+                    <span className="w-1.5 h-1.5 rounded-full bg-status-danger" />
+                    {label}
+                </span>
+            )
+        }
+        if (lower === 'running') {
+            return (
+                <span className="badge-accent capitalize">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+                    running
+                </span>
+            )
+        }
+        return <span className="badge-neutral capitalize">{label}</span>
     }
 
     const formatDate = (dateStr: string) => {
         try {
-            const date = new Date(dateStr)
-            return date.toLocaleString()
+            return new Date(dateStr).toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+            })
         } catch {
             return dateStr
         }
     }
 
     const toggleRun = (runId: string) => {
-        setSelectedRunId(prev => (prev === runId ? null : runId))
-    }
-
-    const getStageIcon = (stageName: string) => {
-        const s = stageName.toLowerCase()
-        if (s.includes('preflight')) return <Database className="w-4 h-4 text-gray-400" />
-        if (s.includes('entity')) return <Layers className="w-4 h-4 text-cyan-400" />
-        if (s.includes('identifier')) return <Cpu className="w-4 h-4 text-purple-400" />
-        if (s.includes('attribute')) return <FileSpreadsheet className="w-4 h-4 text-amber-400" />
-        if (s.includes('edge')) return <GitMerge className="w-4 h-4 text-blue-400" />
-        if (s.includes('label') || s.includes('propagation')) return <Network className="w-4 h-4 text-emerald-400" />
-        if (s.includes('fuzzy')) return <Sparkles className="w-4 h-4 text-pink-400" />
-        return <Activity className="w-4 h-4 text-blue-400" />
+        setSelectedRunId((prev) => (prev === runId ? null : runId))
     }
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-                        <Activity className="w-6 h-6 text-blue-400" />
+                    <h1 className="text-[18px] font-semibold tracking-[-0.015em] text-ink">
                         Run History
                     </h1>
-                    <p className="text-sm text-gray-400 mt-1">
-                        Inspect stage-by-stage pipeline executions, label propagation convergence, and cluster impact telemetry.
+                    <p className="text-[13px] text-ink-muted mt-0.5">
+                        Stage-by-stage execution telemetry, label propagation convergence, and cluster impact.
                     </p>
                 </div>
 
                 <button
+                    type="button"
                     onClick={() => navigate('/explorer')}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl shadow-md transition-all self-start"
+                    className="btn-secondary self-start sm:self-auto"
                 >
-                    <Network className="w-4 h-4" />
-                    Open Graph Explorer
-                    <ArrowRight className="w-4 h-4 ml-1" />
+                    <Network className="w-3.5 h-3.5 text-ink-muted" />
+                    Open Explorer
+                    <ArrowRight className="w-3.5 h-3.5 text-ink-muted" />
                 </button>
             </div>
 
-            <div className="bg-gray-800/90 rounded-xl overflow-hidden border border-gray-700 shadow-xl">
-                <table className="w-full text-left border-collapse">
-                    <thead className="bg-gray-900/80 border-b border-gray-700">
-                        <tr>
-                            <th className="px-4 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400 w-10"></th>
-                            <th className="px-4 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Status</th>
-                            <th className="px-4 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Run ID</th>
-                            <th className="px-4 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Mode</th>
-                            <th className="px-4 py-3.5 text-xs font-semibold uppercase tracking-wider text-gray-400">Started</th>
-                            <th className="px-4 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">Duration</th>
-                            <th className="px-4 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">Entities</th>
-                            <th className="px-4 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">Edges</th>
-                            <th className="px-4 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">Clusters</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-700/60">
-                        {setupStatus && !isConnected ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="inline-flex items-center gap-1 p-0.5 bg-subtle border border-line rounded-md">
+                    {(['ALL', 'SUCCESS', 'FAILED'] as const).map((tab) => (
+                        <button
+                            key={tab}
+                            type="button"
+                            onClick={() => setStatusFilter(tab)}
+                            className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                                statusFilter === tab
+                                    ? 'bg-surface text-ink border border-line-strong'
+                                    : 'text-ink-muted hover:text-ink border border-transparent'
+                            }`}
+                        >
+                            {tab === 'ALL' ? 'All runs' : tab === 'SUCCESS' ? 'Succeeded' : 'Failed'}
+                        </button>
+                    ))}
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                    <Search className="w-3.5 h-3.5 text-ink-subtle absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Filter by run ID or mode…"
+                        aria-label="Filter runs by ID or mode"
+                        className="input-field pl-8 font-mono text-xs"
+                    />
+                </div>
+            </div>
+
+            {isError && (
+                <div role="alert" className="p-3 rounded-md bg-status-danger-soft border border-status-danger-border flex items-center justify-between gap-3">
+                    <span className="text-xs text-status-danger">
+                        Failed to load run history from the backend.
+                    </span>
+                    <button type="button" onClick={() => refetch()} className="btn-secondary text-xs">
+                        <RefreshCw className="w-3 h-3" />
+                        Retry
+                    </button>
+                </div>
+            )}
+
+            <div className="surface-panel overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
                             <tr>
-                                <td colSpan={9} className="px-4 py-12 text-center text-slate-400 text-sm">
-                                    Warehouse disconnected.{' '}
-                                    <button
-                                        onClick={() => navigate('/setup')}
-                                        className="text-blue-400 hover:text-blue-300 underline font-medium"
-                                    >
-                                        Connect in Identity Studio
-                                    </button>{' '}
-                                    to view run telemetry.
-                                </td>
+                                <th scope="col" className="table-th w-10">
+                                    <span className="sr-only">Expand run details</span>
+                                </th>
+                                <th scope="col" className="table-th">Status</th>
+                                <th scope="col" className="table-th">Run ID</th>
+                                <th scope="col" className="table-th">Mode</th>
+                                <th scope="col" className="table-th">Started</th>
+                                <th scope="col" className="table-th text-right">Duration</th>
+                                <th scope="col" className="table-th text-right">Entities</th>
+                                <th scope="col" className="table-th text-right">Edges</th>
+                                <th scope="col" className="table-th text-right">Clusters</th>
                             </tr>
-                        ) : isLoading ? (
-                            <tr>
-                                <td colSpan={9} className="px-4 py-12 text-center text-gray-400 text-sm">
-                                    Loading run telemetry...
-                                </td>
-                            </tr>
-                        ) : isError ? (
-                            <tr>
-                                <td colSpan={9} className="px-4 py-12 text-center text-rose-300 text-sm">
-                                    Failed to load run telemetry. Check your warehouse connection in Identity Studio.
-                                </td>
-                            </tr>
-                        ) : runs?.length === 0 ? (
-                            <tr>
-                                <td colSpan={9} className="px-4 py-12 text-center text-gray-400 text-sm">
-                                    No pipeline runs found.
-                                </td>
-                            </tr>
-                        ) : (
-                            runs?.map((run: RunSummary) => {
-                                const isExpanded = selectedRunId === run.run_id
-                                return (
-                                    <Fragment key={run.run_id}>
-                                        <tr
-                                            onClick={() => toggleRun(run.run_id)}
-                                            className={`hover:bg-gray-700/40 cursor-pointer transition-colors ${
-                                                isExpanded ? 'bg-gray-700/30' : ''
-                                            }`}
-                                        >
-                                            <td className="px-4 py-3.5 text-gray-400">
-                                                {isExpanded ? (
-                                                    <ChevronDown className="w-4 h-4 text-blue-400" />
-                                                ) : (
-                                                    <ChevronRight className="w-4 h-4" />
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3.5">
-                                                <div className="flex items-center gap-2">
-                                                    {getStatusIcon(run.status)}
-                                                    <span className="text-xs font-medium capitalize text-gray-300">
-                                                        {run.status.toLowerCase().replace('_', ' ')}
+                        </thead>
+                        <tbody>
+                            {isLoading ? (
+                                <tr>
+                                    <td colSpan={9} className="px-4 py-10 text-center text-ink-muted text-xs">
+                                        Loading run telemetry…
+                                    </td>
+                                </tr>
+                            ) : filteredRuns.length === 0 ? (
+                                <tr>
+                                    <td colSpan={9} className="px-4 py-10 text-center text-ink-muted text-xs">
+                                        No pipeline runs match the current filter.
+                                    </td>
+                                </tr>
+                            ) : (
+                                filteredRuns.map((run: RunSummary) => {
+                                    const isExpanded = selectedRunId === run.run_id
+                                    return (
+                                        <Fragment key={run.run_id}>
+                                            <tr
+                                                className={`transition-colors hover:bg-subtle ${
+                                                    isExpanded ? 'bg-selected/60' : 'bg-surface'
+                                                }`}
+                                            >
+                                                <td className="table-td w-10">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleRun(run.run_id)}
+                                                        aria-expanded={isExpanded}
+                                                        aria-label={`${isExpanded ? 'Collapse' : 'Expand'} details for run ${run.run_id}`}
+                                                        className="inline-flex items-center justify-center w-7 h-7 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                                                    >
+                                                        {isExpanded ? (
+                                                            <ChevronDown className="w-4 h-4 text-accent" />
+                                                        ) : (
+                                                            <ChevronRight className="w-4 h-4" />
+                                                        )}
+                                                    </button>
+                                                </td>
+                                                <td className="table-td whitespace-nowrap">
+                                                    {getStatusBadge(run.status)}
+                                                </td>
+                                                <td className="table-td whitespace-nowrap">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleRun(run.run_id)}
+                                                        className="font-mono text-xs font-medium text-ink hover:text-accent"
+                                                    >
+                                                        {run.run_id}
+                                                    </button>
+                                                </td>
+                                                <td className="table-td whitespace-nowrap">
+                                                    <span className={run.run_mode === 'FULL' ? 'badge-accent font-mono' : 'badge-neutral font-mono'}>
+                                                        {run.run_mode}
                                                     </span>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3.5">
-                                                <span className="font-mono text-xs font-semibold text-white">
-                                                    {run.run_id}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3.5">
-                                                <span
-                                                    className={`px-2 py-0.5 rounded text-xs font-medium border ${
-                                                        run.run_mode === 'FULL'
-                                                            ? 'bg-purple-900/40 text-purple-300 border-purple-700/60'
-                                                            : 'bg-cyan-900/40 text-cyan-300 border-cyan-700/60'
-                                                    }`}
-                                                >
-                                                    {run.run_mode}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3.5 text-xs text-gray-300">
-                                                {formatDate(run.started_at)}
-                                            </td>
-                                            <td className="px-4 py-3.5 text-right font-mono text-xs text-gray-200">
-                                                {run.duration_seconds !== null && run.duration_seconds !== undefined
-                                                    ? `${run.duration_seconds}s`
-                                                    : '—'}
-                                            </td>
-                                            <td className="px-4 py-3.5 text-right font-mono text-xs text-gray-200">
-                                                {run.entities_processed.toLocaleString()}
-                                            </td>
-                                            <td className="px-4 py-3.5 text-right font-mono text-xs text-gray-200">
-                                                {run.edges_created.toLocaleString()}
-                                            </td>
-                                            <td className="px-4 py-3.5 text-right font-mono text-xs text-emerald-400 font-semibold">
-                                                {run.clusters_impacted.toLocaleString()}
-                                            </td>
-                                        </tr>
+                                                </td>
+                                                <td className="table-td whitespace-nowrap text-xs font-mono tabular-nums text-ink-muted">
+                                                    {formatDate(run.started_at)}
+                                                </td>
+                                                <td className="table-td text-right font-mono text-xs tabular-nums text-ink">
+                                                    {run.duration_seconds != null ? `${run.duration_seconds}s` : '—'}
+                                                </td>
+                                                <td className="table-td text-right font-mono text-xs tabular-nums text-ink">
+                                                    {run.entities_processed.toLocaleString()}
+                                                </td>
+                                                <td className="table-td text-right font-mono text-xs tabular-nums text-ink">
+                                                    {run.edges_created.toLocaleString()}
+                                                </td>
+                                                <td className="table-td text-right font-mono text-xs tabular-nums font-medium text-ink">
+                                                    {run.clusters_impacted.toLocaleString()}
+                                                </td>
+                                            </tr>
 
-                                        {isExpanded && (
-                                            <tr className="bg-gray-950/60">
-                                                <td colSpan={9} className="px-6 py-5 space-y-5 border-t border-b border-gray-700/80">
-                                                    {detailLoading ? (
-                                                        <p className="text-xs text-gray-400">Loading stage breakdown...</p>
-                                                    ) : runDetail ? (
-                                                        <div className="space-y-5">
-                                                            {/* Action & Stats Header */}
-                                                            <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-gray-900/80 rounded-xl border border-gray-800 shadow-inner">
-                                                                <div className="flex flex-wrap items-center gap-3 text-xs">
-                                                                    <span className="px-3 py-1 bg-gray-800 rounded-lg border border-gray-700 text-gray-300">
-                                                                        Status: <strong className="text-white ml-1">{runDetail.status}</strong>
-                                                                    </span>
-                                                                    {runDetail.lp_iterations !== null && runDetail.lp_iterations !== undefined && (
-                                                                        <span className="px-3 py-1 bg-gray-800 rounded-lg border border-gray-700 text-gray-300">
-                                                                            Label Propagation:{' '}
-                                                                            <strong className="text-blue-400 ml-1">
-                                                                                {runDetail.lp_iterations} iterations
-                                                                            </strong>
+                                            {isExpanded && (
+                                                <tr className="bg-subtle/60">
+                                                    <td colSpan={9} className="px-4 py-4 border-b border-line">
+                                                        {detailLoading ? (
+                                                            <p className="text-xs text-ink-muted">Loading stage breakdown…</p>
+                                                        ) : runDetail ? (
+                                                            <div className="space-y-3">
+                                                                <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 bg-surface border border-line rounded-md">
+                                                                    <div className="flex flex-wrap items-center gap-3 text-xs">
+                                                                        <span className="text-ink-muted">
+                                                                            Status:{' '}
+                                                                            <strong className="font-mono text-ink">{runDetail.status}</strong>
                                                                         </span>
-                                                                    )}
-                                                                </div>
-
-                                                                <button
-                                                                    onClick={() => navigate('/explorer')}
-                                                                    className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-lg text-xs font-medium transition-all"
-                                                                >
-                                                                    <Network className="w-3.5 h-3.5" />
-                                                                    Explore Generated Clusters
-                                                                    <ArrowRight className="w-3.5 h-3.5" />
-                                                                </button>
-                                                            </div>
-
-                                                            {/* Error Display */}
-                                                            {runDetail.error_message && (
-                                                                <div className="p-4 bg-rose-950/40 border border-rose-800/80 rounded-xl text-xs text-rose-300 font-mono space-y-1">
-                                                                    <div className="font-bold flex items-center gap-1.5 text-rose-200">
-                                                                        <XCircle className="w-4 h-4 text-rose-400" />
-                                                                        Execution Error
+                                                                        {runDetail.lp_iterations != null && (
+                                                                            <span className="text-ink-muted">
+                                                                                Convergence:{' '}
+                                                                                <strong className="font-mono tabular-nums text-ink">
+                                                                                    {runDetail.lp_iterations} LP iterations
+                                                                                </strong>
+                                                                            </span>
+                                                                        )}
                                                                     </div>
-                                                                    <p>{runDetail.error_message}</p>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => navigate('/explorer')}
+                                                                        className="btn-secondary text-xs"
+                                                                    >
+                                                                        Inspect Clusters
+                                                                        <ArrowRight className="w-3 h-3" />
+                                                                    </button>
                                                                 </div>
-                                                            )}
 
-                                                            {/* Warnings Display */}
-                                                            {runDetail.warnings && runDetail.warnings.length > 0 && (
-                                                                <div className="p-4 bg-amber-950/30 border border-amber-800/60 rounded-xl space-y-2">
-                                                                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
-                                                                        <AlertTriangle className="w-4 h-4" />
-                                                                        Pipeline Warnings ({runDetail.warnings.length})
+                                                                {runDetail.error_message && (
+                                                                    <div role="alert" className="p-3 bg-status-danger-soft border border-status-danger-border rounded-md text-xs text-status-danger font-mono space-y-1">
+                                                                        <div className="font-sans font-semibold flex items-center gap-1.5">
+                                                                            <XCircle className="w-3.5 h-3.5" />
+                                                                            Execution Error
+                                                                        </div>
+                                                                        <p className="break-words">{runDetail.error_message}</p>
                                                                     </div>
-                                                                    <ul className="list-disc list-inside text-xs text-amber-200/90 space-y-1 pl-1">
-                                                                        {runDetail.warnings.map((w, i) => (
-                                                                            <li key={i}>{w}</li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
-                                                            )}
+                                                                )}
 
-                                                            {/* Stage Execution Breakdown */}
-                                                            {runDetail.stages && runDetail.stages.length > 0 && (
-                                                                <div className="space-y-3">
-                                                                    <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                                                                        Stage Execution Breakdown ({runDetail.stages.length} stages)
-                                                                    </h4>
-                                                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                                                                        {(() => {
-                                                                            const maxDuration = Math.max(
-                                                                                ...runDetail.stages.map(s => s.duration_seconds || 1)
-                                                                            )
+                                                                {runDetail.warnings && runDetail.warnings.length > 0 && (
+                                                                    <div className="p-3 bg-status-warning-soft border border-status-warning-border rounded-md space-y-1">
+                                                                        <div className="flex items-center gap-1.5 text-xs font-semibold text-status-warning">
+                                                                            <AlertTriangle className="w-3.5 h-3.5" />
+                                                                            Warnings ({runDetail.warnings.length})
+                                                                        </div>
+                                                                        <ul className="list-disc list-inside text-xs text-ink-secondary space-y-0.5">
+                                                                            {runDetail.warnings.map((w, i) => (
+                                                                                <li key={i}>{w}</li>
+                                                                            ))}
+                                                                        </ul>
+                                                                    </div>
+                                                                )}
 
-                                                                            return runDetail.stages.map(st => {
-                                                                                const duration = st.duration_seconds || 0
-                                                                                const percent = Math.min(
-                                                                                    100,
-                                                                                    Math.max(8, (duration / maxDuration) * 100)
+                                                                {runDetail.stages && runDetail.stages.length > 0 && (
+                                                                    <div className="bg-surface border border-line rounded-md overflow-hidden">
+                                                                        <div className="px-3 py-1.5 bg-subtle border-b border-line text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted">
+                                                                            Stage Breakdown ({runDetail.stages.length} stages)
+                                                                        </div>
+                                                                        <div className="divide-y divide-line">
+                                                                            {(() => {
+                                                                                const maxDuration = Math.max(
+                                                                                    ...runDetail.stages.map((s) => s.duration_seconds || 0.1),
+                                                                                    0.1
                                                                                 )
-
-                                                                                return (
-                                                                                    <div
-                                                                                        key={`${st.stage_order}-${st.stage_name}`}
-                                                                                        className="p-3 bg-gray-900/90 rounded-xl border border-gray-800 shadow-md space-y-2"
-                                                                                    >
-                                                                                        <div className="flex items-center justify-between">
-                                                                                            <div className="flex items-center gap-1.5">
-                                                                                                {getStageIcon(st.stage_name)}
-                                                                                                <span className="text-xs font-semibold text-gray-200">
+                                                                                return runDetail.stages.map((st) => {
+                                                                                    const duration = st.duration_seconds || 0
+                                                                                    const ratio = Math.min(1, Math.max(0.04, duration / maxDuration))
+                                                                                    return (
+                                                                                        <div
+                                                                                            key={`${st.stage_order}-${st.stage_name}`}
+                                                                                            className="px-3 py-2 grid grid-cols-12 items-center gap-3 text-xs"
+                                                                                        >
+                                                                                            <div className="col-span-5 sm:col-span-4 flex items-center gap-2 min-w-0">
+                                                                                                <span className="font-mono text-[11px] text-ink-muted tabular-nums w-5">
+                                                                                                    {String(st.stage_order).padStart(2, '0')}
+                                                                                                </span>
+                                                                                                <span className="font-medium text-ink truncate">
                                                                                                     {st.stage_name}
                                                                                                 </span>
                                                                                             </div>
-                                                                                            <span className="text-xs font-mono font-medium text-blue-400">
+                                                                                            <div className="col-span-3 sm:col-span-4">
+                                                                                                <div className="h-1.5 bg-subtle rounded-sm overflow-hidden">
+                                                                                                    <div
+                                                                                                        className="h-full bg-accent origin-left transition-transform duration-200"
+                                                                                                        style={{ transform: `scaleX(${ratio})` }}
+                                                                                                    />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="col-span-2 text-right font-mono tabular-nums text-ink-muted">
+                                                                                                {st.rows_out != null ? `${st.rows_out.toLocaleString()} rows` : '0 rows'}
+                                                                                            </div>
+                                                                                            <div className="col-span-2 text-right font-mono tabular-nums font-medium text-ink">
                                                                                                 {duration}s
-                                                                                            </span>
+                                                                                            </div>
                                                                                         </div>
-
-                                                                                        {/* Relative execution duration bar */}
-                                                                                        <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
-                                                                                            <div
-                                                                                                className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                                                                                                style={{ width: `${percent}%` }}
-                                                                                            />
-                                                                                        </div>
-
-                                                                                        <div className="flex justify-between items-center text-[11px] text-gray-400 font-mono pt-1">
-                                                                                            <span>#{st.stage_order}</span>
-                                                                                            <span>
-                                                                                                {st.rows_out !== null && st.rows_out !== undefined
-                                                                                                    ? `${st.rows_out.toLocaleString()} rows`
-                                                                                                    : '0 rows'}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                )
-                                                                            })
-                                                                        })()}
+                                                                                    )
+                                                                                })
+                                                                            })()}
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    ) : (
-                                                        <p className="text-xs text-gray-400">No stage details available.</p>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </Fragment>
-                                )
-                            })
-                        )}
-                    </tbody>
-                </table>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-xs text-ink-muted">No stage details available.</p>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
+                                    )
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     )

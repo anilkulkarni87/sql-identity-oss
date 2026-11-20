@@ -32,11 +32,22 @@ title: Interfaces, Web UI, MCP & dbt
 
 ## 2. Interactive React Web UI (`idr ui`)
 
-Launch the full-stack UI and API with a single command:
+Launch the full-stack UI and API with a single command (serves the production bundle from `idr_api/static` on port `8000` and opens your browser automatically):
 
 ```bash
-idr ui --db demo.duckdb
+# Auto-discovers local DuckDB, BigQuery (gcloud ADC), Snowflake, and Databricks profiles
+idr ui
+
+# Or specify a local DuckDB database / custom port
+idr ui --db demo.duckdb --port 8000
 ```
+
+> **Local UI Development (`idr_ui/`)**: When modifying React/TypeScript files in `idr_ui/src/`, run `cd idr_ui && npm run dev` for hot-reloading at `http://localhost:3000` (which proxies `/api` to `http://127.0.0.1:8000`), and run `cd idr_ui && npm run build && rm -rf ../idr_api/static/* && cp -R dist/* ../idr_api/static/` so `idr ui` on `:8000` serves the latest production assets.
+
+### Design System & Global Workbench Controls
+- **Crisp Daylight & Dark Engineering Themes**: Defaults to **Crisp Daylight Engineering** (`IBM Plex Sans` + `JetBrains Mono` with `tabular-nums` and 1px structural borders) with a persistent **Daylight / Dark appearance toggle** in the sidebar footer.
+- **Top-Bar `Run Pipeline` Slide-Over Drawer**: On configured workspaces, clicking **`Run Pipeline`** in the top header opens a focused slide-over execution drawer (`INCR` vs `FULL`, `Dry Run`, guardrails, and live stage telemetry) without routing back through the setup wizard.
+- **Global `AI Copilot (⌘K)` Drawer**: Accessible from the top bar or via `⌘K` / `Ctrl+K` on any screen for natural-language graph Q&A, largest-cluster forensics, anomaly triage (`+ Exclude Hub`), and performance trend diagnostics.
 
 ### Authentication Modes
 - **Local Development Mode (Default for `idr ui`)**:
@@ -45,23 +56,29 @@ idr ui --db demo.duckdb
   - Set `IDR_AUTH_ISSUER`, `IDR_AUTH_AUDIENCE`, `VITE_AUTH_AUTHORITY`, and `VITE_AUTH_CLIENT_ID` (e.g., Keycloak, Okta, Auth0, Azure AD) to enforce Bearer JWT validation across all API routes.
 
 ### Identity Studio (`/setup`)
-- **Connect Data Warehouse**: Clean 2-column connection workspace with auto-discovered local credentials (1-click connect) and dark-mode segmented auth selectors:
+- **Connect Data Warehouse**: Clean 2-column connection workspace with auto-discovered local credentials (**1-Click Connect** for `~/.dbt/profiles.yml`, `~/.databrickscfg`, `gcloud` ADC, and local DuckDB files) and segmented auth selectors:
   - **Snowflake**: Switch cleanly between `Password` and `RSA Key-Pair (JWT)` (`private_key_path` / inline PEM + optional passphrase).
   - **Databricks**: Switch cleanly between `Personal Access Token (PAT)` and `OAuth M2M (Client Secret)`.
-- **Persistent Sticky Studio Header**: Quick actions for `Switch Warehouse`, `History` (view & restore `idr_out.config_snapshot` versions), `Discard` unsaved draft changes, `Save Config`, `Run Pipeline`, and `JSON` import/export.
+- **Persistent Sticky Studio Header**: Quick actions for `Switch Warehouse`, `History` (view & restore `idr_out.config_snapshot` versions), `Discard` unsaved draft changes, `Save Config`, and `JSON` import/export.
 - **4 Persistent Studio Tabs**:
-  1. **Sources & Mappings (`1. Sources & Mappings`)**: Merged table discovery and mapping workspace with a multi-schema slide-over **Discover Tables** drawer and 1-click **Auto-Map All**, plus inline `entity_key`, `watermark_column`, identifier, and attribute editors.
-  2. **Matching Rules (`2. Matching Rules`)**: Configure deterministic rules with all 9 **Domain Canonicalizers** (`EMAIL_STANDARD`, `EMAIL_STRIP_PLUS`, `PHONE_DIGITS`, `PHONE_US_10`, `ALPHANUMERIC_UPPER`, `LOWERCASE`, `UPPERCASE`, `EXACT`/`NONE`, custom SQL `{val}`), fuzzy blocking rules, **Default Poison-Pill Exclusions (`use_default_exclusions`)**, and custom `EXACT`/`LIKE` or `ANY` wildcard exclusions (with automatic bare-substring matching for `LIKE` patterns without `%`/`_`).
+  1. **Sources & Mappings (`1. Sources & Mappings`)**: Merged table discovery and mapping workspace with a multi-schema **Add / Manage Source Tables** browser, optional **AI Goal** prompt bar, and **1-Click `AI Suggest Config`** (backed by the zero-PII statistical warehouse profiler `IDRDataProfiler` + local Ollama/BYOK LLM with verifiable SQL reasoning and deterministic statistical fallback).
+  2. **Matching Rules (`2. Matching Rules`)**: Organized into 4 focused sub-tabs:
+     - **Match Rules**: Deterministic rules with all 9 **Domain Canonicalizers**, probabilistic fuzzy rules, and an inline **AI Rule Generator** bar.
+     - **Multi-Lens Views**: Policy-scoped identity views (`strict_person`, `household`, `b2b_account`) with `include_types`, `exclude_types`, `source_filter`, and `max_group_size`.
+     - **Blocklist Exclusions**: **Default Poison-Pill Exclusions (`use_default_exclusions`)** (33 patterns) plus custom `EXACT`/`LIKE` or `ANY` wildcard exclusions.
+     - **Stewardship Overrides**: Manual `FORCE_LINK`, `DO_NOT_LINK`, and `ISOLATE` entity-pair rules.
   3. **Survivorship (`3. Survivorship`)**: Configure `PRIORITY`, `RECENCY`, `FREQUENCY`, and domain-specific winners per Golden Profile attribute.
   4. **Run & Verify (`4. Run & Verify`)**:
      - **Non-Saving Draft Dry Run**: Click **Start Dry Run** to test unsaved edits ephemerally (`idr_meta.*` is backed up and automatically restored—showing `Draft Previewed — Saved Config Untouched`) without mutating saved metadata or production `idr_out` tables.
      - **5-Card Delta Summary**: Inspect `New Entities`, `Moved Entities`, `Edges Delta` (`proposed_edges` vs `current_edges`), `Clusters Delta` (`proposed_clusters` vs `current_clusters`), and `Unchanged Entities`, then choose **Save & Execute Real Pipeline**, **Save Config Only**, **Discard Draft Changes**, or **Edit Configuration**.
-     - **Live 8-Stage Execution Progress**: Real-time progress bar (`GET /api/setup/run/progress`), elapsed timer, active stage indicator, and live Label Propagation iteration & label-change counter.
+     - **Live Stage Execution Progress**: Real-time progress bar (`GET /api/setup/run/progress`) with domain-specific stage units (`sources verified`, `entities`, `identifiers`, `Skipped (exact only)` / `attributes`, `edges`, `clusters`, `entities analyzed`, `profiles`).
 
-### Cluster Explorer & Stewardship (`/explorer`)
-- Search by identifier value, `entity_key`, or `resolved_id` to inspect cluster graphs, confidence breakdowns, and Golden Profiles.
-- **Stewardship Overrides Modal**: Create or delete `FORCE_LINK`, `DO_NOT_LINK`, and `ISOLATE` overrides directly from the UI.
-- **GDPR Forget Entity Modal**: Purge an entity across all IDR tables with a single audited action.
+### Cluster Explorer & Stewardship Workbench (`/explorer`)
+- **7:5 Split Workbench**: Interactive Cytoscape graph canvas on the left (7 columns, solid deterministic vs dashed fuzzy edges, docked non-overlapping toolbar, source filter pills) paired with a 3-tab Inspector on the right (5 columns: **Golden Record** key-value table | **Edges** provenance | **Selected Entity** details).
+- **Multi-Lens Selector & Cross-Lens Diff Modal**: Switch between the Primary Graph and any configured Identity Lens, or click **Compare Lenses** to inspect cluster boundary migrations (`Merged in Lens B Only` vs `Merged in Lens A Only`).
+- **AI Cluster Forensics**: Click **Explain with AI** or ask custom questions about why a cluster merged and potential over-merge risks.
+- **Collapsible Crosswalk Lineage**: Compact 1-line transition summary bar (`N transitions · M entities moved`, `MERGED`/`SPLIT` badges, and origin source breakdown pills) that expands into a scrollable 5-column lineage table.
+- **Inline Stewardship & GDPR Forget**: 1-click identifier exclusion, 2-click entity `Unlink` (`DO_NOT_LINK`) / `Isolate` (`ISOLATE`), and two-step **GDPR / CCPA Right to be Forgotten** cluster purge with SHA-256 suppression.
 
 ---
 

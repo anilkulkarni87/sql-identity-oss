@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import type { Core, NodeSingular, EventObject } from 'cytoscape'
-import { ZoomIn, ZoomOut, Maximize2, RotateCcw, Layers } from 'lucide-react'
+import { ZoomIn, ZoomOut, Maximize2, RotateCcw, Tag } from 'lucide-react'
+import { useTheme } from '../utils/theme'
 
 export type GraphLayoutName = 'concentric' | 'cose' | 'breadthfirst' | 'circle'
 
@@ -24,6 +25,8 @@ export interface GraphEdgeData {
     label: string
     identifier_type: string
     identifier_value: string
+    rule_id?: string
+    isFuzzy?: boolean
 }
 
 export interface IdentityGraphProps {
@@ -41,20 +44,24 @@ export default function IdentityGraph({
     selectedNodeId,
     onSelectNode,
     layoutName = 'concentric',
-    onLayoutChange
+    onLayoutChange,
 }: IdentityGraphProps) {
+    const { theme } = useTheme()
     const cyRef = useRef<Core | null>(null)
+    const cyInitializedRef = useRef(false)
+    const onSelectNodeRef = useRef(onSelectNode)
+    onSelectNodeRef.current = onSelectNode
+
     const [currentLayout, setCurrentLayout] = useState<GraphLayoutName>(layoutName)
     const [hoveredNode, setHoveredNode] = useState<GraphNodeData | null>(null)
+    const [showAllLabels, setShowAllLabels] = useState(false)
 
-    // Sync layout prop if changed from parent
     useEffect(() => {
         if (layoutName !== currentLayout) {
             setCurrentLayout(layoutName)
         }
-    }, [layoutName])
+    }, [layoutName, currentLayout])
 
-    // Compute node degrees for dynamic sizing & central hub placement
     const { elements, nodeDegreeMap } = useMemo(() => {
         const degreeMap: Record<string, number> = {}
         for (const e of edges) {
@@ -64,12 +71,10 @@ export default function IdentityGraph({
 
         const isLargeCluster = nodes.length > 25
 
-        const cytoscapeNodes = nodes.map(n => {
+        const cytoscapeNodes = nodes.map((n) => {
             const deg = degreeMap[n.id] || 0
-            // Larger nodes for central hubs with high connectivity
-            const size = Math.min(46, Math.max(22, 22 + deg * 2.5))
-            // Only show labels by default in small clusters or on hub nodes
-            const displayLabel = !isLargeCluster || deg >= 4 ? n.label : ''
+            const size = Math.min(42, Math.max(20, 20 + deg * 2.2))
+            const displayLabel = showAllLabels || !isLargeCluster || deg >= 4 ? n.label : ''
 
             return {
                 data: {
@@ -77,99 +82,209 @@ export default function IdentityGraph({
                     degree: deg,
                     size,
                     displayLabel,
-                    fullLabel: n.label
-                }
+                    fullLabel: n.label,
+                },
             }
         })
 
-        const cytoscapeEdges = edges.map(e => ({
+        const cytoscapeEdges = edges.map((e) => ({
             data: {
                 id: e.id,
                 source: e.source,
                 target: e.target,
                 label: e.label,
                 identifier_type: e.identifier_type,
-                identifier_value: e.identifier_value
-            }
+                identifier_value: e.identifier_value,
+                rule_id: e.rule_id || 'EXACT',
+            },
+            classes: e.isFuzzy ? 'fuzzy' : 'exact',
         }))
 
         return {
             elements: [...cytoscapeNodes, ...cytoscapeEdges],
-            nodeDegreeMap: degreeMap
+            nodeDegreeMap: degreeMap,
         }
-    }, [nodes, edges])
+    }, [nodes, edges, showAllLabels])
 
-    // Get layout configuration for Cytoscape
-    const getLayoutConfig = (name: GraphLayoutName) => {
-        switch (name) {
-            case 'concentric':
-                return {
-                    name: 'concentric',
-                    animate: false,
-                    concentric: (node: NodeSingular) => {
-                        const id = node.id()
-                        return nodeDegreeMap[id] || 1
-                    },
-                    levelWidth: () => 2,
-                    minNodeSpacing: nodes.length > 50 ? 35 : 55,
-                    spacingFactor: 1.25,
-                    avoidOverlap: true,
-                    fit: true,
-                    padding: 30
-                }
-            case 'breadthfirst':
-                return {
-                    name: 'breadthfirst',
-                    animate: false,
-                    directed: false,
-                    spacingFactor: 1.4,
-                    avoidOverlap: true,
-                    fit: true,
-                    padding: 30
-                }
-            case 'cose':
-                return {
-                    name: 'cose',
-                    animate: false,
-                    nodeRepulsion: () => (nodes.length > 50 ? 55000 : 35000),
-                    idealEdgeLength: () => (nodes.length > 50 ? 80 : 100),
-                    edgeElasticity: () => 80,
-                    gravity: 0.12,
-                    numIter: 1000,
-                    nodeOverlap: 25,
-                    fit: true,
-                    padding: 30
-                }
-            case 'circle':
-                return {
-                    name: 'circle',
-                    animate: false,
-                    spacingFactor: 1.2,
-                    avoidOverlap: true,
-                    fit: true,
-                    padding: 30
-                }
-        }
-    }
+    const stylesheet = useMemo(() => {
+        const isDark = theme === 'dark'
+        const labelFg = isDark ? '#f1f5f9' : '#0f172a'
+        const labelBg = isDark ? '#111620' : '#ffffff'
+        const edgeColor = isDark ? '#475569' : '#94a3b8'
+        const edgeText = isDark ? '#94a3b8' : '#475569'
+        const edgeHighlight = isDark ? '#60a5fa' : '#1d4ed8'
+        const fuzzyColor = isDark ? '#fbbf24' : '#d97706'
+        const selectRing = isDark ? '#f8fafc' : '#0f172a'
 
-    // Run layout when layout name or elements change
+        return [
+            {
+                selector: 'node',
+                style: {
+                    'background-color': 'data(color)',
+                    'border-color': 'data(borderColor)',
+                    'border-width': 2,
+                    label: 'data(displayLabel)',
+                    color: labelFg,
+                    'font-size': '10px',
+                    'font-family': '"IBM Plex Sans", system-ui, sans-serif',
+                    'text-valign': 'bottom',
+                    'text-margin-y': 5,
+                    'text-background-color': labelBg,
+                    'text-background-opacity': 0.85,
+                    'text-background-padding': 2,
+                    'text-background-shape': 'roundrectangle',
+                    width: 'data(size)',
+                    height: 'data(size)',
+                },
+            },
+            {
+                selector: 'node.highlighted',
+                style: {
+                    'border-color': selectRing,
+                    'border-width': 2.5,
+                    opacity: 1,
+                    'z-index': 990,
+                },
+            },
+            {
+                selector: 'node.selected',
+                style: {
+                    'border-color': selectRing,
+                    'border-width': 3.5,
+                    width: 36,
+                    height: 36,
+                    'z-index': 999,
+                    label: 'data(fullLabel)',
+                    'font-size': '11px',
+                    'font-weight': '600',
+                    color: labelFg,
+                    'text-background-color': labelBg,
+                    'text-background-opacity': 0.96,
+                    'text-background-padding': 4,
+                    'text-background-shape': 'roundrectangle',
+                },
+            },
+            {
+                selector: 'node.dimmed',
+                style: {
+                    opacity: 0.18,
+                },
+            },
+            {
+                selector: 'edge',
+                style: {
+                    width: 1.5,
+                    'line-color': edgeColor,
+                    'curve-style': 'bezier',
+                    label: showAllLabels ? 'data(label)' : '',
+                    color: edgeText,
+                    'font-size': '10px',
+                    'font-family': '"JetBrains Mono", ui-monospace, monospace',
+                    'text-rotation': 'autorotate',
+                    'text-background-color': labelBg,
+                    'text-background-opacity': 0.9,
+                    'text-background-padding': 2,
+                    'text-background-shape': 'roundrectangle',
+                },
+            },
+            {
+                selector: 'edge.fuzzy',
+                style: {
+                    'line-style': 'dashed',
+                    'line-dash-pattern': [5, 3],
+                    'line-color': fuzzyColor,
+                },
+            },
+            {
+                selector: 'edge.highlighted',
+                style: {
+                    'line-color': edgeHighlight,
+                    width: 2.5,
+                    opacity: 1,
+                    label: 'data(label)',
+                    color: edgeHighlight,
+                    'z-index': 995,
+                },
+            },
+            {
+                selector: 'edge.dimmed',
+                style: {
+                    opacity: 0.08,
+                },
+            },
+        ]
+    }, [theme, showAllLabels])
+
+    const runLayout = useCallback(
+        (cy: Core, name: GraphLayoutName) => {
+            let config: any
+            switch (name) {
+                case 'concentric':
+                    config = {
+                        name: 'concentric',
+                        animate: false,
+                        concentric: (node: NodeSingular) => nodeDegreeMap[node.id()] || 1,
+                        levelWidth: () => 2,
+                        minNodeSpacing: nodes.length > 50 ? 35 : 52,
+                        spacingFactor: 1.2,
+                        avoidOverlap: true,
+                        fit: true,
+                        padding: 28,
+                    }
+                    break
+                case 'breadthfirst':
+                    config = {
+                        name: 'breadthfirst',
+                        animate: false,
+                        directed: false,
+                        spacingFactor: 1.35,
+                        avoidOverlap: true,
+                        fit: true,
+                        padding: 28,
+                    }
+                    break
+                case 'cose':
+                    config = {
+                        name: 'cose',
+                        animate: false,
+                        nodeRepulsion: () => (nodes.length > 50 ? 55000 : 35000),
+                        idealEdgeLength: () => (nodes.length > 50 ? 80 : 100),
+                        edgeElasticity: () => 80,
+                        gravity: 0.12,
+                        numIter: 800,
+                        nodeOverlap: 22,
+                        fit: true,
+                        padding: 28,
+                    }
+                    break
+                case 'circle':
+                    config = {
+                        name: 'circle',
+                        animate: false,
+                        spacingFactor: 1.15,
+                        avoidOverlap: true,
+                        fit: true,
+                        padding: 28,
+                    }
+                    break
+            }
+            cy.layout(config).run()
+        },
+        [nodeDegreeMap, nodes.length]
+    )
+
     useEffect(() => {
         const cy = cyRef.current
         if (!cy || elements.length === 0) return
+        runLayout(cy, currentLayout)
+    }, [currentLayout, elements, runLayout])
 
-        const layoutConfig = getLayoutConfig(currentLayout)
-        const layout = cy.layout(layoutConfig)
-        layout.run()
-    }, [currentLayout, elements])
-
-    // Apply selection / focus highlighting
     useEffect(() => {
         const cy = cyRef.current
         if (!cy) return
 
         cy.batch(() => {
             cy.elements().removeClass('selected highlighted dimmed')
-
             if (selectedNodeId) {
                 const selectedNode = cy.getElementById(selectedNodeId)
                 if (selectedNode.nonempty()) {
@@ -177,37 +292,28 @@ export default function IdentityGraph({
                     const neighborhood = selectedNode.neighborhood()
                     neighborhood.nodes().addClass('highlighted')
                     neighborhood.edges().addClass('highlighted')
-
-                    // Dim other elements
                     cy.elements().not(selectedNode).not(neighborhood).addClass('dimmed')
                 }
             }
         })
     }, [selectedNodeId, elements])
 
-    // Handle Cy instance initialization
-    const handleCyInit = (cy: Core) => {
+    const handleCyInit = useCallback((cy: Core) => {
         cyRef.current = cy
+        if (cyInitializedRef.current) return
+        cyInitializedRef.current = true
 
-        // Tap on node
         cy.on('tap', 'node', (evt: EventObject) => {
             const node = evt.target as NodeSingular
-            const nodeData = node.data() as GraphNodeData
-            if (onSelectNode) {
-                onSelectNode(nodeData)
-            }
+            onSelectNodeRef.current?.(node.data() as GraphNodeData)
         })
 
-        // Tap on background to deselect
         cy.on('tap', (evt: EventObject) => {
             if (evt.target === cy) {
-                if (onSelectNode) {
-                    onSelectNode(null)
-                }
+                onSelectNodeRef.current?.(null)
             }
         })
 
-        // Mouse hover interactions for tooltip
         cy.on('mouseover', 'node', (evt: EventObject) => {
             const node = evt.target as NodeSingular
             setHoveredNode(node.data() as GraphNodeData)
@@ -216,13 +322,21 @@ export default function IdentityGraph({
         cy.on('mouseout', 'node', () => {
             setHoveredNode(null)
         })
-    }
+    }, [])
+
+    useEffect(() => {
+        return () => {
+            const cy = cyRef.current
+            if (cy) {
+                cy.removeAllListeners()
+                cyInitializedRef.current = false
+            }
+        }
+    }, [])
 
     const switchLayout = (name: GraphLayoutName) => {
         setCurrentLayout(name)
-        if (onLayoutChange) {
-            onLayoutChange(name)
-        }
+        onLayoutChange?.(name)
     }
 
     const handleZoomIn = () => {
@@ -230,7 +344,7 @@ export default function IdentityGraph({
         if (cy) {
             cy.zoom({
                 level: cy.zoom() * 1.25,
-                renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+                renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
             })
         }
     }
@@ -240,204 +354,137 @@ export default function IdentityGraph({
         if (cy) {
             cy.zoom({
                 level: cy.zoom() * 0.8,
-                renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+                renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
             })
         }
     }
 
-    const handleFit = () => {
-        const cy = cyRef.current
-        if (cy) {
-            cy.fit(undefined, 30)
-        }
-    }
+    const handleFit = () => cyRef.current?.fit(undefined, 28)
 
     const handleReset = () => {
         const cy = cyRef.current
         if (cy) {
             cy.reset()
-            cy.fit(undefined, 30)
+            cy.fit(undefined, 28)
         }
     }
 
     return (
-        <div className="relative w-full h-full min-h-[460px] bg-gray-900 rounded-xl overflow-hidden border border-gray-800">
-            {/* Top Toolbar: Layout Selector and Controls */}
-            <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-gray-800/90 backdrop-blur-md px-2 py-1.5 rounded-lg border border-gray-700/80 shadow-lg text-xs">
-                <span className="text-gray-400 font-medium mr-1 flex items-center gap-1">
-                    <Layers className="w-3.5 h-3.5" />
-                    Layout:
-                </span>
-                {(
-                    [
-                        { id: 'concentric', label: 'Concentric' },
-                        { id: 'breadthfirst', label: 'Hierarchy' },
-                        { id: 'cose', label: 'Force' },
-                        { id: 'circle', label: 'Circle' }
-                    ] as const
-                ).map(l => (
-                    <button
-                        key={l.id}
-                        onClick={() => switchLayout(l.id)}
-                        className={`px-2 py-1 rounded transition-colors ${
-                            currentLayout === l.id
-                                ? 'bg-blue-600 text-white font-medium shadow-sm'
-                                : 'text-gray-300 hover:bg-gray-700'
-                        }`}
-                        title={`Switch to ${l.label} layout`}
-                    >
-                        {l.label}
-                    </button>
-                ))}
-            </div>
-
-            {/* Top-Right: Zoom and Reset Controls */}
-            <div className="absolute top-3 right-3 z-10 flex items-center gap-1 bg-gray-800/90 backdrop-blur-md p-1 rounded-lg border border-gray-700/80 shadow-lg">
-                <button
-                    onClick={handleZoomIn}
-                    className="p-1.5 text-gray-300 hover:text-white hover:bg-gray-700 rounded transition-colors"
-                    title="Zoom in"
-                >
-                    <ZoomIn className="w-4 h-4" />
-                </button>
-                <button
-                    onClick={handleZoomOut}
-                    className="p-1.5 text-gray-300 hover:text-white hover:bg-gray-700 rounded transition-colors"
-                    title="Zoom out"
-                >
-                    <ZoomOut className="w-4 h-4" />
-                </button>
-                <div className="w-[1px] h-4 bg-gray-700 mx-0.5" />
-                <button
-                    onClick={handleFit}
-                    className="p-1.5 text-gray-300 hover:text-white hover:bg-gray-700 rounded transition-colors"
-                    title="Fit to view"
-                >
-                    <Maximize2 className="w-4 h-4" />
-                </button>
-                <button
-                    onClick={handleReset}
-                    className="p-1.5 text-gray-300 hover:text-white hover:bg-gray-700 rounded transition-colors"
-                    title="Reset view"
-                >
-                    <RotateCcw className="w-4 h-4" />
-                </button>
-            </div>
-
-            {/* Hover Tooltip Overlay */}
-            {hoveredNode && (
-                <div className="absolute bottom-3 left-3 z-10 max-w-sm bg-gray-800/95 backdrop-blur-md px-3 py-2 rounded-lg border border-gray-700 shadow-xl text-xs space-y-1 pointer-events-none">
-                    <div className="flex items-center gap-2">
-                        <span
-                            className="w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: hoveredNode.color }}
-                        />
-                        <span className="font-semibold text-white">{hoveredNode.label}</span>
-                    </div>
-                    <p className="font-mono text-gray-400 truncate">Key: {hoveredNode.source_key}</p>
-                    <p className="text-gray-400">
-                        Connections:{' '}
-                        <span className="text-blue-400 font-medium">
-                            {nodeDegreeMap[hoveredNode.id] || 0}
-                        </span>
-                    </p>
+        <div className="flex flex-col w-full h-full min-h-[480px] bg-surface">
+            <div className="px-3 py-2 bg-subtle border-b border-line flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+                <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Graph layout">
+                    {(
+                        [
+                            { id: 'concentric', label: 'Concentric' },
+                            { id: 'breadthfirst', label: 'Hierarchy' },
+                            { id: 'cose', label: 'Force' },
+                            { id: 'circle', label: 'Circle' },
+                        ] as const
+                    ).map((l) => (
+                        <button
+                            key={l.id}
+                            type="button"
+                            onClick={() => switchLayout(l.id)}
+                            aria-pressed={currentLayout === l.id}
+                            className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                                currentLayout === l.id
+                                    ? 'bg-surface text-ink border border-line-strong'
+                                    : 'text-ink-muted hover:text-ink hover:bg-hover border border-transparent'
+                            }`}
+                        >
+                            {l.label}
+                        </button>
+                    ))}
                 </div>
-            )}
 
-            {/* Cytoscape Canvas */}
-            <CytoscapeComponent
-                elements={elements}
-                cy={handleCyInit}
-                style={{ width: '100%', height: '100%', minHeight: '460px' }}
-                stylesheet={[
-                    {
-                        selector: 'node',
-                        style: {
-                            'background-color': 'data(color)',
-                            'border-color': 'data(borderColor)',
-                            'border-width': 2,
-                            'label': 'data(displayLabel)',
-                            'color': '#f8fafc',
-                            'font-size': '10px',
-                            'font-family': 'Inter, system-ui, sans-serif',
-                            'text-valign': 'bottom',
-                            'text-margin-y': 6,
-                            'width': 'data(size)',
-                            'height': 'data(size)',
-                            'transition-property': 'background-color, border-width, border-color, opacity, width, height',
-                            'transition-duration': 0.15
-                        }
-                    },
-                    {
-                        selector: 'node.highlighted',
-                        style: {
-                            'border-color': '#ffffff',
-                            'border-width': 3,
-                            'opacity': 1,
-                            'z-index': 990
-                        }
-                    },
-                    {
-                        selector: 'node.selected',
-                        style: {
-                            'border-color': '#ffffff',
-                            'border-width': 4,
-                            'width': 40,
-                            'height': 40,
-                            'z-index': 999,
-                            'label': 'data(fullLabel)',
-                            'font-size': '11px',
-                            'font-weight': 'bold',
-                            'color': '#ffffff',
-                            'text-background-color': '#020617',
-                            'text-background-opacity': 0.9,
-                            'text-background-padding': 4,
-                            'text-background-shape': 'roundrectangle'
-                        }
-                    },
-                    {
-                        selector: 'node.dimmed',
-                        style: {
-                            'opacity': 0.15
-                        }
-                    },
-                    {
-                        selector: 'edge',
-                        style: {
-                            'width': 1.5,
-                            'line-color': '#334155',
-                            'curve-style': 'bezier',
-                            'label': 'data(label)',
-                            'color': '#94a3b8',
-                            'font-size': '8px',
-                            'font-family': 'Inter, system-ui, sans-serif',
-                            'text-rotation': 'autorotate',
-                            'text-background-color': '#020617',
-                            'text-background-opacity': 0.75,
-                            'text-background-padding': 2,
-                            'text-background-shape': 'roundrectangle',
-                            'transition-property': 'line-color, width, opacity',
-                            'transition-duration': 0.15
-                        }
-                    },
-                    {
-                        selector: 'edge.highlighted',
-                        style: {
-                            'line-color': '#60a5fa',
-                            'width': 3,
-                            'opacity': 1,
-                            'color': '#93c5fd',
-                            'z-index': 995
-                        }
-                    },
-                    {
-                        selector: 'edge.dimmed',
-                        style: {
-                            'opacity': 0.08
-                        }
-                    }
-                ]}
-            />
+                <div className="flex items-center gap-1">
+                    <button
+                        type="button"
+                        onClick={() => setShowAllLabels((v) => !v)}
+                        aria-pressed={showAllLabels}
+                        aria-label="Toggle all node and edge labels"
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+                            showAllLabels
+                                ? 'bg-accent-soft text-accent border-accent-border'
+                                : 'bg-surface text-ink-muted border-line hover:text-ink'
+                        }`}
+                    >
+                        <Tag className="w-3 h-3" />
+                        <span>Labels</span>
+                    </button>
+
+                    <div className="w-px h-4 bg-line mx-1" aria-hidden="true" />
+
+                    <button
+                        type="button"
+                        onClick={handleZoomIn}
+                        aria-label="Zoom in"
+                        className="inline-flex items-center justify-center w-7 h-7 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                    >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleZoomOut}
+                        aria-label="Zoom out"
+                        className="inline-flex items-center justify-center w-7 h-7 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                    >
+                        <ZoomOut className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleFit}
+                        aria-label="Fit graph to view"
+                        className="inline-flex items-center justify-center w-7 h-7 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                    >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleReset}
+                        aria-label="Reset zoom and position"
+                        className="inline-flex items-center justify-center w-7 h-7 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                    >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            </div>
+
+            <div className="relative flex-1 min-h-[440px]">
+                <div className="absolute bottom-2.5 right-2.5 z-10 flex items-center gap-3 px-2.5 py-1 rounded bg-surface/95 border border-line text-[11px] text-ink-muted pointer-events-none">
+                    <span className="inline-flex items-center gap-1.5">
+                        <span className="w-4 h-0.5 bg-ink-subtle inline-block" />
+                        Exact
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                        <span className="w-4 border-t border-dashed border-status-warning inline-block" />
+                        Fuzzy
+                    </span>
+                </div>
+
+                {hoveredNode && (
+                    <div className="absolute bottom-2.5 left-2.5 z-10 max-w-xs bg-surface px-3 py-2 rounded-md border border-line-strong shadow-popover text-xs space-y-0.5 pointer-events-none">
+                        <div className="flex items-center gap-1.5">
+                            <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: hoveredNode.color }}
+                            />
+                            <span className="font-semibold text-ink truncate">{hoveredNode.label}</span>
+                        </div>
+                        <p className="font-mono text-[11px] text-ink-muted truncate">{hoveredNode.source_key}</p>
+                        <p className="text-[11px] text-ink-muted tabular-nums">
+                            Degree: <strong className="font-mono text-ink">{nodeDegreeMap[hoveredNode.id] || 0}</strong>
+                        </p>
+                    </div>
+                )}
+
+                <CytoscapeComponent
+                    elements={elements}
+                    cy={handleCyInit}
+                    style={{ width: '100%', height: '100%', minHeight: '440px' }}
+                    stylesheet={stylesheet as any}
+                />
+            </div>
         </div>
     )
 }

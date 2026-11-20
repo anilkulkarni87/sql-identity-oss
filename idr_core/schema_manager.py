@@ -99,6 +99,18 @@ class SchemaManager:
             return dialect_config.get("string_type", "VARCHAR")
         return dialect_config.get(col_type.value, "VARCHAR")
 
+    @staticmethod
+    def format_cluster_clause(dialect_name: str, cluster_by: List[str] | None) -> str:
+        """Format dialect-specific CLUSTER BY clause (up to 4 columns)."""
+        if not cluster_by:
+            return ""
+        cols = ", ".join(cluster_by[:4])
+        if dialect_name == "bigquery":
+            return f" CLUSTER BY {cols}"
+        if dialect_name in ("snowflake", "databricks"):
+            return f" CLUSTER BY ({cols})"
+        return ""
+
     @classmethod
     def generate_ddl(cls, dialect_name: str) -> str:
         """Generate canonical multi-statement DDL script for a target dialect from SYSTEM_TABLES."""
@@ -131,9 +143,10 @@ class SchemaManager:
                 else:
                     col_defs.append(f"    PRIMARY KEY ({', '.join(pks)})")
 
+            cluster_clause = cls.format_cluster_clause(dialect_name, table_def.cluster_by)
             lines.append(f"CREATE TABLE IF NOT EXISTS {table_def.fqn} (")
             lines.append(",\n".join(col_defs))
-            lines.append(");\n")
+            lines.append(f"){cluster_clause};\n")
         return "\n".join(lines)
 
     def _create_table(self, table_def: TableDef) -> None:
@@ -172,11 +185,12 @@ class SchemaManager:
                 else:
                     pk_clause = f", PRIMARY KEY ({', '.join(pks)})"
 
+            cluster_clause = self.format_cluster_clause(self.dialect_name, table_def.cluster_by)
             full_ddl = f"""
                 CREATE TABLE IF NOT EXISTS {table_def.fqn} (
                     {", ".join(col_defs)}
                     {pk_clause}
-                )
+                ){cluster_clause}
             """
             self.adapter.execute(full_ddl)
 

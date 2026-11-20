@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
     Loader2, CheckCircle2, Settings, Play, Save, ClipboardList,
     ChevronDown, ChevronRight, Database, Shield, Layers, Code,
-    Activity, Clock, Cpu, FileSpreadsheet, GitMerge, Network, Sparkles,
+    Activity, Clock, Cpu, FileSpreadsheet, GitMerge, Network,
     ArrowRight, Copy, Check, Edit3, AlertCircle, RotateCcw
 } from "lucide-react";
 import { IDRConfig } from '../../types';
@@ -344,8 +344,33 @@ export default function StepReview({
         if (s.includes('attribute')) return <FileSpreadsheet className="w-4 h-4 text-amber-400" />;
         if (s.includes('edge')) return <GitMerge className="w-4 h-4 text-blue-400" />;
         if (s.includes('label') || s.includes('propagation')) return <Network className="w-4 h-4 text-emerald-400" />;
-        if (s.includes('fuzzy')) return <Sparkles className="w-4 h-4 text-pink-400" />;
+        if (s.includes('fuzzy')) return <GitMerge className="w-4 h-4 text-status-fuzzy-text" />;
         return <Activity className="w-4 h-4 text-blue-400" />;
+    };
+
+    const formatStageMetric = (stageName: string, rowsAffected: number | null | undefined): string => {
+        const s = stageName.toLowerCase();
+        const cnt = rowsAffected ?? 0;
+        if (s.includes('preflight')) {
+            return cnt > 0 ? `${cnt.toLocaleString()} sources verified` : 'Schema verified';
+        }
+        if (s.includes('entity')) return `${cnt.toLocaleString()} entities`;
+        if (s.includes('identifier')) return `${cnt.toLocaleString()} identifiers`;
+        if (s.includes('attribute')) {
+            return cnt > 0 ? `${cnt.toLocaleString()} attributes` : 'Skipped (exact only)';
+        }
+        if (s.includes('edge')) return `${cnt.toLocaleString()} edges`;
+        if (s.includes('label') || s.includes('propagation')) return `${cnt.toLocaleString()} clusters`;
+        if (s.includes('fuzzy')) {
+            return cnt > 0 ? `${cnt.toLocaleString()} super-clusters` : 'Skipped';
+        }
+        if (s.includes('dry_run')) {
+            const total = cnt > 0 ? cnt : (runResult?.dry_run_summary?.total_entities ?? runResult?.entities_processed ?? 0);
+            return total > 0 ? `${Number(total).toLocaleString()} entities analyzed` : 'Diff analyzed';
+        }
+        if (s.includes('lens')) return `${cnt.toLocaleString()} lenses`;
+        if (s.includes('output')) return `${cnt.toLocaleString()} profiles`;
+        return `${cnt.toLocaleString()} rows`;
     };
 
     const btnClass = "px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center";
@@ -557,7 +582,7 @@ export default function StepReview({
                                             </span>
                                         ) : isDone ? (
                                             <span className="text-gray-300">
-                                                {(st.rows_affected ?? 0).toLocaleString()} rows
+                                                {formatStageMetric(st.name, st.rows_affected)}
                                             </span>
                                         ) : (
                                             <span>Queued</span>

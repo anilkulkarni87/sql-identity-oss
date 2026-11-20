@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="IDR API",
     description="Identity Resolution Dashboard & Explorer API",
-    version="0.5.0",
+    version="0.7.0",
     lifespan=lifespan,
 )
 

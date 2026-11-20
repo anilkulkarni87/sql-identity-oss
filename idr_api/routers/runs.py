@@ -14,7 +14,7 @@ router = APIRouter(tags=["runs"])
 
 
 @router.get("/api/runs", response_model=List[RunSummary])
-async def get_runs(limit: int = Query(20, le=100), adapter=Depends(get_adapter)):
+def get_runs(limit: int = Query(20, le=100), adapter=Depends(get_adapter)):
     """Get recent run history."""
 
     try:
@@ -57,7 +57,7 @@ async def get_runs(limit: int = Query(20, le=100), adapter=Depends(get_adapter))
 
 
 @router.get("/api/runs/{run_id}", response_model=RunDetail)
-async def get_run_detail(run_id: str, adapter=Depends(get_adapter)):
+def get_run_detail(run_id: str, adapter=Depends(get_adapter)):
     """Get detailed run information including stage metrics, warnings, and error messages."""
     from idr_core.adapters.base import get_dialect_config
 

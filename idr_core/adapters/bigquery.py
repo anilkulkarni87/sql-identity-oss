@@ -73,10 +73,28 @@ class BigQueryAdapter(IDRAdapter):
         return sql
 
     def execute(self, sql: str) -> None:
-        """Execute a single SQL statement."""
-        sql = self._prepare_sql_simple(sql)
-        job = self.client.query(sql, location=self.location)
-        job.result()  # Wait for completion
+        """Execute a single SQL statement, auto-migrating clustering spec on CREATE OR REPLACE TABLE."""
+        prepared = self._prepare_sql_simple(sql)
+        try:
+            job = self.client.query(prepared, location=self.location)
+            job.result()  # Wait for completion
+        except Exception as exc:
+            if "Cannot replace a table with a different partitioning spec" in str(exc):
+                m = re.search(
+                    r"\bCREATE\s+OR\s+REPLACE\s+TABLE\s+([`A-Za-z0-9_.\-]+)",
+                    prepared,
+                    flags=re.IGNORECASE,
+                )
+                if m:
+                    target_table = m.group(1)
+                    drop_job = self.client.query(
+                        f"DROP TABLE IF EXISTS {target_table}", location=self.location
+                    )
+                    drop_job.result()
+                    retry_job = self.client.query(prepared, location=self.location)
+                    retry_job.result()
+                    return
+            raise
 
     def execute_script(self, sql: str) -> None:
         """Execute multiple SQL statements as a script."""
@@ -133,6 +151,12 @@ class BigQueryAdapter(IDRAdapter):
             )
 
         job = self.client.query(sql, location=self.location, job_config=job_config)
+        res_iter = job.result()
+        rows_list = list(res_iter)
+        if rows_list and hasattr(rows_list[0], "keys"):
+            return [{str(k).lower(): row[k] for k in row.keys()} for row in rows_list]
+        if not rows_list and hasattr(res_iter, "total_rows"):
+            return []
         df = job.to_dataframe()
         df.columns = [str(c).lower() for c in df.columns]
         return df.to_dict("records")

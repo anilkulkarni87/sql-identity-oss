@@ -82,8 +82,14 @@ def search_entities(q: str = Query(..., min_length=3), adapter=Depends(get_adapt
         FROM idr_out.identity_clusters_current c
         JOIN idr_out.identity_resolved_membership_current m
             ON c.resolved_id = m.resolved_id
-        LEFT JOIN idr_out.identity_edges_current e
-            ON m.entity_key = e.left_entity_key OR m.entity_key = e.right_entity_key
+        LEFT JOIN (
+            SELECT left_entity_key AS entity_key, identifier_value_norm
+            FROM idr_out.identity_edges_current
+            UNION ALL
+            SELECT right_entity_key AS entity_key, identifier_value_norm
+            FROM idr_out.identity_edges_current
+        ) e
+            ON m.entity_key = e.entity_key
         WHERE LOWER(e.identifier_value_norm) LIKE LOWER(?)
            OR LOWER(m.entity_key) LIKE LOWER(?)
            OR LOWER(c.resolved_id) LIKE LOWER(?)

@@ -1,9 +1,10 @@
-import { useState, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import IdentityGraph, { GraphNodeData, GraphEdgeData, GraphLayoutName } from '../components/IdentityGraph'
 import {
-    Search, X, Filter, Sparkles, Check, Copy, Eye, EyeOff,
-    Network, Hash, ShieldAlert, Trash2, GitBranch, Loader2
+    Search, X, Check, Copy, Eye, EyeOff, Hash, ShieldAlert,
+    Trash2, GitBranch, Loader2, RefreshCw, Bot, ChevronDown, ChevronUp
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useToast } from '../components/Toast'
@@ -12,7 +13,7 @@ import {
     getEntityColor,
     formatSourceName,
     getIdentifierBadge,
-    formatAttributeKey
+    formatAttributeKey,
 } from '../utils/colors'
 
 interface ClusterSummary {
@@ -21,13 +22,26 @@ interface ClusterSummary {
     confidence_score: number | null
 }
 
+type InspectorTab = 'golden' | 'edges' | 'entity'
+
 export default function Explorer() {
     const { toast } = useToast()
     const queryClient = useQueryClient()
-    const [searchQuery, setSearchQuery] = useState('')
-    const debouncedSearchQuery = useDebounce(searchQuery, 300)
+    const [searchParams, setSearchParams] = useSearchParams()
+    const searchInputRef = useRef<HTMLInputElement>(null)
 
-    const [selectedCluster, setSelectedCluster] = useState<string | null>(null)
+    const [searchQuery, setSearchQuery] = useState('')
+    const debouncedSearchQuery = useDebounce(searchQuery, 250)
+
+    const selectedCluster = searchParams.get('cluster')
+    const setSelectedCluster = (clusterId: string | null) => {
+        if (clusterId) {
+            setSearchParams({ cluster: clusterId })
+        } else {
+            setSearchParams({})
+        }
+    }
+
     const [selectedLens, setSelectedLens] = useState<string>('')
     const [diffModalOpen, setDiffModalOpen] = useState(false)
     const [diffLensA, setDiffLensA] = useState<string>('')
@@ -35,18 +49,42 @@ export default function Explorer() {
     const [aiExplanation, setAiExplanation] = useState<string | null>(null)
     const [aiExplaining, setAiExplaining] = useState(false)
     const [aiCustomPrompt, setAiCustomPrompt] = useState('')
+
     const [selectedNode, setSelectedNode] = useState<GraphNodeData | null>(null)
+    const [activeTab, setActiveTab] = useState<InspectorTab>('golden')
     const [layoutName, setLayoutName] = useState<GraphLayoutName>('concentric')
     const [hiddenSources, setHiddenSources] = useState<Set<string>>(new Set())
     const [hideEmptyAttrs, setHideEmptyAttrs] = useState(true)
     const [attrFilter, setAttrFilter] = useState('')
     const [edgeSearch, setEdgeSearch] = useState('')
     const [copiedKey, setCopiedKey] = useState<string | null>(null)
-    const [actionNotice, setActionNotice] = useState<string | null>(null)
+    const [confirmOverrideKey, setConfirmOverrideKey] = useState<string | null>(null)
+    const [crosswalkExpanded, setCrosswalkExpanded] = useState(false)
+
     const [rtbfPreview, setRtbfPreview] = useState<any | null>(null)
     const [rtbfReceipt, setRtbfReceipt] = useState<any | null>(null)
     const [rtbfLoading, setRtbfLoading] = useState<'preview' | 'purge' | null>(null)
     const rtbfInFlightRef = useRef(false)
+
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            const tag = (e.target as HTMLElement)?.tagName
+            if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+                e.preventDefault()
+                searchInputRef.current?.focus()
+            } else if (e.key === 'Escape') {
+                if (diffModalOpen) {
+                    setDiffModalOpen(false)
+                } else if (confirmOverrideKey) {
+                    setConfirmOverrideKey(null)
+                } else if (selectedNode) {
+                    setSelectedNode(null)
+                }
+            }
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [diffModalOpen, confirmOverrideKey, selectedNode])
 
     const { data: setupStatus } = useQuery({
         queryKey: ['setupStatus'],
@@ -73,26 +111,36 @@ export default function Explorer() {
             selectedLens
                 ? api.getLensClusters(selectedLens, debouncedSearchQuery)
                 : api.searchEntities(debouncedSearchQuery),
-        enabled: isConnected && (selectedLens ? true : debouncedSearchQuery.trim().length >= 3)
+        enabled: isConnected && (selectedLens ? true : debouncedSearchQuery.trim().length >= 3),
     })
 
-    const { data: clusterDetail } = useQuery({
+    const {
+        data: clusterDetail,
+        isLoading: clusterLoading,
+        isError: clusterError,
+        refetch: refetchCluster,
+    } = useQuery({
         queryKey: ['cluster', selectedLens, selectedCluster],
         queryFn: () =>
             selectedLens
                 ? api.getLensClusterDetail(selectedLens, selectedCluster!)
                 : api.getCluster(selectedCluster!),
-        enabled: !!selectedCluster
+        enabled: !!selectedCluster,
     })
 
-    // Extract dynamic unique sources in this cluster
+    const handleSelectNode = (node: GraphNodeData | null) => {
+        setSelectedNode(node)
+        setConfirmOverrideKey(null)
+        if (node) {
+            setActiveTab('entity')
+        }
+    }
+
     const uniqueSources = useMemo(() => {
         if (!clusterDetail?.entities) return []
-        const sources = Array.from(new Set(clusterDetail.entities.map(e => e.source_id)))
-        return sources.sort()
+        return Array.from(new Set(clusterDetail.entities.map((e) => e.source_id))).sort()
     }, [clusterDetail])
 
-    // Count entities per source
     const sourceCounts = useMemo(() => {
         const counts: Record<string, number> = {}
         if (!clusterDetail?.entities) return counts
@@ -102,17 +150,14 @@ export default function Explorer() {
         return counts
     }, [clusterDetail])
 
-    // Convert cluster entities to graph nodes with dynamic entity color coding
     const graphNodes: GraphNodeData[] = useMemo(() => {
         if (!clusterDetail?.entities) return []
-
         return clusterDetail.entities
-            .filter(e => !hiddenSources.has(e.source_id))
-            .map(e => {
+            .filter((e) => !hiddenSources.has(e.source_id))
+            .map((e) => {
                 const colorScheme = getEntityColor(e.source_id, uniqueSources)
                 const formattedSource = formatSourceName(e.source_id)
                 const shortKey = e.source_key.length > 12 ? `${e.source_key.slice(0, 10)}…` : e.source_key
-
                 return {
                     id: e.entity_key,
                     source_id: e.source_id,
@@ -120,59 +165,55 @@ export default function Explorer() {
                     label: `${formattedSource} (${shortKey})`,
                     color: colorScheme.bg,
                     borderColor: colorScheme.border,
-                    size: 26
+                    size: 24,
                 }
             })
     }, [clusterDetail, uniqueSources, hiddenSources])
 
-    // Convert cluster edges, filtering out hidden sources
     const graphEdges: GraphEdgeData[] = useMemo(() => {
         if (!clusterDetail?.edges) return []
-
-        // Set of active node IDs
-        const activeNodeIds = new Set(graphNodes.map(n => n.id))
-
+        const activeNodeIds = new Set(graphNodes.map((n) => n.id))
         return clusterDetail.edges
-            .filter(e => activeNodeIds.has(e.left_entity_key) && activeNodeIds.has(e.right_entity_key))
-            .map((e, idx) => ({
-                id: `edge-${idx}`,
-                source: e.left_entity_key,
-                target: e.right_entity_key,
-                label: e.identifier_type,
-                identifier_type: e.identifier_type,
-                identifier_value: e.identifier_value
-            }))
+            .filter((e) => activeNodeIds.has(e.left_entity_key) && activeNodeIds.has(e.right_entity_key))
+            .map((e, idx) => {
+                const isFuzzy =
+                    (e.rule_id || '').toLowerCase().includes('fuzzy') ||
+                    (e.identifier_type || '').toLowerCase().includes('fuzzy')
+                return {
+                    id: `edge-${idx}`,
+                    source: e.left_entity_key,
+                    target: e.right_entity_key,
+                    label: e.identifier_type,
+                    identifier_type: e.identifier_type,
+                    identifier_value: e.identifier_value,
+                    rule_id: e.rule_id,
+                    isFuzzy,
+                }
+            })
     }, [clusterDetail, graphNodes])
 
-    // Filtered edges for the right-hand panel
     const displayedEdges = useMemo(() => {
         if (!clusterDetail?.edges) return []
-
         let list = clusterDetail.edges
-
-        // If a node is selected, show edges connected to that node
         if (selectedNode) {
             list = list.filter(
-                e => e.left_entity_key === selectedNode.id || e.right_entity_key === selectedNode.id
+                (e) => e.left_entity_key === selectedNode.id || e.right_entity_key === selectedNode.id
             )
         }
-
-        // Apply text search on edge values or types
         if (edgeSearch.trim()) {
-            const query = edgeSearch.toLowerCase()
+            const q = edgeSearch.toLowerCase()
             list = list.filter(
-                e =>
-                    e.identifier_value.toLowerCase().includes(query) ||
-                    e.identifier_type.toLowerCase().includes(query) ||
-                    e.left_entity_key.toLowerCase().includes(query) ||
-                    e.right_entity_key.toLowerCase().includes(query)
+                (e) =>
+                    e.identifier_value.toLowerCase().includes(q) ||
+                    e.identifier_type.toLowerCase().includes(q) ||
+                    (e.rule_id || '').toLowerCase().includes(q) ||
+                    e.left_entity_key.toLowerCase().includes(q) ||
+                    e.right_entity_key.toLowerCase().includes(q)
             )
         }
-
         return list
     }, [clusterDetail, selectedNode, edgeSearch])
 
-    // Categorized Golden Profile Attributes
     const goldenProfileCategories = useMemo(() => {
         if (!clusterDetail?.golden_profile) return null
 
@@ -181,7 +222,7 @@ export default function Explorer() {
             'Commerce & Transactions': [],
             'Engagement & Activity': [],
             'Location & Address': [],
-            'Additional Attributes': []
+            'Additional Attributes': [],
         }
 
         const filterLower = attrFilter.trim().toLowerCase()
@@ -189,19 +230,9 @@ export default function Explorer() {
 
         for (const [rawKey, rawVal] of Object.entries(clusterDetail.golden_profile)) {
             const isEmpty =
-                rawVal === null ||
-                rawVal === undefined ||
-                rawVal === '' ||
-                rawVal === '-' ||
-                rawVal === '—'
-
-            if (isEmpty) {
-                totalEmpty++
-            }
-
-            if (hideEmptyAttrs && isEmpty) {
-                continue
-            }
+                rawVal === null || rawVal === undefined || rawVal === '' || rawVal === '-' || rawVal === '—'
+            if (isEmpty) totalEmpty++
+            if (hideEmptyAttrs && isEmpty) continue
 
             const label = formatAttributeKey(rawKey)
             if (
@@ -214,59 +245,13 @@ export default function Explorer() {
             }
 
             const k = rawKey.toLowerCase()
-            if (
-                k.includes('name') ||
-                k.includes('email') ||
-                k.includes('phone') ||
-                k.includes('gender') ||
-                k.includes('birth') ||
-                k.includes('dob') ||
-                k.includes('segment') ||
-                k.includes('tier') ||
-                k.includes('customer') ||
-                k.includes('account')
-            ) {
+            if (/name|email|phone|gender|birth|dob|segment|tier|customer|account/.test(k)) {
                 categories['Identity & Contact'].push({ key: rawKey, label, value: rawVal })
-            } else if (
-                k.includes('amount') ||
-                k.includes('spend') ||
-                k.includes('value') ||
-                k.includes('price') ||
-                k.includes('subtotal') ||
-                k.includes('discount') ||
-                k.includes('cost') ||
-                k.includes('points') ||
-                k.includes('payment') ||
-                k.includes('order') ||
-                k.includes('store') ||
-                k.includes('balance')
-            ) {
+            } else if (/amount|spend|value|price|subtotal|discount|cost|points|payment|order|store|balance/.test(k)) {
                 categories['Commerce & Transactions'].push({ key: rawKey, label, value: rawVal })
-            } else if (
-                k.includes('channel') ||
-                k.includes('visit') ||
-                k.includes('timestamp') ||
-                k.includes('date') ||
-                k.includes('event') ||
-                k.includes('device') ||
-                k.includes('browser') ||
-                k.includes('os') ||
-                k.includes('ip') ||
-                k.includes('session') ||
-                k.includes('fraud') ||
-                k.includes('score') ||
-                k.includes('verified')
-            ) {
+            } else if (/channel|visit|timestamp|date|event|device|browser|os|ip|session|fraud|score|verified/.test(k)) {
                 categories['Engagement & Activity'].push({ key: rawKey, label, value: rawVal })
-            } else if (
-                k.includes('address') ||
-                k.includes('street') ||
-                k.includes('city') ||
-                k.includes('state') ||
-                k.includes('zip') ||
-                k.includes('postal') ||
-                k.includes('country')
-            ) {
+            } else if (/address|street|city|state|zip|postal|country/.test(k)) {
                 categories['Location & Address'].push({ key: rawKey, label, value: rawVal })
             } else {
                 categories['Additional Attributes'].push({ key: rawKey, label, value: rawVal })
@@ -277,25 +262,18 @@ export default function Explorer() {
     }, [clusterDetail?.golden_profile, hideEmptyAttrs, attrFilter])
 
     const toggleSourceFilter = (sourceId: string) => {
-        setHiddenSources(prev => {
+        setHiddenSources((prev) => {
             const next = new Set(prev)
-            if (next.has(sourceId)) {
-                next.delete(sourceId)
-            } else {
-                next.add(sourceId)
-            }
+            if (next.has(sourceId)) next.delete(sourceId)
+            else next.add(sourceId)
             return next
         })
-    }
-
-    const resetFilters = () => {
-        setHiddenSources(new Set())
     }
 
     const copyToClipboard = (text: string, id: string) => {
         navigator.clipboard.writeText(text)
         setCopiedKey(id)
-        setTimeout(() => setCopiedKey(null), 2000)
+        setTimeout(() => setCopiedKey(null), 1800)
     }
 
     const handleStewardshipOverride = async (
@@ -309,16 +287,18 @@ export default function Explorer() {
                 override_type: overrideType,
                 entity_key_a: entityKeyA,
                 entity_key_b: entityKeyB || '__ISOLATE__',
-                reason: 'Added from Identity Graph Explorer'
+                reason: 'Added from Identity Graph Explorer',
             })
-            setActionNotice(
+            setConfirmOverrideKey(null)
+            toast(
+                'success',
+                overrideType === 'ISOLATE' ? 'Entity quarantine queued' : 'DO_NOT_LINK override saved',
                 overrideType === 'ISOLATE'
-                    ? `Added ISOLATE override for ${entityKeyA}. It will be quarantined on the next pipeline run.`
-                    : `Added DO_NOT_LINK override between ${entityKeyA} and ${entityKeyB}. It will take effect on the next pipeline run.`
+                    ? `${entityKeyA} will be isolated on the next pipeline run.`
+                    : `${entityKeyA} ↔ ${entityKeyB} will be unlinked on the next pipeline run.`
             )
-            setTimeout(() => setActionNotice(null), 6000)
         } catch (err: any) {
-            setActionNotice(`Failed to save override: ${err?.message || err}`)
+            toast('error', 'Failed to save override', String(err?.message || err))
         }
     }
 
@@ -332,12 +312,13 @@ export default function Explorer() {
                 match_type: 'EXACT',
                 reason: `Excluded from cluster ${selectedCluster || 'explorer'}`,
             })
-            setActionNotice(
-                `Added ${identifierType} exclusion for "${identifierValue}". Re-run in INCR mode to split affected clusters.`
+            toast(
+                'success',
+                `Excluded ${identifierType}: ${identifierValue}`,
+                'Re-run in INCR mode to split affected clusters.'
             )
-            setTimeout(() => setActionNotice(null), 6000)
         } catch (err: any) {
-            setActionNotice(`Failed to save exclusion: ${err?.message || err}`)
+            toast('error', 'Failed to save exclusion', String(err?.message || err))
         }
     }
 
@@ -349,13 +330,11 @@ export default function Explorer() {
             const res = await api.privacyForget({
                 resolved_id: resolvedId,
                 dry_run: true,
-                reason: 'GDPR_CCPA_RTBF'
+                reason: 'GDPR_CCPA_RTBF',
             })
             setRtbfPreview(res)
             setRtbfReceipt(null)
         } catch (err: any) {
-            const msg = `RTBF preview failed: ${err?.message || err}`
-            setActionNotice(msg)
             toast('error', 'GDPR preview failed', String(err?.message || err))
         } finally {
             rtbfInFlightRef.current = false
@@ -371,7 +350,7 @@ export default function Explorer() {
             const res = await api.privacyForget({
                 resolved_id: resolvedId,
                 dry_run: false,
-                reason: 'GDPR_CCPA_RTBF'
+                reason: 'GDPR_CCPA_RTBF',
             })
             setRtbfPreview(null)
             setRtbfReceipt(res)
@@ -379,10 +358,12 @@ export default function Explorer() {
             setSelectedNode(null)
             await queryClient.invalidateQueries({ queryKey: ['search'] })
             await queryClient.invalidateQueries({ queryKey: ['metrics'] })
-            toast('success', 'GDPR purge & suppression complete', `${res.entities_purged} entities purged and suppressed from future FULL/INCR runs.`)
+            toast(
+                'success',
+                'GDPR purge & suppression complete',
+                `${res.entities_purged} entities purged and suppressed from future runs.`
+            )
         } catch (err: any) {
-            const msg = `RTBF purge failed: ${err?.message || err}`
-            setActionNotice(msg)
             toast('error', 'GDPR purge failed', String(err?.message || err))
         } finally {
             rtbfInFlightRef.current = false
@@ -391,170 +372,212 @@ export default function Explorer() {
     }
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-4">
+            {/* Compact Header + Lens Picker + Search */}
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-                        <Network className="w-6 h-6 text-blue-400" />
+                    <h1 className="text-[18px] font-semibold tracking-[-0.015em] text-ink">
                         Identity Graph Explorer
                     </h1>
-                    <p className="text-sm text-gray-400 mt-1">
-                        Search and explore unified entity clusters, inspect incident identifiers, and verify Golden Profiles.
+                    <p className="text-[13px] text-ink-muted mt-0.5">
+                        Inspect entity clusters, deterministic vs. fuzzy edge provenance, Multi-Lens diffs, and Golden Records.
                     </p>
                 </div>
-                {availableLenses.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-xs uppercase tracking-wider text-gray-400 font-semibold">
-                            Lens
-                        </label>
-                        <select
-                            value={selectedLens}
-                            onChange={(e) => {
-                                setSelectedLens(e.target.value)
-                                setSelectedCluster(null)
-                                setSelectedNode(null)
-                            }}
-                            className="bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="">Primary Graph (Default)</option>
-                            {availableLenses.map((l) => (
-                                <option key={l.id} value={l.id}>
-                                    {l.id} ({l.cluster_count} clusters)
-                                </option>
-                            ))}
-                        </select>
-                        {availableLenses.length >= 2 && (
-                            <button
-                                onClick={() => {
-                                    setDiffLensA(availableLenses[0].id)
-                                    setDiffLensB(availableLenses[1].id)
-                                    setDiffModalOpen(true)
+
+                <div className="flex flex-wrap items-center gap-2">
+                    {availableLenses.length > 0 && (
+                        <>
+                            <select
+                                aria-label="Identity lens"
+                                value={selectedLens}
+                                onChange={(e) => {
+                                    setSelectedLens(e.target.value)
+                                    setSelectedCluster(null)
+                                    setSelectedNode(null)
                                 }}
-                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-blue-300 flex items-center gap-1.5 transition"
+                                className="input-field w-auto text-xs py-1.5"
                             >
-                                <GitBranch className="w-3.5 h-3.5" />
-                                Compare Lenses
+                                <option value="">Primary Graph (Default)</option>
+                                {availableLenses.map((l) => (
+                                    <option key={l.id} value={l.id}>
+                                        Lens: {l.id} ({l.cluster_count})
+                                    </option>
+                                ))}
+                            </select>
+
+                            {availableLenses.length >= 2 && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setDiffLensA(availableLenses[0].id)
+                                        setDiffLensB(availableLenses[1].id)
+                                        setDiffModalOpen(true)
+                                    }}
+                                    className="btn-secondary text-xs"
+                                >
+                                    <GitBranch className="w-3.5 h-3.5 text-accent" />
+                                    Compare Lenses
+                                </button>
+                            )}
+                        </>
+                    )}
+
+                    <div className="relative w-full sm:w-80">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-subtle pointer-events-none" />
+                        <input
+                            ref={searchInputRef}
+                            type="text"
+                            aria-label="Search identity clusters by email, phone, customer ID, or hash"
+                            placeholder="Search email, phone, ID, or hash… (/)"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="input-field pl-8 pr-8 text-xs"
+                        />
+                        {searchQuery && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSearchQuery('')
+                                    setSelectedNode(null)
+                                }}
+                                aria-label="Clear search"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                            >
+                                <X className="w-3.5 h-3.5" />
                             </button>
                         )}
                     </div>
-                )}
+                </div>
             </div>
 
-            {/* Search Bar */}
-            <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                    type="text"
-                    placeholder="Search by email, phone, customer ID, or transaction hash (e.g. 'donald.walker', '555-01', 'a28def')..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-12 pr-10 py-3 bg-gray-800/90 rounded-xl border border-gray-700/80 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-all text-sm placeholder:text-gray-500 shadow-inner"
-                />
-                {searchQuery && (
-                    <button
-                        onClick={() => {
-                            setSearchQuery('')
-                            setSelectedNode(null)
-                        }}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                        title="Clear search"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
-                )}
-            </div>
+            {!selectedLens && searchQuery.trim().length > 0 && searchQuery.trim().length < 3 && (
+                <p className="text-xs text-ink-muted">
+                    Type at least 3 characters to query the identity index.
+                </p>
+            )}
 
-            {/* Search Results Dropdown / Card */}
-            {searchQuery.trim().length >= 3 && (
-                <div className="bg-gray-800/95 backdrop-blur-sm rounded-xl p-4 border border-gray-700/80 shadow-xl space-y-2">
-                    <div className="flex items-center justify-between text-xs text-gray-400 pb-2 border-b border-gray-700/60">
+            {/* Search Results Table */}
+            {(selectedLens || searchQuery.trim().length >= 3) && (
+                <div className="surface-panel overflow-hidden">
+                    <div className="px-3 py-2 bg-subtle border-b border-line flex items-center justify-between text-xs text-ink-muted">
                         <span>
                             {setupStatus && !isConnected
                                 ? 'Warehouse disconnected — connect in Identity Studio to search.'
                                 : searching
-                                    ? 'Querying identity index...'
-                                    : `Found ${searchResults?.length || 0} matching clusters`}
+                                ? 'Querying identity index…'
+                                : `${searchResults?.length || 0} matching clusters`}
                         </span>
                         {searchResults && searchResults.length > 0 && (
-                            <span className="text-gray-500">Click a cluster to load the graph</span>
+                            <span>Select a cluster to inspect</span>
                         )}
                     </div>
-                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                        {searchResults?.map((result: ClusterSummary) => {
-                            const isSelected = selectedCluster === result.resolved_id
-                            return (
-                                <button
-                                    key={result.resolved_id}
-                                    onClick={() => {
-                                        setSelectedCluster(result.resolved_id)
-                                        setSelectedNode(null)
-                                        setHiddenSources(new Set())
-                                    }}
-                                    className={`w-full text-left p-3 rounded-lg transition-all border ${
-                                        isSelected
-                                            ? 'bg-blue-600/25 border-blue-500 text-white shadow-md'
-                                            : 'bg-gray-900/60 border-gray-700/60 hover:bg-gray-700/60 text-gray-200'
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <Hash className="w-4 h-4 text-blue-400" />
-                                            <span className="font-mono text-xs font-semibold">{result.resolved_id}</span>
+                    <div className="max-h-52 overflow-y-auto divide-y divide-line">
+                        {searchResults && searchResults.length === 0 && !searching ? (
+                            <div className="px-3 py-5 text-center text-xs text-ink-muted">
+                                No clusters matched &ldquo;{searchQuery}&rdquo;.
+                            </div>
+                        ) : (
+                            searchResults?.map((result: ClusterSummary) => {
+                                const isSelected = selectedCluster === result.resolved_id
+                                return (
+                                    <button
+                                        key={result.resolved_id}
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedCluster(result.resolved_id)
+                                            setSelectedNode(null)
+                                            setHiddenSources(new Set())
+                                            setAiExplanation(null)
+                                            setActiveTab('golden')
+                                        }}
+                                        className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 transition-colors ${
+                                            isSelected
+                                                ? 'bg-selected text-ink'
+                                                : 'bg-surface hover:bg-subtle text-ink-secondary'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <Hash className="w-3.5 h-3.5 text-accent shrink-0" />
+                                            <span className="font-mono text-xs font-medium text-ink truncate">
+                                                {result.resolved_id}
+                                            </span>
                                         </div>
-                                        <div className="flex items-center gap-3">
-                                            {result.confidence_score !== null && result.confidence_score !== undefined && (
-                                                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
-                                                    {(result.confidence_score * 100).toFixed(1)}% match
+                                        <div className="flex items-center gap-2 shrink-0 font-mono tabular-nums">
+                                            {result.confidence_score != null && (
+                                                <span className="badge-success">
+                                                    {(result.confidence_score * 100).toFixed(1)}%
                                                 </span>
                                             )}
-                                            <span className="text-xs font-medium text-gray-300 bg-gray-800 px-2.5 py-0.5 rounded-full border border-gray-700">
+                                            <span className="badge-neutral">
                                                 {result.cluster_size.toLocaleString()} entities
                                             </span>
                                         </div>
-                                    </div>
-                                </button>
-                            )
-                        })}
+                                    </button>
+                                )
+                            })
+                        )}
                     </div>
                 </div>
             )}
 
-            {/* Selected Cluster Workspace */}
-            {actionNotice && (
-                <div className="bg-emerald-950/60 border border-emerald-700/80 text-emerald-200 px-4 py-3 rounded-xl text-xs flex items-center justify-between">
-                    <span>{actionNotice}</span>
-                    <button onClick={() => setActionNotice(null)} className="text-emerald-400 hover:text-white">×</button>
-                </div>
-            )}
-
+            {/* GDPR RTBF Audit Receipt */}
             {rtbfReceipt && (
-                <div className="bg-emerald-950/50 border border-emerald-600/70 text-emerald-100 p-4 rounded-xl text-xs space-y-2">
-                    <div className="flex items-center justify-between font-semibold text-sm text-emerald-300">
-                        <span>GDPR / CCPA Right-to-be-Forgotten Purge Complete ({rtbfReceipt.request_id})</span>
-                        <button onClick={() => setRtbfReceipt(null)} className="text-emerald-400 hover:text-white">×</button>
+                <div className="p-3.5 rounded-md bg-status-success-soft border border-status-success-border text-xs space-y-1.5">
+                    <div className="flex items-center justify-between font-semibold text-status-success">
+                        <span>GDPR / CCPA Purge Complete ({rtbfReceipt.request_id})</span>
+                        <button
+                            type="button"
+                            onClick={() => setRtbfReceipt(null)}
+                            aria-label="Dismiss purge receipt"
+                            className="p-1 rounded hover:bg-surface/50"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
                     </div>
-                    <p>
-                        Purged <strong>{rtbfReceipt.entities_purged}</strong> entities and <strong>{rtbfReceipt.edges_purged}</strong> edges across <code>idr_out.*</code> and <code>idr_work.*</code>
-                        {typeof rtbfReceipt.suppressed_entities === 'number' && rtbfReceipt.suppressed_entities > 0
-                            ? ` (${rtbfReceipt.suppressed_entities} entity hashes added to idr_meta.privacy_suppression)`
-                            : ''}.
+                    <p className="text-ink-secondary">
+                        Purged <strong className="font-mono tabular-nums text-ink">{rtbfReceipt.entities_purged}</strong> entities and{' '}
+                        <strong className="font-mono tabular-nums text-ink">{rtbfReceipt.edges_purged}</strong> edges across{' '}
+                        <code className="font-mono">idr_out.*</code> and <code className="font-mono">idr_work.*</code>.
                     </p>
-                    <p className="font-mono text-[11px] text-emerald-300/80">
-                        Zero-PII Audit SHA-256 Receipt: {rtbfReceipt.target_hash}
+                    <p className="font-mono text-[11px] text-ink-muted break-all">
+                        SHA-256 Audit Receipt: {rtbfReceipt.target_hash}
                     </p>
                 </div>
             )}
 
+            {/* Cluster Loading / Error States */}
+            {selectedCluster && clusterLoading && (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4" aria-busy="true">
+                    <div className="lg:col-span-7 h-[560px] surface-panel animate-pulse bg-subtle" />
+                    <div className="lg:col-span-5 h-[560px] surface-panel animate-pulse bg-subtle" />
+                </div>
+            )}
+
+            {selectedCluster && clusterError && (
+                <div role="alert" className="p-4 rounded-md bg-status-danger-soft border border-status-danger-border flex items-center justify-between gap-3">
+                    <span className="text-xs text-status-danger">
+                        Unable to load cluster <code className="font-mono">{selectedCluster}</code>.
+                    </span>
+                    <button type="button" onClick={() => refetchCluster()} className="btn-secondary text-xs">
+                        <RefreshCw className="w-3 h-3" />
+                        Retry
+                    </button>
+                </div>
+            )}
+
+            {/* Split Workbench: Graph Left (7 cols) + Tabbed Inspector Right (5 cols) */}
             {selectedCluster && clusterDetail && (
-                <div className="space-y-6">
+                <div className="space-y-3">
                     {/* AI Cluster Explanation Bar */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-800/70 border border-gray-700/70 rounded-xl px-4 py-2.5">
-                        <div className="text-xs text-gray-300">
-                            Cluster <span className="font-mono text-white font-semibold">{selectedCluster}</span>
+                    <div className="surface-panel px-3.5 py-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-xs text-ink-secondary">
+                            <Bot className="w-4 h-4 text-accent" />
+                            <span>AI Cluster Forensics</span>
                         </div>
                         <div className="flex flex-1 sm:flex-initial items-center gap-2 min-w-[260px] max-w-xl">
                             <input
                                 type="text"
+                                aria-label="Ask AI about this cluster"
                                 value={aiCustomPrompt}
                                 onChange={(e) => setAiCustomPrompt(e.target.value)}
                                 onKeyDown={(e) => {
@@ -563,8 +586,8 @@ export default function Explorer() {
                                         document.getElementById('btn-explain-cluster-ai')?.click()
                                     }
                                 }}
-                                placeholder="Optional: ask a specific question about this cluster..."
-                                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                                placeholder="Ask a question about this cluster (or click Explain)…"
+                                className="input-field py-1 text-xs flex-1"
                             />
                             <button
                                 id="btn-explain-cluster-ai"
@@ -576,524 +599,753 @@ export default function Explorer() {
                                     try {
                                         const res = await api.explainClusterAi(selectedCluster, aiCustomPrompt)
                                         setAiExplanation(
-                                            `[${res.provider}:${res.model} | PII Masking: ${res.pii_masked ? 'ON' : 'OFF (local)'}]\n\n${res.explanation}`
+                                            `[${res.provider}:${res.model} · PII Masking: ${
+                                                res.pii_masked ? 'ON' : 'OFF (local)'
+                                            }]\n\n${res.explanation}`
                                         )
                                     } catch (err: any) {
-                                        setAiExplanation(`AI Explain unavailable: ${err.message || String(err)} (Configure Ollama or a BYOK key in Settings.)`)
+                                        setAiExplanation(
+                                            `AI Explain unavailable: ${err.message || String(err)} (Configure Ollama or a BYOK key in Settings.)`
+                                        )
                                     } finally {
                                         setAiExplaining(false)
                                     }
                                 }}
-                                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 text-xs font-medium transition-colors disabled:opacity-50"
+                                className="btn-secondary text-xs shrink-0"
                             >
-                                {aiExplaining ? 'Analyzing...' : (aiCustomPrompt.trim() ? 'Ask AI' : 'Explain with AI')}
+                                {aiExplaining ? (
+                                    <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        Analyzing…
+                                    </>
+                                ) : aiCustomPrompt.trim() ? (
+                                    'Ask AI'
+                                ) : (
+                                    'Explain with AI'
+                                )}
                             </button>
                         </div>
                     </div>
+
                     {aiExplanation && (
-                        <div className="bg-purple-950/30 border border-purple-700/50 rounded-xl p-4 text-xs text-purple-100 whitespace-pre-wrap">
+                        <div className="p-3.5 rounded-md bg-subtle border border-line text-xs text-ink whitespace-pre-wrap relative">
+                            <button
+                                type="button"
+                                onClick={() => setAiExplanation(null)}
+                                aria-label="Close AI explanation"
+                                className="absolute top-2 right-2 p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
                             {aiExplanation}
                         </div>
                     )}
 
-                    {/* Persistent resolved_id Crosswalk History Banner */}
-                    {clusterDetail.crosswalk_history && clusterDetail.crosswalk_history.length > 0 && (
-                        <div className="bg-indigo-950/40 border border-indigo-700/60 rounded-xl p-3.5 text-xs text-indigo-200 space-y-1.5">
-                            <div className="flex items-center gap-2 font-semibold text-indigo-300">
-                                <GitBranch className="w-4 h-4" />
-                                <span>Persistent Cluster ID Crosswalk Lineage (idr_out.resolved_id_crosswalk)</span>
-                            </div>
-                            <div className="flex flex-wrap gap-2 pt-1">
-                                {clusterDetail.crosswalk_history.map((cw, idx) => (
-                                    <span key={idx} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-900/80 border border-indigo-800/60 font-mono text-[11px]">
-                                        <span className="text-gray-400">{cw.previous_resolved_id}</span>
-                                        <span className="text-indigo-400">→</span>
-                                        <span className="text-white font-semibold">{cw.current_resolved_id}</span>
-                                        <span className="px-1.5 py-0.2 rounded bg-indigo-900/60 text-indigo-300 text-[10px]">
-                                            {cw.change_type} ({cw.entities_moved} entities)
-                                        </span>
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    )}
+                    {/* Crosswalk Lineage Strip (Compact Summary + Expandable Scrollable Table) */}
+                    {clusterDetail.crosswalk_history && clusterDetail.crosswalk_history.length > 0 && (() => {
+                        const history = clusterDetail.crosswalk_history
+                        const mergedCnt = history.filter((c) => c.change_type === 'MERGED').length
+                        const splitCnt = history.filter((c) => c.change_type === 'SPLIT').length
+                        const totalMoved = history.reduce((acc, c) => acc + (Number(c.entities_moved) || 0), 0)
+                        const bySource: Record<string, number> = {}
+                        for (const cw of history) {
+                            const prev = String(cw.previous_resolved_id || '')
+                            const src = prev.includes(':') ? prev.split(':', 1)[0] : 'cluster'
+                            bySource[src] = (bySource[src] || 0) + 1
+                        }
+                        const sourceBreakdown = Object.entries(bySource)
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 5)
 
-                    {/* RTBF Preview Confirmation Card */}
-                    {rtbfPreview && (
-                        <div className="bg-rose-950/60 border border-rose-600/80 rounded-xl p-4 text-xs text-rose-100 space-y-3">
-                            <div className="flex items-center justify-between">
-                                <span className="font-semibold text-sm text-rose-300 flex items-center gap-2">
-                                    <Trash2 className="w-4 h-4" />
-                                    Confirm GDPR / CCPA Right-to-be-Forgotten Cascading Purge
-                                </span>
-                                <button onClick={() => setRtbfPreview(null)} className="text-rose-300 hover:text-white">Cancel</button>
-                            </div>
-                            <div className="space-y-2">
-                                <p>
-                                    This will permanently purge cluster <code className="font-mono bg-gray-900 px-1.5 py-0.5 rounded">{selectedCluster}</code> including <strong>{rtbfPreview.entities_purged}</strong> linked entities and <strong>{rtbfPreview.edges_purged}</strong> graph edges across all IDR output &amp; staging tables, add their zero-PII SHA-256 hashes to <code className="font-mono">idr_meta.privacy_suppression</code> (preventing rebuild on future FULL/INCR runs), and record an audit receipt in <code className="font-mono">idr_meta.privacy_audit_log</code>.
-                                </p>
-                                {rtbfPreview.entity_keys && rtbfPreview.entity_keys.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-2 rounded-lg bg-gray-950/60 border border-rose-900/50">
-                                        {rtbfPreview.entity_keys.slice(0, 6).map((ek: string) => (
-                                            <span key={ek} className="font-mono text-[11px] bg-gray-900 text-rose-200 px-1.5 py-0.5 rounded border border-gray-800">
-                                                {ek}
-                                            </span>
-                                        ))}
-                                        {rtbfPreview.entity_keys.length > 6 && (
-                                            <span className="font-mono text-[11px] text-rose-300/80 px-1.5 py-0.5">
-                                                +{rtbfPreview.entity_keys.length - 6} more entities
+                        return (
+                            <div className="surface-panel overflow-hidden">
+                                <div className="px-3.5 py-2 bg-accent-soft flex flex-wrap items-center justify-between gap-2 text-xs">
+                                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                        <span className="inline-flex items-center gap-1.5 font-semibold text-accent">
+                                            <GitBranch className="w-3.5 h-3.5" />
+                                            Crosswalk Lineage
+                                        </span>
+                                        <span className="font-mono tabular-nums text-[11px] px-2 py-0.5 rounded bg-surface border border-line text-ink font-medium">
+                                            {history.length} {history.length === 1 ? 'transition' : 'transitions'} · {totalMoved.toLocaleString()} {totalMoved === 1 ? 'entity' : 'entities'} moved
+                                        </span>
+                                        {mergedCnt > 0 && (
+                                            <span className="badge-Exact font-mono tabular-nums">
+                                                {mergedCnt} MERGED
                                             </span>
                                         )}
+                                        {splitCnt > 0 && (
+                                            <span className="badge-warning font-mono tabular-nums">
+                                                {splitCnt} SPLIT
+                                            </span>
+                                        )}
+                                        {sourceBreakdown.map(([src, cnt]) => (
+                                            <span
+                                                key={src}
+                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface border border-line text-[11px] text-ink-secondary"
+                                            >
+                                                <span>{formatSourceName(src)}</span>
+                                                <span className="font-mono tabular-nums text-ink-muted">×{cnt}</span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCrosswalkExpanded((v) => !v)}
+                                        aria-expanded={crosswalkExpanded}
+                                        className="btn-secondary text-xs px-2.5 py-1 min-h-[26px]"
+                                    >
+                                        {crosswalkExpanded ? (
+                                            <>
+                                                <ChevronUp className="w-3.5 h-3.5" />
+                                                Hide Transitions
+                                            </>
+                                        ) : (
+                                            <>
+                                                <ChevronDown className="w-3.5 h-3.5" />
+                                                Inspect {history.length} {history.length === 1 ? 'Transition' : 'Transitions'}
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+
+                                {crosswalkExpanded && (
+                                    <div className="max-h-56 overflow-y-auto border-t border-line bg-surface">
+                                        <table className="data-table">
+                                            <thead className="sticky top-0 bg-subtle z-10">
+                                                <tr>
+                                                    <th className="w-24">Type</th>
+                                                    <th className="w-36">Origin Source</th>
+                                                    <th>Previous Cluster ID</th>
+                                                    <th>Target Cluster</th>
+                                                    <th className="text-right w-24">Moved</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {history.map((cw, idx) => {
+                                                    const prev = String(cw.previous_resolved_id || '')
+                                                    const curr = String(cw.current_resolved_id || '')
+                                                    const [prevSrc, prevKey] = prev.includes(':')
+                                                        ? prev.split(':', 2)
+                                                        : ['cluster', prev]
+                                                    const isCurrentTarget = curr === clusterDetail.resolved_id
+                                                    return (
+                                                        <tr key={idx}>
+                                                            <td>
+                                                                <span className={cw.change_type === 'SPLIT' ? 'badge-warning font-mono' : 'badge-Exact font-mono'}>
+                                                                    {cw.change_type}
+                                                                </span>
+                                                            </td>
+                                                            <td className="text-xs text-ink-secondary">
+                                                                {formatSourceName(prevSrc)}
+                                                            </td>
+                                                            <td className="font-mono text-xs text-ink" title={prev}>
+                                                                {prevKey}
+                                                            </td>
+                                                            <td className="font-mono text-xs">
+                                                                {isCurrentTarget ? (
+                                                                    <span className="inline-flex items-center gap-1 text-accent font-medium">
+                                                                        <span>→</span>
+                                                                        <span>Current Cluster</span>
+                                                                    </span>
+                                                                ) : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setSelectedCluster(curr)}
+                                                                        className="text-accent hover:underline truncate max-w-[240px] inline-block"
+                                                                        title={curr}
+                                                                    >
+                                                                        → {curr}
+                                                                    </button>
+                                                                )}
+                                                            </td>
+                                                            <td className="text-right font-mono text-xs tabular-nums text-ink-secondary">
+                                                                {cw.entities_moved}
+                                                            </td>
+                                                        </tr>
+                                                    )
+                                                })}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 )}
                             </div>
-                            <div className="flex gap-2">
+                        )
+                    })()}
+
+                    {/* RTBF Dry-Run Confirmation Banner */}
+                    {rtbfPreview && (
+                        <div className="p-4 rounded-md bg-status-danger-soft border border-status-danger-border text-xs space-y-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-status-danger flex items-center gap-1.5">
+                                    <Trash2 className="w-4 h-4" />
+                                    Confirm GDPR / CCPA Cascading Purge
+                                </span>
                                 <button
+                                    type="button"
+                                    onClick={() => setRtbfPreview(null)}
+                                    className="text-ink-muted hover:text-ink font-medium"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                            <p className="text-ink-secondary leading-relaxed">
+                                Permanently purges cluster <code className="font-mono text-ink">{selectedCluster}</code> (
+                                <strong className="font-mono tabular-nums text-ink">{rtbfPreview.entities_purged}</strong> entities,{' '}
+                                <strong className="font-mono tabular-nums text-ink">{rtbfPreview.edges_purged}</strong> edges),
+                                writes SHA-256 suppression hashes to <code className="font-mono">idr_meta.privacy_suppression</code>,
+                                and logs an audit receipt.
+                            </p>
+                            {rtbfPreview.entity_keys && rtbfPreview.entity_keys.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 p-2 rounded bg-surface border border-line">
+                                    {rtbfPreview.entity_keys.slice(0, 6).map((ek: string) => (
+                                        <span key={ek} className="font-mono text-[11px] text-ink-secondary px-1.5 py-0.5 rounded bg-subtle border border-line">
+                                            {ek}
+                                        </span>
+                                    ))}
+                                    {rtbfPreview.entity_keys.length > 6 && (
+                                        <span className="font-mono text-[11px] text-ink-muted px-1 py-0.5">
+                                            +{rtbfPreview.entity_keys.length - 6} more
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2 pt-0.5">
+                                <button
+                                    type="button"
                                     onClick={() => handleConfirmRtbf(selectedCluster)}
                                     disabled={rtbfLoading !== null}
-                                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-lg"
+                                    className="btn-danger"
                                 >
                                     {rtbfLoading === 'purge' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                                    <span>{rtbfLoading === 'purge' ? 'Purging & Suppressing...' : 'Confirm & Purge Identity Graph'}</span>
+                                    {rtbfLoading === 'purge' ? 'Purging…' : 'Confirm & Purge Cluster'}
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={() => setRtbfPreview(null)}
                                     disabled={rtbfLoading !== null}
-                                    className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 rounded-lg border border-gray-600"
+                                    className="btn-secondary"
                                 >
                                     Cancel
                                 </button>
                             </div>
                         </div>
                     )}
-                    {/* Unified Golden Profile Section */}
-                    {clusterDetail.golden_profile && Object.keys(clusterDetail.golden_profile).length > 0 && (
-                        <div className="bg-gray-800/90 rounded-xl p-5 border border-blue-500/30 shadow-xl space-y-4">
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-gray-700/60">
-                                <div className="flex items-center gap-3">
-                                    <Sparkles className="w-5 h-5 text-blue-400" />
-                                    <h2 className="text-lg font-semibold text-white">Unified Golden Profile</h2>
+
+                    {/* Workbench Grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+                        {/* LEFT PANE: Graph Canvas + Source Filter Strip */}
+                        <section className="lg:col-span-7 surface-panel overflow-hidden flex flex-col">
+                            <div className="px-3.5 py-2.5 border-b border-line flex flex-wrap items-center justify-between gap-2 bg-surface">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className="font-mono text-xs font-semibold text-ink truncate max-w-[240px]" title={clusterDetail.resolved_id}>
+                                        {clusterDetail.resolved_id}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => copyToClipboard(clusterDetail.resolved_id, 'cluster')}
+                                        aria-label="Copy cluster resolved ID"
+                                        className="p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                                    >
+                                        {copiedKey === 'cluster' ? (
+                                            <Check className="w-3.5 h-3.5 text-status-success" />
+                                        ) : (
+                                            <Copy className="w-3.5 h-3.5" />
+                                        )}
+                                    </button>
+                                    {clusterDetail.confidence_score != null && (
+                                        <span className="badge-success font-mono tabular-nums">
+                                            {(clusterDetail.confidence_score * 100).toFixed(1)}%
+                                        </span>
+                                    )}
                                     {clusterDetail.super_cluster_id && (
-                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-purple-900/40 text-purple-300 border border-purple-700/60">
-                                            Super-Cluster: {clusterDetail.super_cluster_id.slice(0, 16)}
+                                        <span className="badge-neutral font-mono" title={`Super-cluster ${clusterDetail.super_cluster_id}`}>
+                                            Super: {clusterDetail.super_cluster_id.slice(0, 10)}
                                         </span>
                                     )}
                                 </div>
 
-                                <div className="flex items-center gap-3">
-                                    {/* Attribute Search */}
-                                    <div className="relative">
-                                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                                        <input
-                                            type="text"
-                                            placeholder="Filter attributes..."
-                                            value={attrFilter}
-                                            onChange={(e) => setAttrFilter(e.target.value)}
-                                            className="pl-8 pr-3 py-1 bg-gray-900/80 rounded-lg text-xs border border-gray-700 focus:border-blue-500 focus:outline-none w-44"
-                                        />
-                                    </div>
-
-                                    {/* Empty Toggle */}
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-xs font-mono tabular-nums text-ink-muted">
+                                        {graphNodes.length}/{clusterDetail.entities.length} nodes · {graphEdges.length} edges
+                                    </span>
                                     <button
-                                        onClick={() => setHideEmptyAttrs(!hideEmptyAttrs)}
-                                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs border transition-colors ${
-                                            hideEmptyAttrs
-                                                ? 'bg-blue-600/20 border-blue-500/40 text-blue-300 hover:bg-blue-600/30'
-                                                : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
-                                        }`}
-                                        title={hideEmptyAttrs ? 'Show empty attributes' : 'Hide empty attributes'}
+                                        type="button"
+                                        onClick={() => handlePreviewRtbf(clusterDetail.resolved_id)}
+                                        disabled={rtbfLoading !== null}
+                                        className="btn-danger text-xs px-2 py-1 min-h-[28px]"
+                                        title="GDPR / CCPA Right to be Forgotten preview"
                                     >
-                                        {hideEmptyAttrs ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                        {hideEmptyAttrs
-                                            ? `Empty Hidden (${goldenProfileCategories?.totalEmpty || 0})`
-                                            : 'Showing All'}
+                                        {rtbfLoading === 'preview' ? (
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                        ) : (
+                                            <Trash2 className="w-3 h-3" />
+                                        )}
+                                        GDPR Forget
                                     </button>
                                 </div>
                             </div>
 
-                            {/* Categorized Attributes Display */}
-                            <div className="space-y-4">
-                                {goldenProfileCategories &&
-                                    Object.entries(goldenProfileCategories.categories).map(([catName, attrs]) => {
-                                        if (attrs.length === 0) return null
+                            {uniqueSources.length > 0 && (
+                                <div className="px-3 py-1.5 border-b border-line bg-surface flex flex-wrap items-center gap-1.5">
+                                    {uniqueSources.map((sourceId) => {
+                                        const colorScheme = getEntityColor(sourceId, uniqueSources)
+                                        const isHidden = hiddenSources.has(sourceId)
+                                        const formatted = formatSourceName(sourceId)
+                                        const count = sourceCounts[sourceId] || 0
                                         return (
-                                            <div key={catName} className="space-y-2">
-                                                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                                                    {catName} ({attrs.length})
-                                                </h3>
-                                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
-                                                    {attrs.map(attr => {
-                                                        const isValueEmpty =
-                                                            attr.value === null ||
-                                                            attr.value === undefined ||
-                                                            attr.value === '' ||
-                                                            attr.value === '-' ||
-                                                            attr.value === '—'
-
-                                                        return (
-                                                            <div
-                                                                key={attr.key}
-                                                                className={`rounded-lg p-2.5 border transition-all ${
-                                                                    isValueEmpty
-                                                                        ? 'bg-gray-900/30 border-gray-800 text-gray-500'
-                                                                        : 'bg-gray-900/70 border-gray-700/80 hover:border-gray-600'
-                                                                }`}
-                                                            >
-                                                                <span className="text-[11px] font-medium text-gray-400 block truncate" title={attr.label}>
-                                                                    {attr.label}
-                                                                </span>
-                                                                <span
-                                                                    className={`text-xs font-semibold mt-1 block truncate ${
-                                                                        isValueEmpty
-                                                                            ? 'text-gray-600 font-mono'
-                                                                            : typeof attr.value === 'boolean'
-                                                                            ? attr.value ? 'text-emerald-400' : 'text-rose-400'
-                                                                            : 'text-gray-100'
-                                                                    }`}
-                                                                    title={String(attr.value ?? '—')}
-                                                                >
-                                                                    {isValueEmpty ? '—' : String(attr.value)}
-                                                                </span>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
-                                            </div>
+                                            <button
+                                                key={sourceId}
+                                                type="button"
+                                                onClick={() => toggleSourceFilter(sourceId)}
+                                                aria-pressed={!isHidden}
+                                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs border transition-colors ${
+                                                    isHidden
+                                                        ? 'bg-subtle text-ink-subtle border-line line-through opacity-65'
+                                                        : 'bg-surface text-ink-secondary border-line-strong hover:bg-subtle'
+                                                }`}
+                                            >
+                                                <span
+                                                    className="w-2 h-2 rounded-full shrink-0"
+                                                    style={{ backgroundColor: isHidden ? '#94a3b8' : colorScheme.bg }}
+                                                />
+                                                <span>{formatted}</span>
+                                                <span className="font-mono tabular-nums text-[11px] text-ink-muted">
+                                                    {count}
+                                                </span>
+                                            </button>
                                         )
                                     })}
+                                    {hiddenSources.size > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setHiddenSources(new Set())}
+                                            className="text-xs font-medium text-accent hover:underline ml-auto"
+                                        >
+                                            Show all
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="flex-1 min-h-[500px]">
+                                <IdentityGraph
+                                    nodes={graphNodes}
+                                    edges={graphEdges}
+                                    selectedNodeId={selectedNode?.id}
+                                    onSelectNode={handleSelectNode}
+                                    layoutName={layoutName}
+                                    onLayoutChange={setLayoutName}
+                                />
                             </div>
-                        </div>
-                    )}
+                        </section>
 
-                    {/* Dynamic Entity Type Filter Bar / Legend */}
-                    {uniqueSources.length > 0 && (
-                        <div className="bg-gray-800/80 rounded-xl p-3 border border-gray-700/80 flex flex-wrap items-center justify-between gap-3 shadow-md">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-xs font-medium text-gray-400 flex items-center gap-1.5 mr-1">
-                                    <Filter className="w-3.5 h-3.5" />
-                                    Entity Types ({uniqueSources.length}):
-                                </span>
-                                {uniqueSources.map(sourceId => {
-                                    const colorScheme = getEntityColor(sourceId, uniqueSources)
-                                    const isHidden = hiddenSources.has(sourceId)
-                                    const formatted = formatSourceName(sourceId)
-                                    const count = sourceCounts[sourceId] || 0
-
+                        {/* RIGHT PANE: Tabbed Inspector */}
+                        <section className="lg:col-span-5 surface-panel overflow-hidden flex flex-col max-h-[640px]">
+                            <div role="tablist" aria-label="Cluster inspector tabs" className="px-2 pt-2 bg-subtle border-b border-line flex items-center gap-1 shrink-0">
+                                {(
+                                    [
+                                        { id: 'golden', label: 'Golden Record' },
+                                        { id: 'edges', label: `Edges (${displayedEdges.length})` },
+                                        { id: 'entity', label: selectedNode ? 'Selected Entity' : 'Entities' },
+                                    ] as const
+                                ).map((tab) => {
+                                    const isActive = activeTab === tab.id
                                     return (
                                         <button
-                                            key={sourceId}
-                                            onClick={() => toggleSourceFilter(sourceId)}
-                                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
-                                                isHidden
-                                                    ? 'bg-gray-900/40 text-gray-500 border-gray-800 line-through opacity-60'
-                                                    : `${colorScheme.badgeBg} ${colorScheme.badgeText} ${colorScheme.badgeBorder} shadow-sm hover:brightness-110`
+                                            key={tab.id}
+                                            role="tab"
+                                            type="button"
+                                            aria-selected={isActive}
+                                            onClick={() => setActiveTab(tab.id)}
+                                            className={`px-3 py-1.5 text-xs font-medium rounded-t-md border-t border-x transition-colors ${
+                                                isActive
+                                                    ? 'bg-surface text-ink border-line -mb-px pb-[7px]'
+                                                    : 'bg-transparent text-ink-muted hover:text-ink border-transparent'
                                             }`}
-                                            title={`Toggle ${formatted} in graph`}
                                         >
-                                            <span
-                                                className={`w-2 h-2 rounded-full ${isHidden ? 'bg-gray-600' : ''}`}
-                                                style={!isHidden ? { backgroundColor: colorScheme.bg } : undefined}
-                                            />
-                                            <span>{formatted}</span>
-                                            <span className="opacity-75 font-mono text-[10px]">({count})</span>
+                                            {tab.label}
                                         </button>
                                     )
                                 })}
                             </div>
 
-                            {hiddenSources.size > 0 && (
-                                <button
-                                    onClick={resetFilters}
-                                    className="text-xs text-blue-400 hover:text-blue-300 font-medium underline underline-offset-2 ml-auto"
-                                >
-                                    Show All ({hiddenSources.size} hidden)
-                                </button>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Main Visualizer & Edge Inspector */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Graph Canvas */}
-                        <div className="lg:col-span-2 space-y-4">
-                            <div className="bg-gray-800 rounded-xl p-4 border border-gray-700 shadow-xl space-y-3">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2 min-w-0">
-                                        <h3 className="text-base font-semibold text-white whitespace-nowrap">
-                                            Cluster Entities ({graphNodes.length} / {clusterDetail.entities.length})
-                                        </h3>
-                                        <span
-                                            className="text-xs font-mono text-gray-400 bg-gray-900 px-2 py-0.5 rounded border border-gray-700 truncate max-w-[220px]"
-                                            title={clusterDetail.resolved_id}
-                                        >
-                                            {clusterDetail.resolved_id}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-3 shrink-0">
-                                        <span className="text-xs text-gray-400 whitespace-nowrap tabular-nums">
-                                            {graphEdges.length} connections
-                                        </span>
+                            {/* TAB 1: Golden Record (Dense Key-Value Table) */}
+                            {activeTab === 'golden' && (
+                                <div className="flex-1 flex flex-col min-h-0">
+                                    <div className="p-2.5 border-b border-line flex items-center gap-2 shrink-0">
+                                        <div className="relative flex-1">
+                                            <Search className="w-3.5 h-3.5 text-ink-subtle absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                            <input
+                                                type="text"
+                                                aria-label="Filter golden record attributes"
+                                                placeholder="Filter attributes…"
+                                                value={attrFilter}
+                                                onChange={(e) => setAttrFilter(e.target.value)}
+                                                className="input-field pl-8 py-1 text-xs"
+                                            />
+                                        </div>
                                         <button
-                                            onClick={() => handlePreviewRtbf(clusterDetail.resolved_id)}
-                                            disabled={rtbfLoading !== null}
-                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-950/60 hover:bg-rose-900/70 disabled:opacity-60 disabled:cursor-not-allowed text-rose-300 border border-rose-800/70 transition-colors whitespace-nowrap"
-                                            title="GDPR / CCPA Right to be Forgotten cascading purge"
+                                            type="button"
+                                            onClick={() => setHideEmptyAttrs((v) => !v)}
+                                            className="btn-secondary text-xs px-2 py-1 min-h-[28px] shrink-0"
                                         >
-                                            {rtbfLoading === 'preview' ? (
-                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                            ) : (
-                                                <Trash2 className="w-3.5 h-3.5" />
-                                            )}
-                                            <span>{rtbfLoading === 'preview' ? 'Checking...' : 'GDPR Forget'}</span>
+                                            {hideEmptyAttrs ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                            <span className="tabular-nums">
+                                                {hideEmptyAttrs ? `${goldenProfileCategories?.totalEmpty || 0} hidden` : 'All'}
+                                            </span>
                                         </button>
                                     </div>
-                                </div>
 
-                                <div className="h-[520px]">
-                                    <IdentityGraph
-                                        nodes={graphNodes}
-                                        edges={graphEdges}
-                                        selectedNodeId={selectedNode?.id}
-                                        onSelectNode={setSelectedNode}
-                                        layoutName={layoutName}
-                                        onLayoutChange={setLayoutName}
-                                    />
+                                    <div className="flex-1 overflow-y-auto">
+                                        {!goldenProfileCategories ? (
+                                            <div className="p-8 text-center text-xs text-ink-muted">
+                                                No golden profile attributes available for this cluster.
+                                            </div>
+                                        ) : (
+                                            Object.entries(goldenProfileCategories.categories).map(([catName, attrs]) => {
+                                                if (attrs.length === 0) return null
+                                                return (
+                                                    <div key={catName}>
+                                                        <div className="sticky top-0 px-3 py-1.5 bg-subtle border-y border-line text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted">
+                                                            {catName} ({attrs.length})
+                                                        </div>
+                                                        <table className="w-full text-left border-collapse">
+                                                            <tbody className="divide-y divide-line">
+                                                                {attrs.map((attr) => {
+                                                                    const isEmpty =
+                                                                        attr.value === null ||
+                                                                        attr.value === undefined ||
+                                                                        attr.value === '' ||
+                                                                        attr.value === '-' ||
+                                                                        attr.value === '—'
+                                                                    const display = isEmpty ? '—' : String(attr.value)
+                                                                    return (
+                                                                        <tr key={attr.key} className="hover:bg-subtle/60">
+                                                                            <td className="px-3 py-1.5 text-xs text-ink-muted w-[44%] align-top">
+                                                                                <div className="font-medium text-ink-secondary">{attr.label}</div>
+                                                                                <div className="font-mono text-[10px] text-ink-subtle truncate">
+                                                                                    {attr.key}
+                                                                                </div>
+                                                                            </td>
+                                                                            <td className="px-3 py-1.5 text-xs align-top break-words">
+                                                                                <span
+                                                                                    className={
+                                                                                        isEmpty
+                                                                                            ? 'font-mono text-ink-subtle'
+                                                                                            : typeof attr.value === 'boolean'
+                                                                                            ? attr.value
+                                                                                                ? 'badge-success font-mono'
+                                                                                                : 'badge-danger font-mono'
+                                                                                            : 'font-mono text-ink tabular-nums'
+                                                                                    }
+                                                                                >
+                                                                                    {display}
+                                                                                </span>
+                                                                            </td>
+                                                                        </tr>
+                                                                    )
+                                                                })}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                )
+                                            })
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
-                            {/* Selected Node Details Drawer */}
-                            {selectedNode && (
-                                <div className="bg-gray-800/90 rounded-xl p-4 border border-blue-500/50 shadow-xl space-y-3 animate-fadeIn">
-                                    <div className="flex items-center justify-between pb-2 border-b border-gray-700/60">
-                                        <div className="flex items-center gap-2">
-                                            <span
-                                                className="w-3 h-3 rounded-full"
-                                                style={{ backgroundColor: selectedNode.color }}
+                            {/* TAB 2: Edges & Rule Provenance */}
+                            {activeTab === 'edges' && (
+                                <div className="flex-1 flex flex-col min-h-0">
+                                    <div className="p-2.5 border-b border-line space-y-2 shrink-0">
+                                        <div className="relative">
+                                            <Search className="w-3.5 h-3.5 text-ink-subtle absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                            <input
+                                                type="text"
+                                                aria-label="Filter edges by value, rule, or entity key"
+                                                placeholder="Filter by value, rule, or entity…"
+                                                value={edgeSearch}
+                                                onChange={(e) => setEdgeSearch(e.target.value)}
+                                                className="input-field pl-8 py-1 text-xs"
                                             />
-                                            <h4 className="text-sm font-bold text-white">
-                                                Selected Entity: {formatSourceName(selectedNode.source_id)}
-                                            </h4>
-                                            <span className="text-xs font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400 border border-gray-700">
-                                                {selectedNode.source_id}
-                                            </span>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => handleStewardshipOverride('ISOLATE', selectedNode.id)}
-                                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 border border-amber-800/70"
-                                                title="Quarantine this entity into a singleton on next run (ISOLATE)"
-                                            >
-                                                <ShieldAlert className="w-3 h-3" />
-                                                <span>Isolate Entity</span>
-                                            </button>
-                                            <button
-                                                onClick={() => setSelectedNode(null)}
-                                                className="text-xs text-gray-400 hover:text-white flex items-center gap-1"
-                                            >
-                                                <X className="w-3.5 h-3.5" />
-                                                Deselect
-                                            </button>
-                                        </div>
+                                        {selectedNode && (
+                                            <div className="px-2.5 py-1.5 rounded bg-accent-soft border border-accent-border text-xs flex items-center justify-between gap-2">
+                                                <span className="text-accent truncate">
+                                                    Filtered to <strong>{formatSourceName(selectedNode.source_id)}</strong>
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedNode(null)}
+                                                    className="text-accent hover:underline font-medium shrink-0"
+                                                >
+                                                    Show all
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                                        <div className="bg-gray-900/70 p-3 rounded-lg border border-gray-700/80 flex items-center justify-between">
-                                            <div>
-                                                <span className="text-gray-400 block text-[11px]">Primary Source Key</span>
-                                                <span className="font-mono text-gray-200 font-semibold truncate block mt-0.5">
-                                                    {selectedNode.source_key}
-                                                </span>
+                                    <div className="flex-1 overflow-y-auto divide-y divide-line">
+                                        {displayedEdges.length === 0 ? (
+                                            <div className="p-8 text-center text-xs text-ink-muted">
+                                                No matching edges found.
                                             </div>
-                                            <button
-                                                onClick={() => copyToClipboard(selectedNode.source_key, 'key')}
-                                                className="p-1.5 text-gray-400 hover:text-white bg-gray-800 rounded border border-gray-700"
-                                                title="Copy source key"
-                                            >
-                                                {copiedKey === 'key' ? (
-                                                    <Check className="w-3.5 h-3.5 text-green-400" />
-                                                ) : (
-                                                    <Copy className="w-3.5 h-3.5" />
-                                                )}
-                                            </button>
-                                        </div>
+                                        ) : (
+                                            displayedEdges.map((edge, i) => {
+                                                const badge = getIdentifierBadge(edge.identifier_type)
+                                                const leftSource = edge.left_entity_key.split(':')[0] || 'Entity'
+                                                const rightSource = edge.right_entity_key.split(':')[0] || 'Entity'
+                                                const leftColor = getEntityColor(leftSource, uniqueSources)
+                                                const rightColor = getEntityColor(rightSource, uniqueSources)
+                                                const confirmKey = `unlink:${edge.left_entity_key}:${edge.right_entity_key}:${i}`
+                                                const isConfirming = confirmOverrideKey === confirmKey
 
-                                        <div className="bg-gray-900/70 p-3 rounded-lg border border-gray-700/80 flex items-center justify-between">
-                                            <div>
-                                                <span className="text-gray-400 block text-[11px]">Graph Degree</span>
-                                                <span className="font-mono text-blue-400 font-semibold block mt-0.5">
-                                                    {selectedNode.degree || 0} direct incident links
-                                                </span>
-                                            </div>
-                                            <span className="text-xs text-gray-500">
-                                                {displayedEdges.length} filtered edges
-                                            </span>
-                                        </div>
+                                                return (
+                                                    <div key={i} className="px-3 py-2.5 hover:bg-subtle/60 transition-colors text-xs space-y-1.5">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <div className="flex items-center gap-1.5 min-w-0">
+                                                                <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium border ${badge.badgeBg} ${badge.badgeText} ${badge.border}`}>
+                                                                    {edge.identifier_type}
+                                                                </span>
+                                                                <span className="font-mono text-[11px] text-ink-muted truncate">
+                                                                    {edge.rule_id || 'EXACT'}
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="flex items-center gap-1 shrink-0">
+                                                                {edge.identifier_value && !isConfirming && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleExcludeIdentifier(edge.identifier_type, edge.identifier_value)}
+                                                                        className="px-1.5 py-0.5 rounded text-[11px] text-ink-muted hover:text-status-warning hover:bg-status-warning-soft border border-line transition-colors"
+                                                                        title={`Exclude "${edge.identifier_value}" from future matching`}
+                                                                    >
+                                                                        Exclude Value
+                                                                    </button>
+                                                                )}
+                                                                {isConfirming ? (
+                                                                    <>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() =>
+                                                                                handleStewardshipOverride(
+                                                                                    'DO_NOT_LINK',
+                                                                                    edge.left_entity_key,
+                                                                                    edge.right_entity_key
+                                                                                )
+                                                                            }
+                                                                            className="px-2 py-0.5 rounded text-[11px] font-medium bg-status-danger-soft text-status-danger border border-status-danger-border"
+                                                                        >
+                                                                            Confirm Unlink
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setConfirmOverrideKey(null)}
+                                                                            className="px-1.5 py-0.5 rounded text-[11px] text-ink-muted hover:text-ink"
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                    </>
+                                                                ) : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setConfirmOverrideKey(confirmKey)}
+                                                                        className="px-2 py-0.5 rounded text-[11px] text-ink-muted hover:text-status-danger hover:bg-status-danger-soft border border-line hover:border-status-danger-border transition-colors"
+                                                                    >
+                                                                        Unlink
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="font-mono text-xs text-ink bg-subtle px-2 py-1 rounded border border-line truncate" title={edge.identifier_value}>
+                                                            {edge.identifier_value}
+                                                        </div>
+
+                                                        <div className="flex items-center justify-between text-[11px] text-ink-muted">
+                                                            <span className="inline-flex items-center gap-1.5 truncate max-w-[46%]" title={edge.left_entity_key}>
+                                                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: leftColor.bg }} />
+                                                                <span className="truncate">{formatSourceName(leftSource)}</span>
+                                                            </span>
+                                                            <span className="text-ink-subtle">↔</span>
+                                                            <span className="inline-flex items-center gap-1.5 truncate max-w-[46%] justify-end" title={edge.right_entity_key}>
+                                                                <span className="truncate">{formatSourceName(rightSource)}</span>
+                                                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: rightColor.bg }} />
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })
+                                        )}
                                     </div>
                                 </div>
                             )}
-                        </div>
 
-                        {/* Edge Details Panel */}
-                        <div className="bg-gray-800 rounded-xl p-4 border border-gray-700 shadow-xl flex flex-col h-[585px]">
-                            <div className="flex items-center justify-between pb-3 border-b border-gray-700/60">
-                                <div className="flex items-center gap-2">
-                                    <h3 className="text-base font-semibold text-white">
-                                        Edge Connections ({displayedEdges.length})
-                                    </h3>
-                                </div>
-                                {selectedNode && (
-                                    <button
-                                        onClick={() => setSelectedNode(null)}
-                                        className="text-xs text-blue-400 hover:text-blue-300"
-                                    >
-                                        Clear Filter
-                                    </button>
-                                )}
-                            </div>
+                            {/* TAB 3: Selected Entity / Cluster Entity List */}
+                            {activeTab === 'entity' && (
+                                <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                                    {selectedNode ? (
+                                        <div className="space-y-3">
+                                            <div className="flex items-center justify-between gap-2 pb-2 border-b border-line">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedNode.color }} />
+                                                    <h2 className="text-[13px] font-semibold text-ink truncate">
+                                                        {formatSourceName(selectedNode.source_id)}
+                                                    </h2>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedNode(null)}
+                                                    className="btn-ghost text-xs px-2 py-1 min-h-[28px]"
+                                                >
+                                                    All entities
+                                                </button>
+                                            </div>
 
-                            {/* Search filter for edges */}
-                            <div className="mt-3 mb-2 relative">
-                                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Filter edges by value/type..."
-                                    value={edgeSearch}
-                                    onChange={(e) => setEdgeSearch(e.target.value)}
-                                    className="w-full pl-8 pr-3 py-1.5 bg-gray-900/80 rounded-lg text-xs border border-gray-700 focus:border-blue-500 focus:outline-none"
-                                />
-                            </div>
-
-                            {selectedNode && (
-                                <div className="mb-2 p-2 bg-blue-950/40 rounded-lg border border-blue-800/40 text-xs text-blue-300 flex items-center justify-between">
-                                    <span>Filtered by: <strong>{formatSourceName(selectedNode.source_id)}</strong></span>
-                                    <span className="font-mono text-[10px] opacity-75">{selectedNode.source_key.slice(0, 10)}…</span>
-                                </div>
-                            )}
-
-                            {/* Edge list */}
-                            <div className="space-y-2.5 overflow-y-auto flex-1 pr-1">
-                                {displayedEdges.length === 0 ? (
-                                    <div className="text-center py-12 text-gray-500 text-xs">
-                                        {selectedNode
-                                            ? 'No active edges match the current filters for this node.'
-                                            : 'No edges found in this cluster.'}
-                                    </div>
-                                ) : (
-                                    displayedEdges.map((edge, i) => {
-                                        const badge = getIdentifierBadge(edge.identifier_type)
-                                        const leftSource = edge.left_entity_key.split(':')[0] || 'Entity'
-                                        const rightSource = edge.right_entity_key.split(':')[0] || 'Entity'
-                                        const leftColor = getEntityColor(leftSource, uniqueSources)
-                                        const rightColor = getEntityColor(rightSource, uniqueSources)
-
-                                        return (
-                                            <div
-                                                key={i}
-                                                className="p-3 bg-gray-900/70 hover:bg-gray-700/40 rounded-lg border border-gray-700/60 transition-colors text-xs space-y-2"
-                                            >
-                                                {/* Identifier Type & Value */}
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <span
-                                                        className={`px-2 py-0.5 rounded text-[11px] font-medium border ${badge.badgeBg} ${badge.badgeText} ${badge.border}`}
-                                                    >
-                                                        {edge.identifier_type}
-                                                    </span>
-                                                    <span className="font-mono text-[10px] text-gray-400 truncate">
-                                                        Rule: {edge.rule_id || 'EXACT'}
-                                                    </span>
-                                                    <div className="flex items-center gap-1.5 shrink-0">
-                                                        {edge.identifier_value && (
-                                                            <button
-                                                                onClick={() => handleExcludeIdentifier(edge.identifier_type, edge.identifier_value)}
-                                                                className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 hover:bg-amber-950/60 text-gray-400 hover:text-amber-300 border border-gray-700 hover:border-amber-800/60 transition-colors"
-                                                                title={`Exclude "${edge.identifier_value}" from future matching`}
-                                                            >
-                                                                Exclude Value
-                                                            </button>
-                                                        )}
+                                            <dl className="divide-y divide-line border border-line rounded-md overflow-hidden text-xs">
+                                                <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
+                                                    <dt className="text-ink-muted">Source Table</dt>
+                                                    <dd className="font-mono text-ink truncate">{selectedNode.source_id}</dd>
+                                                </div>
+                                                <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
+                                                    <dt className="text-ink-muted">Source Key</dt>
+                                                    <dd className="flex items-center gap-1.5 min-w-0">
+                                                        <span className="font-mono text-ink truncate">{selectedNode.source_key}</span>
                                                         <button
-                                                            onClick={() => handleStewardshipOverride('DO_NOT_LINK', edge.left_entity_key, edge.right_entity_key)}
-                                                            className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 hover:bg-rose-950/60 text-gray-400 hover:text-rose-300 border border-gray-700 hover:border-rose-800/60 transition-colors"
-                                                            title="Add DO_NOT_LINK override between these two entities"
+                                                            type="button"
+                                                            onClick={() => copyToClipboard(selectedNode.source_key, 'srcKey')}
+                                                            aria-label="Copy source key"
+                                                            className="p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
                                                         >
-                                                            Unlink Pair
+                                                            {copiedKey === 'srcKey' ? (
+                                                                <Check className="w-3.5 h-3.5 text-status-success" />
+                                                            ) : (
+                                                                <Copy className="w-3.5 h-3.5" />
+                                                            )}
+                                                        </button>
+                                                    </dd>
+                                                </div>
+                                                <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
+                                                    <dt className="text-ink-muted">Entity Key</dt>
+                                                    <dd className="font-mono text-ink truncate">{selectedNode.id}</dd>
+                                                </div>
+                                                <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
+                                                    <dt className="text-ink-muted">Graph Degree</dt>
+                                                    <dd className="font-mono tabular-nums font-medium text-ink">
+                                                        {selectedNode.degree || 0} incident links
+                                                    </dd>
+                                                </div>
+                                            </dl>
+
+                                            <div className="p-3 rounded-md bg-subtle border border-line space-y-2">
+                                                <div className="text-xs font-semibold text-ink flex items-center gap-1.5">
+                                                    <ShieldAlert className="w-3.5 h-3.5 text-status-warning" />
+                                                    Stewardship Override
+                                                </div>
+                                                <p className="text-[11px] text-ink-muted">
+                                                    Quarantines this entity into its own singleton cluster on the next pipeline run.
+                                                </p>
+                                                {confirmOverrideKey === `isolate:${selectedNode.id}` ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleStewardshipOverride('ISOLATE', selectedNode.id)}
+                                                            className="btn-danger text-xs"
+                                                        >
+                                                            Confirm Isolate
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setConfirmOverrideKey(null)}
+                                                            className="btn-secondary text-xs"
+                                                        >
+                                                            Cancel
                                                         </button>
                                                     </div>
-                                                </div>
-
-                                                <p className="font-mono text-xs text-gray-200 font-medium truncate bg-gray-800/60 px-2 py-1 rounded border border-gray-700/40">
-                                                    {edge.identifier_value}
-                                                </p>
-
-                                                {/* Connecting Entities */}
-                                                <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1 border-t border-gray-800">
-                                                    <span className="flex items-center gap-1.5 truncate max-w-[45%]">
-                                                        <span
-                                                            className="w-2 h-2 rounded-full flex-shrink-0"
-                                                            style={{ backgroundColor: leftColor.bg }}
-                                                        />
-                                                        <span className="truncate" title={edge.left_entity_key}>
-                                                            {formatSourceName(leftSource)}
-                                                        </span>
-                                                    </span>
-
-                                                    <span className="text-gray-500">↔</span>
-
-                                                    <span className="flex items-center gap-1.5 truncate max-w-[45%] justify-end">
-                                                        <span className="truncate" title={edge.right_entity_key}>
-                                                            {formatSourceName(rightSource)}
-                                                        </span>
-                                                        <span
-                                                            className="w-2 h-2 rounded-full flex-shrink-0"
-                                                            style={{ backgroundColor: rightColor.bg }}
-                                                        />
-                                                    </span>
-                                                </div>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConfirmOverrideKey(`isolate:${selectedNode.id}`)}
+                                                        className="btn-secondary text-xs"
+                                                    >
+                                                        Isolate Entity
+                                                    </button>
+                                                )}
                                             </div>
-                                        )
-                                    })
-                                )}
-                            </div>
-                        </div>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <p className="text-xs text-ink-muted">
+                                                Click a node on the graph or select an entity below to inspect its keys and incident edges.
+                                            </p>
+                                            <div className="border border-line rounded-md divide-y divide-line overflow-hidden">
+                                                {graphNodes.map((node) => (
+                                                    <button
+                                                        key={node.id}
+                                                        type="button"
+                                                        onClick={() => handleSelectNode(node)}
+                                                        className="w-full px-3 py-2 text-left bg-surface hover:bg-subtle flex items-center justify-between gap-2 text-xs transition-colors"
+                                                    >
+                                                        <span className="inline-flex items-center gap-2 min-w-0">
+                                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: node.color }} />
+                                                            <span className="font-medium text-ink truncate">
+                                                                {formatSourceName(node.source_id)}
+                                                            </span>
+                                                        </span>
+                                                        <span className="font-mono text-[11px] text-ink-muted truncate max-w-[160px]">
+                                                            {node.source_key}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </section>
                     </div>
                 </div>
             )}
 
             {/* Empty State */}
             {!selectedCluster && !selectedLens && searchQuery.trim().length < 3 && (
-                <div className="text-center py-24 text-gray-500 bg-gray-800/30 rounded-2xl border border-gray-800/60">
-                    <Search className="w-14 h-14 mx-auto mb-3 opacity-40 text-blue-400" />
-                    <h2 className="text-base font-semibold text-gray-300">Search for any identity entity</h2>
-                    <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
-                        Type an email address, phone number, loyalty ID, or customer key to inspect its cluster and connected graph.
+                <div className="surface-panel py-16 px-4 text-center">
+                    <Search className="w-8 h-8 mx-auto mb-2.5 text-ink-subtle" />
+                    <h2 className="text-sm font-semibold text-ink">Search the identity index</h2>
+                    <p className="text-xs text-ink-muted mt-1 max-w-md mx-auto">
+                        Enter an email address, phone number, customer key, or cluster hash (minimum 3 characters) to inspect its entity graph and Golden Record.
                     </p>
                 </div>
             )}
 
             {/* Lens Diff Modal */}
             {diffModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-                    <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                                <GitBranch className="w-5 h-5 text-blue-400" />
+                <div role="dialog" aria-modal="true" aria-label="Compare Identity Lenses" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="fixed inset-0 bg-ink/30" onClick={() => setDiffModalOpen(false)} aria-hidden="true" />
+                    <div className="relative z-10 bg-surface border border-line-strong rounded-md w-full max-w-3xl max-h-[85vh] flex flex-col shadow-popover">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-line bg-subtle">
+                            <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
+                                <GitBranch className="w-4 h-4 text-accent" />
                                 Compare Identity Lenses
                             </h2>
                             <button
+                                type="button"
                                 onClick={() => setDiffModalOpen(false)}
-                                className="text-gray-400 hover:text-white"
+                                aria-label="Close lens diff modal"
+                                className="p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
                             >
-                                <X className="w-5 h-5" />
+                                <X className="w-4 h-4" />
                             </button>
                         </div>
-                        <div className="p-5 space-y-4 overflow-y-auto">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="p-4 space-y-4 overflow-y-auto text-xs">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Lens A</label>
+                                    <label className="block text-ink-secondary font-medium mb-1">Lens A</label>
                                     <select
                                         value={diffLensA}
                                         onChange={(e) => setDiffLensA(e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-3 py-2"
+                                        className="input-field text-xs"
                                     >
                                         {availableLenses.map((l) => (
                                             <option key={l.id} value={l.id}>{l.id}</option>
@@ -1101,11 +1353,11 @@ export default function Explorer() {
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Lens B</label>
+                                    <label className="block text-ink-secondary font-medium mb-1">Lens B</label>
                                     <select
                                         value={diffLensB}
                                         onChange={(e) => setDiffLensB(e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-3 py-2"
+                                        className="input-field text-xs"
                                     >
                                         {availableLenses.map((l) => (
                                             <option key={l.id} value={l.id}>{l.id}</option>
@@ -1115,41 +1367,41 @@ export default function Explorer() {
                             </div>
 
                             {diffLensA === diffLensB ? (
-                                <p className="text-sm text-amber-400">Select two different lenses to compare.</p>
+                                <p className="text-status-warning">Select two different lenses to compare.</p>
                             ) : diffLoading ? (
-                                <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center">
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    Computing cross-lens diff...
+                                <div className="flex items-center gap-2 text-ink-muted py-6 justify-center">
+                                    <Loader2 className="w-4 h-4 animate-spin text-accent" />
+                                    Computing cross-lens diff…
                                 </div>
                             ) : lensDiffData ? (
                                 <div className="space-y-4">
-                                    <div className="grid grid-cols-3 gap-3">
-                                        <div className="bg-slate-800/70 rounded-lg p-3 border border-slate-700/60">
-                                            <div className="text-xs text-gray-400">{lensDiffData.lens_a} Clusters</div>
-                                            <div className="text-xl font-bold text-white">{lensDiffData.lens_a_clusters}</div>
+                                    <div className="grid grid-cols-3 gap-2 font-mono tabular-nums">
+                                        <div className="surface-subtle p-3">
+                                            <div className="text-[11px] font-sans text-ink-muted">{lensDiffData.lens_a} Clusters</div>
+                                            <div className="text-lg font-semibold text-ink mt-0.5">{lensDiffData.lens_a_clusters}</div>
                                         </div>
-                                        <div className="bg-slate-800/70 rounded-lg p-3 border border-slate-700/60">
-                                            <div className="text-xs text-gray-400">{lensDiffData.lens_b} Clusters</div>
-                                            <div className="text-xl font-bold text-white">{lensDiffData.lens_b_clusters}</div>
+                                        <div className="surface-subtle p-3">
+                                            <div className="text-[11px] font-sans text-ink-muted">{lensDiffData.lens_b} Clusters</div>
+                                            <div className="text-lg font-semibold text-ink mt-0.5">{lensDiffData.lens_b_clusters}</div>
                                         </div>
-                                        <div className="bg-slate-800/70 rounded-lg p-3 border border-slate-700/60">
-                                            <div className="text-xs text-gray-400">Entities Compared</div>
-                                            <div className="text-xl font-bold text-white">{lensDiffData.entities_compared}</div>
+                                        <div className="surface-subtle p-3">
+                                            <div className="text-[11px] font-sans text-ink-muted">Entities Compared</div>
+                                            <div className="text-lg font-semibold text-ink mt-0.5">{lensDiffData.entities_compared}</div>
                                         </div>
                                     </div>
 
                                     <div>
-                                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+                                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted mb-1.5">
                                             Merged in {lensDiffData.lens_b} only ({lensDiffData.merged_in_b_only.length})
-                                        </h4>
+                                        </h3>
                                         {lensDiffData.merged_in_b_only.length === 0 ? (
-                                            <p className="text-xs text-gray-500">None</p>
+                                            <p className="text-ink-muted">None</p>
                                         ) : (
-                                            <div className="bg-slate-950/60 rounded-lg border border-slate-800 divide-y divide-slate-800 max-h-44 overflow-y-auto">
+                                            <div className="border border-line rounded-md divide-y divide-line max-h-40 overflow-y-auto">
                                                 {lensDiffData.merged_in_b_only.map((row, i) => (
-                                                    <div key={i} className="px-3 py-2 text-xs flex justify-between gap-2 text-gray-300">
-                                                        <span className="font-mono text-blue-300">{row.entity_key}</span>
-                                                        <span className="text-gray-400 font-mono truncate">
+                                                    <div key={i} className="px-3 py-1.5 flex justify-between gap-2 bg-surface">
+                                                        <span className="font-mono text-accent">{row.entity_key}</span>
+                                                        <span className="text-ink-muted font-mono truncate">
                                                             {row.resolved_a} → {row.resolved_b}
                                                         </span>
                                                     </div>
@@ -1159,17 +1411,17 @@ export default function Explorer() {
                                     </div>
 
                                     <div>
-                                        <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+                                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted mb-1.5">
                                             Merged in {lensDiffData.lens_a} only ({lensDiffData.merged_in_a_only.length})
-                                        </h4>
+                                        </h3>
                                         {lensDiffData.merged_in_a_only.length === 0 ? (
-                                            <p className="text-xs text-gray-500">None</p>
+                                            <p className="text-ink-muted">None</p>
                                         ) : (
-                                            <div className="bg-slate-950/60 rounded-lg border border-slate-800 divide-y divide-slate-800 max-h-44 overflow-y-auto">
+                                            <div className="border border-line rounded-md divide-y divide-line max-h-40 overflow-y-auto">
                                                 {lensDiffData.merged_in_a_only.map((row, i) => (
-                                                    <div key={i} className="px-3 py-2 text-xs flex justify-between gap-2 text-gray-300">
-                                                        <span className="font-mono text-blue-300">{row.entity_key}</span>
-                                                        <span className="text-gray-400 font-mono truncate">
+                                                    <div key={i} className="px-3 py-1.5 flex justify-between gap-2 bg-surface">
+                                                        <span className="font-mono text-accent">{row.entity_key}</span>
+                                                        <span className="text-ink-muted font-mono truncate">
                                                             {row.resolved_a} ← {row.resolved_b}
                                                         </span>
                                                     </div>

@@ -89,6 +89,26 @@ class TestBigQueryAdapterUnit:
         val = adapter.query_one("SELECT RESOLVED_ID FROM idr_out.test")
         assert val == "c1"
 
+    def test_execute_auto_migrates_clustering_spec_on_create_or_replace(self):
+        client = MagicMock()
+        fail_job = MagicMock()
+        fail_job.result.side_effect = RuntimeError(
+            "400 Cannot replace a table with a different partitioning spec. "
+            "Instead, DROP the table, and then recreate it."
+        )
+        ok_job = MagicMock()
+        ok_job.result.return_value = []
+        client.query.side_effect = [fail_job, ok_job, ok_job]
+
+        adapter = BigQueryAdapter(client, project="ga4-134745")
+        adapter.execute(
+            "CREATE OR REPLACE TABLE idr_work.edges_new CLUSTER BY left_entity_key AS SELECT 1 AS left_entity_key"
+        )
+        calls = [c.args[0] for c in client.query.call_args_list]
+        assert len(calls) == 3
+        assert "DROP TABLE IF EXISTS `ga4-134745`.idr_work.edges_new" in calls[1]
+        assert "CLUSTER BY left_entity_key" in calls[2]
+
     def test_table_exists_get_columns_and_list_tables(self):
         client = MagicMock()
         mock_table = MagicMock()

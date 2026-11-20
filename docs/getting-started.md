@@ -114,18 +114,23 @@ idr config rollback --platform duckdb --db demo.duckdb
 
 ### Step 4: Launch the Interactive Web UI
 
-Start the integrated FastAPI + React Web UI server:
+Start the integrated FastAPI + React Web UI server with a single command:
 
 ```bash
+# Launch UI + API on http://127.0.0.1:8000 (auto-detects local cloud/DuckDB credentials)
+idr ui
+
+# Or pre-connect a specific DuckDB file
 idr ui --db demo.duckdb
 ```
 
 Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser to:
 
-- Configure sources, mappings, rules, exclusions, and survivorship in the persistent 4-tab **Identity Studio** (`1. Sources & Mappings` with merged multi-schema table discovery drawer & 1-click `Auto-Map All`, `2. Matching Rules`, `3. Survivorship`, `4. Run & Verify`).
-- Preview un-saved draft rule changes with non-saving **Start Dry Run** (`Draft Previewed — Saved Config Untouched`, `Edges Delta` & `Clusters Delta`), inspect **History**, or **Discard** drafts.
-- Trigger runs with a **Live 8-Stage Execution Progress** tracker.
-- Search entities, inspect confidence scores, create **Manual Overrides** (`FORCE_LINK`, `DO_NOT_LINK`, `ISOLATE`), or execute **GDPR Erasure** in the **Cluster Explorer**.
+- Configure sources, mappings, rules, exclusions, lenses, and survivorship in the persistent 4-tab **Identity Studio** (`1. Sources & Mappings` with merged multi-schema table browser & zero-PII statistical **`AI Suggest Config`**, `2. Matching Rules` with 4 sub-tabs for Match Rules / Multi-Lens Views / Blocklist Exclusions / Stewardship Overrides, `3. Survivorship`, `4. Run & Verify`).
+- Trigger quick `INCR` or `FULL` runs from anywhere using the top-bar **`Run Pipeline`** slide-over drawer or open the **`AI Copilot (⌘K)`** drawer for natural-language graph Q&A, anomaly triage, and runtime diagnostics.
+- Preview unsaved draft rule changes with non-saving **Start Dry Run** (`Draft Previewed — Saved Config Untouched`, `Edges Delta` & `Clusters Delta`), inspect **History**, or **Discard** drafts.
+- Search entities, switch or diff **Identity Lenses**, inspect collapsible **Crosswalk Lineage** transition tables, run **AI Cluster Forensics (`Explain with AI`)**, create **Manual Overrides** (`FORCE_LINK`, `DO_NOT_LINK`, `ISOLATE`), or execute **GDPR Erasure** in the **7:5 Graph / Inspector Explorer Workbench**.
+- Switch between **Crisp Daylight Engineering** (default) and **Dark Appearance** from the sidebar footer, or configure **Local Ollama** (`llama3.2`, `qwen2.5:14b`) and **Cloud BYOK** (`OpenAI`, `Anthropic`, `Gemini`) in **Settings**.
 
 ---
 

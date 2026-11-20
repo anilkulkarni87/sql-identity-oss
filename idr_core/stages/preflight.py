@@ -61,6 +61,7 @@ class PreflightStage(BaseStage):
 
         # Validate identifier mappings reference real columns
         self._validate_identifier_columns()
+        return len(sources)
 
     def _validate_identifier_columns(self) -> None:
         """Validate that identifier mappings reference real columns in source tables."""
@@ -73,6 +74,7 @@ class PreflightStage(BaseStage):
         if not mappings:
             return
 
+        col_cache = {}
         for m in mappings:
             # Extract column name from expression (handle simple cases)
             expr = m["identifier_value_expr"]
@@ -80,13 +82,16 @@ class PreflightStage(BaseStage):
             if "(" in expr or " " in expr:
                 continue
 
-            # Validate column exists
+            # Validate column exists (cached per table_fqn)
             try:
-                columns = self.adapter.get_table_columns(m["table_fqn"])
-                col_names = [c["name"].lower() for c in columns]
-                if columns and expr.lower() not in col_names:
+                fqn = m["table_fqn"]
+                if fqn not in col_cache:
+                    columns = self.adapter.get_table_columns(fqn)
+                    col_cache[fqn] = [c["name"].lower() for c in columns] if columns else []
+                col_names = col_cache[fqn]
+                if col_names and expr.lower() not in col_names:
                     self._warnings.append(
-                        f"Column '{expr}' may not exist in {m['table_fqn']} (identifier: {m['identifier_type']})"
+                        f"Column '{expr}' may not exist in {fqn} (identifier: {m['identifier_type']})"
                     )
             except Exception as e:
                 self.logger.warning(
