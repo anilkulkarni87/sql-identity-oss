@@ -59,8 +59,9 @@ class PreflightStage(BaseStage):
         if not rules or rules[0]["cnt"] == 0:
             self._warnings.append("No active matching rules configured")
 
-        # Validate identifier mappings reference real columns
+        # Validate identifier mappings reference real columns and check cross-table coverage
         self._validate_identifier_columns()
+        self._validate_identifier_mapping_coverage(len(sources))
         return len(sources)
 
     def _validate_identifier_columns(self) -> None:
@@ -99,6 +100,52 @@ class PreflightStage(BaseStage):
                     extra={"run_id": self.run_id},
                 )
                 pass  # Skip validation if we can't get columns
+
+    def _validate_identifier_mapping_coverage(self, active_source_count: int) -> None:
+        """Warn on identifier mappings that have no active rule or are only mapped on one source table."""
+        try:
+            mappings = self.adapter.query("""
+                SELECT DISTINCT im.identifier_type, im.table_id
+                FROM idr_meta.identifier_mapping im
+                JOIN idr_meta.source_table st ON im.table_id = st.table_id
+                WHERE st.is_active = TRUE
+            """)
+            if not mappings:
+                return
+
+            active_rules = self.adapter.query(
+                "SELECT DISTINCT identifier_type FROM idr_meta.rule WHERE is_active = TRUE"
+            )
+            active_rule_types = {r["identifier_type"] for r in (active_rules or [])}
+
+            tables_by_id_type: dict[str, list[str]] = {}
+            for row in mappings:
+                id_type = row["identifier_type"]
+                tables_by_id_type.setdefault(id_type, []).append(row["table_id"])
+
+            for id_type in sorted(tables_by_id_type):
+                tables = sorted(tables_by_id_type[id_type])
+                if id_type not in active_rule_types:
+                    msg = (
+                        f"Identifier '{id_type}' is mapped on {len(tables)} source table(s) "
+                        f"({', '.join(tables)}) but has no active rule in idr_meta.rule — "
+                        f"it will be ignored during extraction."
+                    )
+                    self._warnings.append(msg)
+                    self.logger.warning(msg, extra={"run_id": self.run_id})
+                elif active_source_count > 1 and len(tables) == 1:
+                    msg = (
+                        f"Identifier '{id_type}' is only mapped on 1 active source table "
+                        f"({tables[0]}) — it can only deduplicate within that table and will "
+                        f"not form cross-table edges."
+                    )
+                    self._warnings.append(msg)
+                    self.logger.warning(msg, extra={"run_id": self.run_id})
+        except Exception as e:
+            self.logger.warning(
+                f"Skipped identifier mapping coverage check: {e}",
+                extra={"run_id": self.run_id},
+            )
 
     def _ensure_schema_upgrades(self) -> None:
         """Apply necessary schema updates and ensure all system tables exist for existing deployments."""

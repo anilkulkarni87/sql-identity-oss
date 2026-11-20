@@ -37,6 +37,9 @@ DEFAULT_EXCLUSIONS: List[Dict[str, str]] = [
     {"identifier_type": "EMAIL", "identifier_value_pattern": "na@%", "match_type": "LIKE", "reason": "Default pack: NA email"},
     {"identifier_type": "EMAIL", "identifier_value_pattern": "%@example.com", "match_type": "LIKE", "reason": "Default pack: RFC 2606 example domain"},
     {"identifier_type": "EMAIL", "identifier_value_pattern": "%@test.com", "match_type": "LIKE", "reason": "Default pack: test domain"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "erased_%@%", "match_type": "LIKE", "reason": "Default pack: GDPR-erased email"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "%@anonymized.%", "match_type": "LIKE", "reason": "Default pack: anonymized email domain"},
+    {"identifier_type": "EMAIL", "identifier_value_pattern": "redacted@%", "match_type": "LIKE", "reason": "Default pack: redacted email"},
     # Bogus / Repeated-Digit Phone Numbers
     {"identifier_type": "PHONE", "identifier_value_pattern": "0000000000", "match_type": "EXACT", "reason": "Default pack: all-zeros phone"},
     {"identifier_type": "PHONE", "identifier_value_pattern": "1111111111", "match_type": "EXACT", "reason": "Default pack: repeated-1s phone"},
@@ -56,6 +59,9 @@ DEFAULT_EXCLUSIONS: List[Dict[str, str]] = [
     {"identifier_type": "ANY", "identifier_value_pattern": "unknown", "match_type": "EXACT", "reason": "Default pack: literal unknown"},
     {"identifier_type": "ANY", "identifier_value_pattern": "anonymous", "match_type": "EXACT", "reason": "Default pack: literal anonymous"},
     {"identifier_type": "ANY", "identifier_value_pattern": "refused", "match_type": "EXACT", "reason": "Default pack: literal refused"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "redacted", "match_type": "EXACT", "reason": "Default pack: literal redacted"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "---", "match_type": "EXACT", "reason": "Default pack: dash placeholder"},
+    {"identifier_type": "ANY", "identifier_value_pattern": "na", "match_type": "EXACT", "reason": "Default pack: literal na"},
 ]
 
 
@@ -1635,7 +1641,9 @@ def get_config_snapshots(adapter, limit: int = 15) -> List[Dict[str, Any]]:
         except Exception:
             continue
         rules_cnt = len(cfg.get("rules") or []) + len(cfg.get("fuzzy_rules") or [])
-        excl_cnt = len(cfg.get("exclusions") or []) + (33 if cfg.get("use_default_exclusions") else 0)
+        excl_cnt = len(cfg.get("exclusions") or []) + (
+            len(DEFAULT_EXCLUSIONS) if cfg.get("use_default_exclusions") else 0
+        )
         snapshots.append(
             {
                 "config_hash": str(row.get("config_hash") or ""),

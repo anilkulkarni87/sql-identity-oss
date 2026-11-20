@@ -40,6 +40,15 @@ _METRIC_HINTS = (
     "price", "cost", "amount", "value", "quantity", "qty", "rating",
     "score", "count", "pct", "percent", "rate", "weight", "total", "subtotal", "revenue", "ltv",
 )
+# Generic column names that commonly have different semantics across tables
+# (e.g., orders.status = PAID/CANCELLED vs shipments.status = IN_TRANSIT/DELIVERED)
+GENERIC_HOMONYM_ATTRIBUTES: Set[str] = {
+    "status", "state", "type", "category", "channel", "source", "reason",
+    "stage", "code", "notes", "description", "comments", "comment",
+    "created_at", "updated_at", "timestamp", "event_time", "event_date",
+    "amount", "total", "subtotal", "price", "value", "score", "rating",
+    "count", "quantity", "qty",
+}
 
 
 def _to_shape_skeleton(value: str) -> str:
@@ -244,6 +253,7 @@ class SafeSchemaProfile:
     dialect: str
     tables: List[SafeTableProfile] = field(default_factory=list)
     overlaps: List[CrossTableOverlap] = field(default_factory=list)
+    attribute_homonyms: List[Dict[str, Any]] = field(default_factory=list)
 
     def table_map(self) -> Dict[str, SafeTableProfile]:
         return {t.table_fqn: t for t in self.tables}
@@ -254,6 +264,7 @@ class SafeSchemaProfile:
             "tables_profiled": len(self.tables),
             "tables_with_identifiers": sum(1 for t in self.tables if t.has_candidate_identifiers),
             "cross_table_overlaps": [o.to_dict() for o in self.overlaps],
+            "attribute_homonyms": self.attribute_homonyms,
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -913,8 +924,18 @@ class IDRDataProfiler:
         safe_tables: List[SafeTableProfile] = []
         # Ephemeral hashed value sets used ONLY in-memory for cross-table overlap, then discarded
         hashed_sets: Dict[Tuple[str, str, str], Set[str]] = {}
+        # Ephemeral categorical attribute hash sets for zero-PII homonym collision detection
+        attr_hashed_sets: Dict[str, Dict[str, Set[str]]] = {}
 
-        def _profile_one_table(fqn: str) -> Optional[Tuple[SafeTableProfile, Dict[Tuple[str, str, str], Set[str]]]]:
+        def _profile_one_table(
+            fqn: str,
+        ) -> Optional[
+            Tuple[
+                SafeTableProfile,
+                Dict[Tuple[str, str, str], Set[str]],
+                Dict[str, Set[str]],
+            ]
+        ]:
             cols = []
             if hasattr(self.adapter, "get_table_columns"):
                 cols = self.adapter.get_table_columns(fqn)
@@ -930,6 +951,7 @@ class IDRDataProfiler:
 
             safe_cols: List[SafeColumnProfile] = []
             local_hashes: Dict[Tuple[str, str, str], Set[str]] = {}
+            local_attr_hashes: Dict[str, Set[str]] = {}
             for col_info in cols:
                 cname = col_info["name"].lower()
                 cp = col_profiles.get(cname)
@@ -949,6 +971,16 @@ class IDRDataProfiler:
                 if compute_overlap and sp.hint_role == "identifier" and sp.hint_identifier_type and raw_vals:
                     local_hashes[(fqn, sp.name, sp.hint_identifier_type)] = {
                         self._normalize_for_overlap_hash(v, sp.hint_identifier_type)
+                        for v in raw_vals
+                    }
+                elif (
+                    compute_overlap
+                    and sp.hint_role in ("attribute", "metric", "consent_flag")
+                    and 2 <= sp.distinct_count <= 50
+                    and raw_vals
+                ):
+                    local_attr_hashes[sp.name.lower()] = {
+                        hashlib.sha256(v.strip().lower().encode("utf-8")).hexdigest()[:16]
                         for v in raw_vals
                     }
 
@@ -997,6 +1029,7 @@ class IDRDataProfiler:
                     has_candidate_identifiers=any(c.hint_role == "identifier" for c in safe_cols),
                 ),
                 local_hashes,
+                local_attr_hashes,
             )
 
         if len(candidate_tables) > 1:
@@ -1011,9 +1044,11 @@ class IDRDataProfiler:
         for res in results:
             if res is None:
                 continue
-            tprof, local_hashes = res
+            tprof, local_hashes, local_attr_hashes = res
             safe_tables.append(tprof)
             hashed_sets.update(local_hashes)
+            for col_l, hset in local_attr_hashes.items():
+                attr_hashed_sets.setdefault(col_l, {})[tprof.table_fqn] = hset
 
         # Compute cross-table overlap matrix across tables sharing candidate identifier types
         overlaps: List[CrossTableOverlap] = []
@@ -1041,4 +1076,53 @@ class IDRDataProfiler:
                         )
                     )
 
-        return SafeSchemaProfile(dialect=dialect, tables=safe_tables, overlaps=overlaps)
+        # Detect semantic homonym attributes across tables (generic names or disjoint categorical domains)
+        attribute_homonyms: List[Dict[str, Any]] = []
+        if len(safe_tables) >= 2:
+            attr_tables_by_col: Dict[str, List[str]] = {}
+            for tp in safe_tables:
+                for c in tp.columns:
+                    if c.hint_role in ("attribute", "metric", "consent_flag"):
+                        attr_tables_by_col.setdefault(c.name.lower(), []).append(tp.table_fqn)
+
+            for col_l, tbls in sorted(attr_tables_by_col.items()):
+                if len(tbls) < 2:
+                    continue
+                if col_l in GENERIC_HOMONYM_ATTRIBUTES:
+                    attribute_homonyms.append(
+                        {
+                            "column": col_l,
+                            "tables": sorted(tbls),
+                            "reason": "generic_homonym_name",
+                        }
+                    )
+                    continue
+                # Check if categorical sample domains are completely disjoint (0% overlap)
+                per_tbl_hashes = attr_hashed_sets.get(col_l, {})
+                if len(per_tbl_hashes) >= 2:
+                    hash_items = list(per_tbl_hashes.items())
+                    disjoint_pair = False
+                    for i in range(len(hash_items)):
+                        _, sa = hash_items[i]
+                        for j in range(i + 1, len(hash_items)):
+                            _, sb = hash_items[j]
+                            if sa and sb and len(sa & sb) == 0:
+                                disjoint_pair = True
+                                break
+                        if disjoint_pair:
+                            break
+                    if disjoint_pair:
+                        attribute_homonyms.append(
+                            {
+                                "column": col_l,
+                                "tables": sorted(tbls),
+                                "reason": "zero_value_overlap",
+                            }
+                        )
+
+        return SafeSchemaProfile(
+            dialect=dialect,
+            tables=safe_tables,
+            overlaps=overlaps,
+            attribute_homonyms=attribute_homonyms,
+        )

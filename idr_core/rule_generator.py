@@ -583,7 +583,75 @@ class AIRuleGenerator:
                 )
             )
 
+        self._disambiguate_homonym_attributes(sources, schema_profile, explanations)
         return sources, explanations
+
+    @staticmethod
+    def _disambiguate_homonym_attributes(
+        sources: List[SourceSpec],
+        schema_profile: SafeSchemaProfile,
+        explanations: List[ExplanationItem],
+    ) -> None:
+        """
+        Namespace colliding homonym attributes across tables (e.g., orders.status -> orders_status,
+        shipments.status -> shipments_status) when flagged by the profiler's zero-PII domain check
+        or known generic homonym names.
+        """
+        from .profiler import GENERIC_HOMONYM_ATTRIBUTES
+
+        homonym_reasons: Dict[str, str] = {}
+        for item in getattr(schema_profile, "attribute_homonyms", []) or []:
+            col_l = str(item.get("column") or "").lower()
+            if col_l:
+                homonym_reasons[col_l] = str(item.get("reason") or "homonym")
+
+        # Group mapped attributes by lowercase target name across sources
+        occurrences: Dict[str, List[Tuple[SourceSpec, AttributeMappingSpec]]] = {}
+        for src in sources:
+            for attr in src.attributes:
+                occurrences.setdefault(attr.name.lower(), []).append((src, attr))
+
+        for attr_l, pairs in sorted(occurrences.items()):
+            distinct_sources = {src.id for src, _ in pairs}
+            if len(distinct_sources) < 2:
+                continue
+            reason = homonym_reasons.get(attr_l)
+            if not reason and attr_l in GENERIC_HOMONYM_ATTRIBUTES:
+                reason = "generic_homonym_name"
+            if not reason:
+                continue
+
+            renamed_labels: List[str] = []
+            for src, attr in pairs:
+                tbl_short = re.sub(r"[^a-zA-Z0-9_]+", "_", src.table.split(".")[-1].lower()).strip("_")
+                if not tbl_short:
+                    tbl_short = src.id.lower()
+                if not attr_l.startswith(f"{tbl_short}_"):
+                    new_name = f"{tbl_short}_{attr_l}"
+                    attr.name = new_name
+                    renamed_labels.append(f"{src.table}.{attr.expr} → {new_name}")
+
+            if renamed_labels:
+                why = (
+                    "0% sample-value overlap across tables"
+                    if reason == "zero_value_overlap"
+                    else "generic column name with table-specific semantics"
+                )
+                explanations.append(
+                    ExplanationItem(
+                        target=f"attribute:{attr_l}",
+                        summary=(
+                            f"Namespaced colliding attribute '{attr_l}' across {len(distinct_sources)} tables "
+                            f"({why}): {', '.join(renamed_labels[:5])}"
+                            + (f" (+{len(renamed_labels) - 5} more)" if len(renamed_labels) > 5 else "")
+                            + "."
+                        ),
+                        evidence=[f"reason={reason}", f"tables={len(distinct_sources)}"],
+                        risks=[],
+                        confidence="high",
+                        needs_review=False,
+                    )
+                )
 
     # =========================================================================
     # Stage 2B: Pass B (Global Rules, Fuzzy Templates, Survivorship & Lenses)

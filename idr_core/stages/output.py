@@ -461,6 +461,14 @@ class OutputStage(BaseStage):
                 insert_cols=["entity_key", "resolved_id", "updated_at", "run_id", "super_cluster_id"],
             )
 
+            # 2b. Cleanup stale memberships (FULL run only) so removed/inactive source tables
+            # or hard-deleted source rows do not leave ghost memberships behind.
+            if self.config and self.config.run_mode == "FULL":
+                self.adapter.execute(f"""
+                    DELETE FROM idr_out.identity_resolved_membership_current
+                    WHERE run_id != '{self.run_id}'
+                """)
+
             # 3. Update edges table (Insert / Upsert) BEFORE clusters to enable scoring.
             # In INCR mode, remove stale historical edges for re-extracted entities and
             # any edges invalidated by new exclusions before upserting freshly computed edges.

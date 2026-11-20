@@ -481,7 +481,10 @@ class ExtractionStage(BaseStage):
             raw_expr = f"TRIM(CAST(({value_expr}) AS {str_type}))"
 
             # Apply canonicalization (built-in preset, registered fn, or inline SQL with {val})
-            norm_expr = build_canonicalize_expr(raw_expr, canonicalize, self.adapter.dialect)
+            pre_hash_norm_expr = build_canonicalize_expr(
+                raw_expr, canonicalize, self.adapter.dialect
+            )
+            norm_expr = pre_hash_norm_expr
 
             # Apply PII hashing if enabled
             is_hashed = bool(m.get("is_hashed", False))
@@ -498,11 +501,13 @@ class ExtractionStage(BaseStage):
                 else self._dialect.get("bool_false", "FALSE")
             )
 
-            # Robust null, empty string, and sentinel check
+            # Robust null, empty string, sentinel, and post-canonicalization non-empty check
             where_condition = f"""
                 ({value_expr}) IS NOT NULL
                 AND LENGTH({raw_expr}) > 0
-                AND LOWER({raw_expr}) NOT IN ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', '0', 'default', '')
+                AND LOWER({raw_expr}) NOT IN ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', 'redacted', '0', 'default', '')
+                AND ({pre_hash_norm_expr}) IS NOT NULL
+                AND LENGTH(TRIM({pre_hash_norm_expr})) > 0
             """
 
             dedup_meta = getattr(self, "_source_dedup_meta", {}).get(table_id)

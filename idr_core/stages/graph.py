@@ -159,6 +159,8 @@ class GraphStage(BaseStage):
                     identifier_value_norm,
                     MAX(max_group_size) AS max_group_size
                 FROM idr_work.identifiers_all
+                WHERE identifier_value_norm IS NOT NULL
+                  AND LENGTH(TRIM(identifier_value_norm)) > 0
                 GROUP BY entity_key, identifier_type, identifier_value_norm
             ),
             identifier_groups AS (

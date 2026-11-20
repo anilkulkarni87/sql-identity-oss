@@ -28,6 +28,24 @@ const IDENTIFIER_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
     { pattern: /crm_id|salesforce_id|hubspot_id|external_id/i, type: 'external_id' },
 ];
 
+const GENERIC_HOMONYM_ATTRS = new Set([
+    'status', 'state', 'type', 'category', 'channel', 'source', 'reason',
+    'stage', 'code', 'notes', 'description', 'comments', 'comment',
+    'created_at', 'updated_at', 'timestamp', 'event_time', 'event_date',
+    'amount', 'total', 'subtotal', 'price', 'value', 'score', 'rating',
+    'count', 'quantity', 'qty',
+]);
+
+function suggestAliasedAttrName(tableFqn: string, attrName: string): string {
+    const shortTbl = (tableFqn.split('.').pop() || tableFqn)
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    const cleanAttr = attrName.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!shortTbl || cleanAttr.startsWith(`${shortTbl}_`)) return cleanAttr;
+    return `${shortTbl}_${cleanAttr}`;
+}
+
 function guessDefaultWatermark(cols: TableColumn[], entityKey?: string): string {
     const wmKeywords = [
         'updated_at', 'modified_at', 'last_modified', 'timestamp',
@@ -369,11 +387,11 @@ export default function StepMap({
         const curr = config[table];
         if (!curr) return;
         const currentAttrs = curr.attributes || [];
-        const exists = currentAttrs.find(a => a.name === colName);
+        const exists = currentAttrs.find(a => (a.column || a.expr || a.name) === colName);
         const colMeta = (columns[table] || []).find(c => c.name === colName);
 
         const newAttrs: Attribute[] = exists
-            ? currentAttrs.filter(a => a.name !== colName)
+            ? currentAttrs.filter(a => (a.column || a.expr || a.name) !== colName)
             : [...currentAttrs, { name: colName, column: colName, expr: colName, data_type: colMeta?.type }];
         const newIds = exists ? (curr.identifiers || []) : (curr.identifiers || []).filter(i => i.column !== colName);
 
@@ -381,6 +399,16 @@ export default function StepMap({
             ...config,
             [table]: { ...curr, attributes: newAttrs, identifiers: newIds },
         });
+    };
+
+    const updateAttributeName = (table: string, colName: string, newName: string) => {
+        const curr = config[table];
+        if (!curr) return;
+        const safeName = newName.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+        const newAttrs = (curr.attributes || []).map(a =>
+            (a.column || a.expr || a.name) === colName ? { ...a, name: safeName } : a
+        );
+        commitUpdate({ ...config, [table]: { ...curr, attributes: newAttrs } });
     };
 
     const toggleIdentifier = (table: string, colName: string) => {
@@ -397,7 +425,7 @@ export default function StepMap({
             const defaultType = matchedPattern ? matchedPattern.type : colName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
             newIds = [...currentIds, { column: colName, type: defaultType, expr: colName, is_match_key: true }];
         }
-        const newAttrs = exists ? (curr.attributes || []) : (curr.attributes || []).filter(a => a.name !== colName);
+        const newAttrs = exists ? (curr.attributes || []) : (curr.attributes || []).filter(a => (a.column || a.expr || a.name) !== colName);
 
         commitUpdate({
             ...config,
@@ -426,7 +454,8 @@ export default function StepMap({
 
     const getColumnState = (table: string, colName: string) => {
         const attrs = config[table]?.attributes || [];
-        if (attrs.find(a => (a.column || a.name) === colName)) return { isAttr: true };
+        const attrMatch = attrs.find(a => (a.column || a.expr || a.name) === colName);
+        if (attrMatch) return { isAttr: true, attrName: attrMatch.name };
 
         const ids = config[table]?.identifiers || [];
         const idMatch = ids.find(i => (i.column || i.expr) === colName);
@@ -434,6 +463,19 @@ export default function StepMap({
 
         return {};
     };
+
+    // Track which target attribute names appear on multiple tables so we can flag homonym collisions
+    const sharedAttrTables: Record<string, string[]> = {};
+    for (const t of tables) {
+        const seenInTable = new Set<string>();
+        for (const a of config[t]?.attributes || []) {
+            const k = (a.name || '').trim().toLowerCase();
+            if (k && !seenInTable.has(k)) {
+                seenInTable.add(k);
+                sharedAttrTables[k] = [...(sharedAttrTables[k] || []), t];
+            }
+        }
+    }
 
     const handleNext = () => {
         const allIdentifiers = tables.flatMap(t => config[t]?.identifiers || []);
@@ -1006,6 +1048,15 @@ export default function StepMap({
 
                                     {filteredActiveCols.map(c => {
                                         const state = getColumnState(activeTable, c.name);
+                                        const attrKey = (state.attrName || '').trim().toLowerCase();
+                                        const collidingTables = state.isAttr && attrKey ? (sharedAttrTables[attrKey] || []) : [];
+                                        const isHomonymCollision =
+                                            state.isAttr &&
+                                            collidingTables.length > 1 &&
+                                            GENERIC_HOMONYM_ATTRS.has(attrKey);
+                                        const suggestedAlias = isHomonymCollision
+                                            ? suggestAliasedAttrName(activeTable, state.attrName || c.name)
+                                            : '';
                                         return (
                                             <div key={c.name} className="grid grid-cols-12 gap-2 px-3.5 py-2 items-center hover:bg-slate-900/80 border-b border-slate-800/50 last:border-0">
                                                 <div className="col-span-4 text-xs font-mono font-medium text-slate-200 truncate" title={c.name}>
@@ -1026,7 +1077,7 @@ export default function StepMap({
                                                         </button>
                                                     )}
                                                 </div>
-                                                <div className="col-span-5 flex items-center justify-end gap-1.5">
+                                                <div className="col-span-5 flex items-center justify-end gap-1.5 flex-wrap">
                                                     {state.isId && (
                                                         <input
                                                             type="text"
@@ -1035,6 +1086,32 @@ export default function StepMap({
                                                             className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs font-mono text-blue-300 w-24 focus:outline-none focus:border-blue-500"
                                                             placeholder="id type"
                                                         />
+                                                    )}
+                                                    {state.isAttr && (
+                                                        <div className="flex items-center gap-1">
+                                                            <input
+                                                                type="text"
+                                                                value={state.attrName || ''}
+                                                                onChange={(e) => updateAttributeName(activeTable, c.name, e.target.value)}
+                                                                className={`bg-slate-900 border rounded-md px-2 py-1 text-xs font-mono w-28 focus:outline-none ${
+                                                                    isHomonymCollision
+                                                                        ? 'border-amber-500/70 text-amber-300 focus:border-amber-400'
+                                                                        : 'border-slate-700 text-emerald-300 focus:border-emerald-500'
+                                                                }`}
+                                                                placeholder="attr name"
+                                                                title="Target attribute name in golden_profile_current (rename to alias colliding columns)"
+                                                            />
+                                                            {isHomonymCollision && suggestedAlias && suggestedAlias !== attrKey && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => updateAttributeName(activeTable, c.name, suggestedAlias)}
+                                                                    title={`'${attrKey}' is mapped on ${collidingTables.length} tables (${collidingTables.join(', ')}). Click to alias as '${suggestedAlias}'.`}
+                                                                    className="px-1.5 py-1 text-[10px] font-mono rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 whitespace-nowrap"
+                                                                >
+                                                                    → {suggestedAlias}
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     )}
                                                     <button
                                                         type="button"
