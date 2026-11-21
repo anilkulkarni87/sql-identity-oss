@@ -1,10 +1,13 @@
+import ProfilePreviewPanel from '../../components/ProfilePreviewPanel';
+import EvaluationConfigEditor from '../../components/EvaluationConfigEditor';
+import AIReviewPanel from '../../components/AIReviewPanel';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Loader2, CheckCircle2, Settings, Play, Save, ClipboardList,
     ChevronDown, ChevronRight, Database, Shield, Layers, Code,
     Activity, Clock, Cpu, FileSpreadsheet, GitMerge, Network,
-    ArrowRight, Copy, Check, Edit3, AlertCircle, RotateCcw, Bot, Sparkles
+    ArrowRight, Copy, Check, Edit3, AlertCircle, RotateCcw,  Sparkles
 } from "lucide-react";
 import { IDRConfig } from '../../types';
 import { api } from '../../api/client';
@@ -67,18 +70,21 @@ export default function StepReview({
     const [jsonSuccess, setJsonSuccess] = useState<string | null>(null);
 
     // Run Configuration State
-    const [runMode, setRunMode] = useState<'FULL' | 'INCREMENTAL'>('INCREMENTAL');
+    const [runMode, setRunMode] = useState<'FULL' | 'INCREMENTAL'>('FULL');
     const [strictMode, setStrictMode] = useState(false);
     const [maxIterations, setMaxIterations] = useState(30);
     const [maxGroupSize, setMaxGroupSize] = useState(10000);
     const [maxMovedEntitiesPct, setMaxMovedEntitiesPct] = useState('');
     const [maxClusterDeltaPct, setMaxClusterDeltaPct] = useState('');
     const [selectedLens, setSelectedLens] = useState('');
-    const [dryRun, setDryRun] = useState(false);
+    const [dryRun, setDryRun] = useState(true);
     const [runResult, setRunResult] = useState<any>(null);
     const [critiqueLoading, setCritiqueLoading] = useState(false);
     const [critiqueReport, setCritiqueReport] = useState<Awaited<ReturnType<typeof api.critiqueDryRunAi>> | null>(null);
-    const [appliedPatches, setAppliedPatches] = useState<Set<string>>(new Set());
+    const [previewBase, setPreviewBase] = useState('');
+    const [previewOptions, setPreviewOptions] = useState('');
+    const currentPreviewOptions = JSON.stringify([runMode, strictMode, maxIterations, maxGroupSize, selectedLens && selectedLens !== '__none__' ? selectedLens : 'default']);
+    const [savedReviewId, setSavedReviewId] = useState('');
 
     const handleCritiqueDryRun = async () => {
         if (!runResult) return;
@@ -86,50 +92,17 @@ export default function StepReview({
         try {
             const res = await api.critiqueDryRunAi(
                 config as unknown as Record<string, unknown>,
-                runResult.dry_run_summary || {},
-                runResult.warnings || []
+                runResult.run_id,
+                runResult.draft_hash,
+                selectedLens && selectedLens !== '__none__' ? selectedLens : 'default'
             );
             setCritiqueReport(res);
-            setAppliedPatches(new Set());
+
         } catch (err: any) {
             toast('error', 'Dry Run Critique failed', String(err?.message || err));
         } finally {
             setCritiqueLoading(false);
         }
-    };
-
-    const applyCritiquePatch = (
-        patchKey: string,
-        patch: { action: string; label: string; target: string; value: unknown }
-    ) => {
-        if (!onUpdateConfig) return;
-        const next: IDRConfig = { ...config };
-        if (patch.action === 'enable_default_exclusions') {
-            next.use_default_exclusions = true;
-        } else if (patch.action === 'remove_rule') {
-            const targetType = String(patch.target || '').toLowerCase();
-            next.rules = (config.rules || []).filter((r) => {
-                const mks = (r.match_keys || []).map((k) => String(k).toLowerCase());
-                return !mks.includes(targetType);
-            });
-        } else if (patch.action === 'remove_source') {
-            const targetId = String(patch.target || '');
-            next.sources = (config.sources || []).filter(
-                (s) => s.id !== targetId && s.table !== String(patch.value || '')
-            );
-        } else if (patch.action === 'raise_fuzzy_threshold') {
-            const thr = Number(patch.value) || 0.9;
-            next.fuzzy_rules = (config.fuzzy_rules || []).map((fr) =>
-                String(fr.id) === String(patch.target) ? { ...fr, threshold: thr } : fr
-            );
-        }
-        onUpdateConfig(next);
-        setAppliedPatches((prev) => {
-            const s = new Set(prev);
-            s.add(patchKey);
-            return s;
-        });
-        toast('success', 'Draft config updated', `${patch.label} — re-run Dry Run to verify impact.`);
     };
 
     // Collapsible sections (all collapsed by default so Run Controls are immediately visible!)
@@ -290,13 +263,13 @@ export default function StepReview({
 
     const handleRun = async (overrideDryRun?: boolean) => {
         const effectiveDryRun = overrideDryRun ?? dryRun;
+        const hasLenses = !effectiveDryRun && selectedLens !== '__none__' && ((config.lenses || []).length > 0 || Boolean(selectedLens));
         if (overrideDryRun !== undefined) {
             setDryRun(overrideDryRun);
         }
         setPhase('running');
         setError(null);
         setCritiqueReport(null);
-        setAppliedPatches(new Set());
         setLiveProgress({
             status: 'RUNNING',
             elapsed_seconds: 0,
@@ -307,27 +280,23 @@ export default function StepReview({
                 ? 'Running ephemeral dry run (saved config untouched)...'
                 : 'Starting pipeline...',
             stages: [
-                { name: 'preflight', label: 'Preflight & Schema Check', order: 1, status: 'running' },
+
+            { name: 'preflight', label: 'Preflight & Schema Check', order: 1, status: 'running' },
                 { name: 'entity_extraction', label: 'Entity Extraction', order: 2, status: 'pending' },
                 { name: 'identifier_extraction', label: 'Identifier Extraction', order: 3, status: 'pending' },
                 { name: 'attribute_extraction', label: 'Attribute Extraction', order: 4, status: 'pending' },
                 { name: 'edge_building', label: 'Edge Building', order: 5, status: 'pending' },
                 { name: 'label_propagation', label: 'Label Propagation (Graph)', order: 6, status: 'pending' },
                 ...(strictMode ? [] : [{ name: 'fuzzy_matching', label: 'Fuzzy Matching', order: 7, status: 'pending' as const }]),
+                ...(hasLenses
+                    ? [{name: 'lens_resolution', label: 'Validate Multi-Lens Views', order: strictMode ? 7 : 8, status: 'pending' as const}]
+                    : []),
                 {
                     name: effectiveDryRun ? 'dry_run_analysis' : 'output_generation',
                     label: effectiveDryRun ? 'Dry Run Analysis' : 'Output & Golden Profiles',
-                    order: strictMode ? 7 : 8,
+                    order: (strictMode ? 7 : 8) + (hasLenses ? 1 : 0),
                     status: 'pending'
                 },
-                ...(!effectiveDryRun && ((config.lenses || []).length > 0 || !!selectedLens)
-                    ? [{
-                        name: 'lens_resolution',
-                        label: 'Multi-Lens Views',
-                        order: strictMode ? 8 : 9,
-                        status: 'pending' as const,
-                    }]
-                    : [])
             ]
         });
         try {
@@ -364,7 +333,7 @@ export default function StepReview({
                         ? { lens: selectedLens }
                         : {}),
                 dry_run: effectiveDryRun,
-                ...(effectiveDryRun ? { config: cleanConfig } : {}),
+                ...(effectiveDryRun ? { config: cleanConfig, ...(config.evaluation ? {ground_truth: config.evaluation} : {}) } : {}),
             });
             // Fetch final progress snapshot so all completed stages reflect accurate row counts & durations
             try {
@@ -376,13 +345,19 @@ export default function StepReview({
                 // Ignore transient errors on final snapshot
             }
             if (result.status === 'FAILED') {
+                setLiveProgress(null);
                 setError(String(result.error || 'Pipeline execution aborted or failed.'));
                 setPhase('idle');
                 return;
             }
             setRunResult(result);
+            setPreviewBase(JSON.stringify(config));
+            setPreviewOptions(currentPreviewOptions);
+            // Review is a separate user action; preview evidence stays on the server.
+            setCritiqueReport(null);
             setPhase('success');
         } catch (err: any) {
+            setLiveProgress(null);
             setError(err.message || String(err));
             setPhase('idle');
         }
@@ -455,6 +430,32 @@ export default function StepReview({
 
     return (
         <div className="space-y-6 flex flex-col">
+                <div className="flex flex-wrap gap-2 items-center text-xs">
+                <label>Saved preview run ID <input value={savedReviewId} onChange={e => setSavedReviewId(e.target.value)} className="rounded bg-gray-800 p-2 ml-2 text-white" /></label>
+                <button type="button" disabled={!savedReviewId.trim() || critiqueLoading} className="rounded border border-purple-500 p-2"
+                    onClick={async () => {
+                        setCritiqueLoading(true);
+                        try {
+                            const saved = await api.getAiReview(savedReviewId.trim());
+                            const review = saved;
+                            setCritiqueReport(null); setPreviewBase(JSON.stringify(config));
+                            const opts = review.execution_options;
+                            const mode = opts?.run_mode === 'INCR' ? 'INCREMENTAL' : 'FULL';
+                            const exact = opts?.strict || false;
+                            const iterations = opts?.max_iters || 30;
+                            const cap = opts?.max_group_size || 100000;
+                            setRunMode(mode); setStrictMode(exact); setMaxIterations(iterations); setMaxGroupSize(cap);
+                            setPreviewOptions(JSON.stringify([mode, exact, iterations, cap]));
+                            setSelectedLens(review.lens === 'default' ? '' : review.lens);
+                            setDryRun(true);
+                            setRunResult({run_id: review.run_id, draft_hash: review.draft_hash, lens:review.lens, profile_validation:review.profile_validation, review, dry_run_summary: {total_entities: review.telemetry.total_entities}});
+                            setPhase('success');
+                        } catch (err) { toast('error', 'Unable to load review', err instanceof Error ? err.message : String(err)); }
+                        finally { setCritiqueLoading(false); }
+                    }}>Load saved review</button>
+
+            </div>
+            <EvaluationConfigEditor value={config.evaluation} onChange={onUpdateConfig ? next => onUpdateConfig({...config, evaluation:next}) : undefined} />
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-700 pb-4">
                 <div>
                     <h2 className="text-xl font-semibold text-white">Review & Run Pipeline</h2>
@@ -535,7 +536,7 @@ export default function StepReview({
             )}
 
             {/* LIVE & COMPLETED PIPELINE EXECUTION PROGRESS PANEL */}
-            {(loading || success || (liveProgress && liveProgress.status !== 'IDLE')) && liveProgress && (
+            {(loading || success) && liveProgress && (
                 <div className={`border rounded-xl p-5 space-y-4 shadow-lg transition-all ${
                     success
                         ? 'bg-emerald-950/20 border-emerald-500/40'
@@ -569,7 +570,7 @@ export default function StepReview({
                                 </div>
                                 <p className={`text-xs mt-0.5 ${success ? 'text-emerald-300' : 'text-blue-300'}`}>
                                     {success
-                                        ? `Finished in ${Math.round(runResult?.duration_seconds ?? liveProgress.elapsed_seconds ?? 0)}s — All stages completed`
+                                        ? `Finished in ${Number((runResult?.duration_seconds ?? liveProgress.elapsed_seconds ?? 0).toFixed(2))}s — All stages completed`
                                         : (liveProgress.current_detail || 'Processing stage...')}
                                 </p>
                             </div>
@@ -578,7 +579,7 @@ export default function StepReview({
                         <div className="flex items-center gap-4 text-xs font-mono">
                             <span className="px-2.5 py-1 rounded bg-gray-800 border border-gray-700 text-gray-300 flex items-center gap-1.5">
                                 <Clock className={`w-3.5 h-3.5 ${success ? 'text-emerald-400' : 'text-blue-400'}`} />
-                                {Math.round(liveProgress.elapsed_seconds || runResult?.duration_seconds || 0)}s elapsed
+                                {Number((liveProgress.elapsed_seconds || runResult?.duration_seconds || 0).toFixed(2))}s elapsed
                             </span>
                             <span className={`font-bold ${success ? 'text-emerald-400' : 'text-blue-400'}`}>
                                 Stage {Math.min(completedStages, totalStages)} of {totalStages} ({progressPercent}%)
@@ -627,7 +628,7 @@ export default function StepReview({
                                         </div>
                                         {isDone && st.duration_seconds !== null && st.duration_seconds !== undefined && (
                                             <span className="font-mono text-[11px] text-emerald-400 shrink-0">
-                                                {st.duration_seconds}s
+                                                {Number(st.duration_seconds.toFixed(3))}s
                                             </span>
                                         )}
                                     </div>
@@ -752,7 +753,7 @@ export default function StepReview({
                                     <div className="flex flex-wrap gap-3 pt-1">
                                         <button
                                             type="button"
-                                            disabled={critiqueLoading}
+                                            disabled={critiqueLoading || previewBase !== JSON.stringify(config) || previewOptions !== currentPreviewOptions}
                                             onClick={handleCritiqueDryRun}
                                             title="Inspects zero-PII Dry Run graph metrics (cluster sizes, singletons, zero-edge rules, supernodes) and suggests one-click draft fixes"
                                             className={`${btnOutlineClass} border-purple-500/60 text-purple-300 hover:bg-purple-950/40`}
@@ -811,103 +812,26 @@ export default function StepReview({
                                     </div>
 
                                     {/* AI Dry-Run Graph Critique Scorecard & One-Click Patches */}
+                                    {runResult.review?.evaluation_acceptance && <div className="rounded border border-slate-600 p-3 text-xs space-y-2">
+                                        <p className="font-semibold">Labeled evaluation: {runResult.review.evaluation_acceptance.status.replace(/_/g,' ')}</p>
+                                        <p>{runResult.review.evaluation?.evaluated_entities ?? 0} labeled records evaluated · precision {runResult.review.evaluation?.precision ?? 'N/A'} · recall {runResult.review.evaluation?.recall ?? 'N/A'}</p>
+                                        {runResult.review.evaluation_acceptance.reasons.map((reason: string) => <p key={reason}>{reason}</p>)}
+                                        <p>Accuracy measurements cover the labeled population only. Graph completion does not imply labeled acceptance passed.</p>
+                                    </div>}
+                                    <ProfilePreviewPanel key={`profiles-${runResult.run_id}`} config={config} runId={runResult.run_id} fingerprint={runResult.draft_hash}
+                                        lens={selectedLens && selectedLens !== '__none__' ? selectedLens : 'default'}
+                                        initialValidation={runResult.profile_validation || runResult.review?.profile_validation}
+                                        stale={previewBase !== JSON.stringify(config) || previewOptions !== currentPreviewOptions || (runResult.review?.lens || runResult.lens || 'default') !== (selectedLens && selectedLens !== '__none__' ? selectedLens : 'default')} />
                                     {!critiqueReport && !critiqueLoading && (
                                         <p className="text-[11px] text-gray-400">
-                                            <strong className="text-purple-300">Analyze &amp; Refine with AI (Beta)</strong> inspects aggregate Dry Run graph metrics (cluster sizes, singletons, zero-edge rules &amp; supernodes — zero raw PII) and recommends one-click draft fixes before you commit.
+                                            <strong className="text-purple-300">Analyze &amp; Refine with AI (Beta)</strong> runs only when you click it. It inspects aggregate Dry Run graph metrics (cluster sizes, singletons, zero-edge rules &amp; supernodes — zero raw PII) and recommends one-click draft fixes before you commit.
                                         </p>
                                     )}
-                                    {critiqueReport && (
-                                        <div className="mt-3 p-4 rounded-xl bg-gray-900/80 border border-purple-500/40 space-y-3 text-xs">
-                                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-2.5">
-                                                <div className="flex items-center gap-2">
-                                                    <Bot className="w-4 h-4 text-purple-400" />
-                                                    <span className="font-semibold text-white">AI Graph Critique</span>
-                                                    <span className="px-1.5 py-0.2 rounded bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[10px] font-semibold uppercase">
-                                                        Beta
-                                                    </span>
-                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase border ${
-                                                        critiqueReport.health === 'healthy'
-                                                            ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40'
-                                                            : critiqueReport.health === 'over_merged_risk'
-                                                            ? 'bg-rose-950/70 text-rose-300 border-rose-500/40'
-                                                            : 'bg-amber-950/70 text-amber-300 border-amber-500/40'
-                                                    }`}>
-                                                        {critiqueReport.health.replace(/_/g, ' ')}
-                                                    </span>
-                                                    <span className="text-[10px] font-mono text-gray-400">
-                                                        {critiqueReport.provider}:{critiqueReport.model} · Zero-PII
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center gap-3 font-mono text-[11px] text-gray-400">
-                                                    <span>Singletons: {critiqueReport.telemetry.singleton_pct}%</span>
-                                                    <span>Max Cluster: {critiqueReport.telemetry.max_cluster_size.toLocaleString()}</span>
-                                                </div>
-                                            </div>
+                                    {critiqueReport && <AIReviewPanel key={critiqueReport.run_id}
+                                        report={critiqueReport} config={config}
+                                        stale={previewBase !== JSON.stringify(config) || previewOptions !== currentPreviewOptions || critiqueReport.lens !== (selectedLens && selectedLens !== '__none__' ? selectedLens : 'default')}
+                                        onUpdate={onUpdateConfig} onPreview={() => handleRun(true)} />}
 
-                                            <p className="text-gray-200 leading-relaxed">{critiqueReport.headline}</p>
-
-                                            {critiqueReport.findings.length > 0 && (
-                                                <div className="space-y-2">
-                                                    {critiqueReport.findings.map((f, idx) => {
-                                                        const pKey = `${idx}:${f.patch?.action || ''}:${f.patch?.target || ''}`;
-                                                        const isApplied = appliedPatches.has(pKey);
-                                                        return (
-                                                            <div
-                                                                key={pKey}
-                                                                className="p-2.5 rounded-lg bg-gray-950/70 border border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
-                                                            >
-                                                                <div className="space-y-0.5 min-w-0">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                                                                            f.severity === 'high'
-                                                                                ? 'bg-rose-500/20 text-rose-300'
-                                                                                : f.severity === 'medium'
-                                                                                ? 'bg-amber-500/20 text-amber-300'
-                                                                                : 'bg-blue-500/20 text-blue-300'
-                                                                        }`}>
-                                                                            {f.severity}
-                                                                        </span>
-                                                                        <span className="font-semibold text-gray-100">{f.title}</span>
-                                                                        <span className="font-mono text-[10px] text-gray-500">{f.metric}</span>
-                                                                    </div>
-                                                                    <p className="text-gray-400 leading-relaxed">{f.detail}</p>
-                                                                </div>
-                                                                {f.patch && onUpdateConfig && (
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={isApplied}
-                                                                        onClick={() => applyCritiquePatch(pKey, f.patch!)}
-                                                                        className={`shrink-0 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border transition-colors ${
-                                                                            isApplied
-                                                                                ? 'bg-emerald-950/60 border-emerald-600/50 text-emerald-300'
-                                                                                : 'bg-purple-600/20 border-purple-500/50 text-purple-200 hover:bg-purple-600/35'
-                                                                        }`}
-                                                                    >
-                                                                        {isApplied ? 'Applied ✓' : f.patch.label}
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-
-                                            {appliedPatches.size > 0 && (
-                                                <div className="pt-1 flex items-center justify-between gap-2 border-t border-gray-800">
-                                                    <span className="text-emerald-300">
-                                                        {appliedPatches.size} patch(es) applied to draft config.
-                                                    </span>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRun(true)}
-                                                        className="px-3 py-1 rounded-md bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs"
-                                                    >
-                                                        Re-Run Dry Run →
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-3">
@@ -925,12 +849,14 @@ export default function StepReview({
                                             </span>
                                         </div>
                                         <div className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
-                                            <span className="text-gray-400 block">Clusters Impacted</span>
+                                            <span className="text-gray-400 block">Clusters Resolved</span>
                                             <span className="text-lg font-mono font-bold text-emerald-400">
-                                                {(runResult.clusters_impacted ?? 0).toLocaleString()}
+                                                {(runResult.clusters_resolved ?? runResult.clusters_impacted ?? 0).toLocaleString()}
                                             </span>
+                                            {runResult.clusters_changed !== undefined && <p className="text-xs text-gray-400 mt-1" title="Distinct primary cluster IDs affected by record additions, removals or changed memberships; includes retired IDs.">{runResult.clusters_changed.toLocaleString()} cluster IDs changed</p>}
                                         </div>
                                     </div>
+                                    {runResult.grouped_output_counts && Object.keys(runResult.grouped_output_counts).length > 0 && <p className="text-xs">Grouped state outputs: {Object.entries(runResult.grouped_output_counts).map(([id, count]) => `${id}: ${count} rows`).join(' · ')}</p>}
                                     <div className="flex flex-wrap items-center gap-3 pt-1">
                                         <button
                                             className={btnClass}

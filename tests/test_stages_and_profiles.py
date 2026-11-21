@@ -516,30 +516,34 @@ def databricks_builder():
 class TestColumnSelectionRecency:
     """Tests for RECENCY survivorship strategy across dialects."""
 
-    def test_duckdb_uses_arg_max(self, duckdb_builder):
+    def test_duckdb_uses_stable_arg_min(self, duckdb_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = duckdb_builder._build_column_selection(rule)
-        assert "arg_max" in result
+        assert "arg_min" in result
+        assert "source_record_key" in result
         assert "email" in result
         assert "recency_ts" in result
 
-    def test_snowflake_uses_max_by(self, snowflake_builder):
+    def test_snowflake_uses_ordered_array(self, snowflake_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = snowflake_builder._build_column_selection(rule)
-        assert "MAX_BY" in result
+        assert "ARRAY_AGG" in result
+        assert "source_record_key" in result
         assert "email" in result
 
     def test_databricks_uses_max_by(self, databricks_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = databricks_builder._build_column_selection(rule)
-        assert "MAX_BY" in result
+        assert "MIN_BY" in result
+        assert "source_record_key" in result
         assert "email" in result
 
     def test_bigquery_uses_array_agg(self, bigquery_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = bigquery_builder._build_column_selection(rule)
         assert "ARRAY_AGG" in result
-        assert "ORDER BY recency_ts DESC" in result
+        assert "COALESCE(recency_ts" in result
+        assert "source_record_key ASC" in result
         assert "SAFE_OFFSET(0)" in result
 
 
@@ -570,7 +574,8 @@ class TestColumnSelectionPriority:
             "source_priority_list": '["crm", "web"]',
         }
         result = snowflake_builder._build_column_selection(rule)
-        assert "MIN_BY" in result
+        assert "ARRAY_AGG" in result
+        assert "source_record_key" in result
         assert "CASE" in result
 
     def test_databricks_uses_min_by(self, databricks_builder):

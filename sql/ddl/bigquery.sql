@@ -52,8 +52,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.identifier_mapping (
   table_id STRING,
   identifier_type STRING,
   identifier_value_expr STRING,
-  is_hashed BOOL
-);
+  is_hashed BOOL,
+  source_is_hashed BOOL DEFAULT FALSE);
 
 CREATE TABLE IF NOT EXISTS idr_meta.entity_attribute_mapping (
   table_id STRING,
@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.survivorship_rule (
   attribute_name STRING,
   strategy STRING,
   source_priority_list STRING,
-  recency_field STRING
+  recency_field STRING,
+  row_group STRING
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.fuzzy_rule (
@@ -238,7 +239,10 @@ CREATE TABLE IF NOT EXISTS idr_out.run_history (
   watermarks_json STRING,
   error_message STRING,
   error_stage STRING,
-  created_at TIMESTAMP
+  created_at TIMESTAMP,
+  duration_seconds_precise FLOAT64,
+  clusters_changed INT64,
+  matching_config_hash STRING
 );
 
 CREATE TABLE IF NOT EXISTS idr_out.stage_metrics (
@@ -250,7 +254,8 @@ CREATE TABLE IF NOT EXISTS idr_out.stage_metrics (
   duration_seconds INT64,
   rows_in INT64,
   rows_out INT64,
-  notes STRING
+  notes STRING,
+  duration_seconds_precise FLOAT64
 );
 
 -- ============================================
@@ -368,3 +373,12 @@ CREATE TABLE IF NOT EXISTS idr_out.resolved_id_crosswalk (
   updated_at TIMESTAMP,
   PRIMARY KEY (previous_resolved_id, current_resolved_id) NOT ENFORCED
 );
+
+
+-- Aggregate review reports; record-level comparison inputs remain in expiring scratch schemas.
+CREATE TABLE IF NOT EXISTS idr_out.ai_review_report (
+  run_id STRING, owner_key STRING, report_json STRING,
+  scratch_token STRING, input_expires_at STRING, expires_at STRING
+);
+
+CREATE TABLE IF NOT EXISTS idr_meta.config_extension (extension_key STRING, value_json STRING);

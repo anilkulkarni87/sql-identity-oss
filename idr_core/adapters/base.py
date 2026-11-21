@@ -181,6 +181,15 @@ class IDRAdapter(ABC):
             flags=re.IGNORECASE,
         )
 
+    supports_scan_cost_cap: bool = False
+
+    def query_budget(self, seconds: float, max_bytes_billed: Optional[int] = None):
+        """Context manager enforcing a wall-clock query budget (and optional scan cap)."""
+        raise ValueError(
+            "Data profile previews require an adapter with an enforced query budget. "
+            "Metadata validation remains available."
+        )
+
     def close(self) -> None:
         """
         Close database connection. Override if cleanup needed.

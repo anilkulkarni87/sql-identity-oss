@@ -487,10 +487,11 @@ def test_phase3_dry_run_critique_telemetry_and_patches(adapter):
     """
     Verify Phase 3 closed-loop Dry Run critique:
     - Collects zero-PII cluster size histogram, per-source singleton rates, and zero-edge rules.
-    - Proposes actionable one-click patches (remove unused rule, exclude high-singleton source,
-      raise permissive fuzzy threshold).
+    - Offers draft-bound comparisons without excluding sources based only on singletons.
     """
     from idr_core.ai_assistant import critique_dry_run_with_ai
+    from idr_core.ai_config import AIConfigContext
+    from idr_core.ai_review import AIReviewService
 
     adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
     adapter.execute("CREATE TABLE raw.customers (id VARCHAR, email VARCHAR)")
@@ -527,40 +528,33 @@ def test_phase3_dry_run_critique_telemetry_and_patches(adapter):
             {"id": "r_order", "match_keys": ["order_id"], "canonicalize": "EXACT"},
         ],
         "fuzzy_rules": [
-            {"id": "f_name", "name": "Name Fuzzy", "blocking_key": "x", "score_expr": "1.0", "threshold": 0.80}
+            {"id": "f_name", "name": "Name Fuzzy", "blocking_key": "SUBSTR(email,1,2)", "score_expr": "jaro_winkler_similarity(<a>.email,<b>.email)", "threshold": 0.80}
         ],
     }
-    for stmt in config_to_sql(cfg, dialect="duckdb"):
-        adapter.execute(stmt)
-
-    dry_res = IDRRunner(adapter).run(RunConfig(run_mode="FULL", dry_run=True))
-    assert dry_res.status == "DRY_RUN_COMPLETE"
-
-    critique = critique_dry_run_with_ai(
-        adapter=adapter,
-        draft_config=cfg,
-        dry_run_summary={},
-        warnings=dry_res.warnings,
-    )
+    cfg["ai_assistance"] = AIConfigContext(fuzzy=True).model_dump()
+    preview = AIReviewService(adapter).preview(cfg)
+    critique = critique_dry_run_with_ai(adapter=adapter, draft_config=cfg, run_id=preview["run_id"])
     assert critique["pii_masked"] is True
-    assert critique["health"] in ("needs_tuning", "over_merged_risk")
+    assert critique["health"] in ("needs_review", "high_risk")
     assert critique["telemetry"]["total_entities"] == 45
     assert any(z["identifier_type"] == "order_id" for z in critique["telemetry"]["zero_edge_rules"])
 
     actions = {f["patch"]["action"] for f in critique["findings"] if f.get("patch")}
     assert "remove_rule" in actions
-    assert "remove_source" in actions
+    assert "remove_source" not in actions  # Singletons alone do not justify excluding a source.
     assert "raise_fuzzy_threshold" in actions
 
 
-def test_critique_pinpoints_mega_cluster_culprit_and_caps_singleton_pct(adapter):
+def test_critique_identifies_large_cluster_contributors_and_preserves_singleton_pct(adapter):
     """
-    Verify mega-cluster culprit detection & singleton_pct rounding fix:
+    Verify large-cluster contributor evidence and accurate singleton percentages:
     - When 120 unrelated rows merge via a shared dimension key ('product_id') alongside 1,500 singletons,
       singleton_pct is capped at 99.9% (never falsely 100.0%).
-    - The HIGH mega-cluster finding pinpoints 'product_id' and offers a 1-click remove_rule patch.
+    - Contributor evidence offers a cap comparison without asserting causality.
     """
     from idr_core.ai_assistant import critique_dry_run_with_ai
+    from idr_core.ai_config import AIConfigContext
+    from idr_core.ai_review import AIReviewService
 
     adapter.execute("CREATE SCHEMA IF NOT EXISTS raw")
     adapter.execute("CREATE TABLE raw.orders (id VARCHAR, product_id VARCHAR)")
@@ -582,20 +576,17 @@ def test_critique_pinpoints_mega_cluster_culprit_and_caps_singleton_pct(adapter)
         ],
         "rules": [{"id": "r_prod", "match_keys": ["product_id"], "canonicalize": "EXACT"}],
     }
-    for stmt in config_to_sql(cfg, dialect="duckdb"):
-        adapter.execute(stmt)
-
-    dry_res = IDRRunner(adapter).run(RunConfig(run_mode="FULL", dry_run=True))
-    assert dry_res.status == "DRY_RUN_COMPLETE"
-
-    critique = critique_dry_run_with_ai(adapter=adapter, draft_config=cfg, dry_run_summary={})
-    assert critique["health"] == "over_merged_risk"
-    assert critique["telemetry"]["singleton_pct"] == 99.9
-    assert critique["telemetry"]["mega_cluster_culprits"][0]["identifier_type"] == "product_id"
+    cfg["ai_assistance"] = AIConfigContext(allowed_matching_identifiers=["product_id"]).model_dump()
+    preview = AIReviewService(adapter).preview(cfg)
+    critique = critique_dry_run_with_ai(adapter=adapter, draft_config=cfg, run_id=preview["run_id"])
+    assert critique["health"] == "high_risk"
+    assert 99 < critique["telemetry"]["singleton_pct"] < 100
+    assert critique["telemetry"]["mega_cluster_contributors"][0]["identifier_type"] == "product_id"
     high_finding = next(f for f in critique["findings"] if f["severity"] == "high")
     assert "product_id" in high_finding["detail"]
-    assert high_finding["patch"]["action"] == "remove_rule"
-    assert high_finding["patch"]["target"] == "product_id"
+    # Preserve a usable proposal: compare a cap change rather than delete the last rule.
+    assert high_finding["patch"]["action"] == "set_group_limit"
+    assert high_finding["patch"]["target"] == "r_prod"
 
 
 def test_dimension_fk_guard_blocks_product_and_facility_keys_generically(adapter):

@@ -15,12 +15,27 @@ End-to-end pipeline:
 
 from __future__ import annotations
 
+import copy
 import json
 import re
+import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
+from .ai_config import (
+    AIConfigContext,
+    candidate_errors,
+    config_diff,
+    draft_hash,
+    enforce_policy,
+    local_goal_objectives,
+    model_evidence,
+    model_goal,
+    policy_errors,
+    restore_refs,
+    safe_name,
+)
 from .canonicalizers import list_canonicalizers, validate_canonicalize_spec
 from .config import (
     validate_config,
@@ -35,9 +50,8 @@ from .config_schema import (
     ExplanationBundle,
     ExplanationItem,
     GeneratedIDRPlan,
-    IDRConfigSpec,
     IdentifierMappingSpec,
-    LensSpec,
+    IDRConfigSpec,
     PassAMappingOutput,
     PassATableDecision,
     PassBRuleOutput,
@@ -52,9 +66,29 @@ from .survivorship import is_registered_survivorship_strategy, list_survivorship
 
 _SAFE_COL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 _DISALLOWED_ID_TYPES = {
-    "string", "varchar", "text", "char", "int", "integer", "bigint", "smallint",
-    "float", "double", "decimal", "numeric", "boolean", "bool", "timestamp",
-    "date", "datetime", "json", "object", "array", "null", "none", "unknown",
+    "string",
+    "varchar",
+    "text",
+    "char",
+    "int",
+    "integer",
+    "bigint",
+    "smallint",
+    "float",
+    "double",
+    "decimal",
+    "numeric",
+    "boolean",
+    "bool",
+    "timestamp",
+    "date",
+    "datetime",
+    "json",
+    "object",
+    "array",
+    "null",
+    "none",
+    "unknown",
 }
 
 
@@ -68,8 +102,10 @@ def _is_valid_watermark_col(tprof: SafeTableProfile, col_name: str) -> bool:
         return False
     for c in tprof.columns:
         if c.name.lower() == cl:
-            return c.hint_role == "watermark" or c.date_ts_rate >= 0.4 or any(
-                t in c.declared_type for t in ("timestamp", "date", "time")
+            return (
+                c.hint_role == "watermark"
+                or c.date_ts_rate >= 0.4
+                or any(t in c.declared_type for t in ("timestamp", "date", "time"))
             )
     return False
 
@@ -122,23 +158,56 @@ class AIRuleGenerator:
         sample_size: int = 2000,
         verify_sql: bool = True,
         on_progress: Optional[Any] = None,
+        context: Optional[AIConfigContext] = None,
+        current_config: Optional[Dict[str, Any]] = None,
+        mode: str = "config",
+        base_draft_hash: Optional[str] = None,
     ) -> GeneratedIDRPlan:
         """
         Run the full profiling -> mapping -> rule synthesis -> validation pipeline.
         Never mutates `idr_meta` tables.
         """
+
         def _emit(stage: str, step: int, message: str) -> None:
             if callable(on_progress):
                 try:
-                    on_progress({"stage": stage, "step": step, "total_steps": 5, "message": message})
+                    on_progress(
+                        {"stage": stage, "step": step, "total_steps": 5, "message": message}
+                    )
                 except Exception:
                     pass
 
+        from .profiler import is_system_table
+
+        if mode == "rules" and current_config:
+            tables = [source["table"] for source in current_config.get("sources", [])]
+        tables = [t for t in tables if not is_system_table(t)]
+        if len(tables) > 50 or not 1 <= sample_size <= 10000:
+            raise ValueError("Select at most 50 source tables and sample_size between 1 and 10000")
+        self.context = context or AIConfigContext()
+        self.current_config = copy.deepcopy(current_config or {})
+        self.mode = mode
+        self.model_excluded_tables = set()
+        self.verify_sql = verify_sql
+        if mode not in ("config", "rules"):
+            raise ValueError("mode must be config or rules")
+        if base_draft_hash and base_draft_hash != draft_hash(self.current_config):
+            raise ValueError("Stale draft; regenerate against the current configuration")
+        if mode == "rules" and not current_config:
+            raise ValueError("Rules generation requires the current config")
+        self.context = self.context.model_copy(
+            update={
+                "objectives": sorted(set(self.context.objectives + local_goal_objectives(goal)))
+            }
+        )
+        goal = model_goal(self.context)
         if not tables:
             return GeneratedIDRPlan(
                 generation_mode="deterministic_fallback",
                 provider=self.client.config.provider,
-                model=self.client.config.resolved_model() if self.client.config.is_enabled else "profiler",
+                model=self.client.config.resolved_model()
+                if self.client.config.is_enabled
+                else "profiler",
                 pii_masked=True,
                 suggested_config={},
                 validation_report=ValidationReport(
@@ -154,13 +223,19 @@ class AIRuleGenerator:
             f"Profiling {len(tables)} warehouse table(s) — schema, sample shapes & full-table stats…",
         )
         schema_profile = self.profiler.profile_tables_safe(
-            tables, sample_size=sample_size, compute_overlap=True, on_progress=on_progress
+            tables,
+            sample_size=sample_size,
+            compute_overlap=True,
+            on_progress=on_progress,
+            grain=self.context.grain,
         )
         if not schema_profile.tables:
             return GeneratedIDRPlan(
                 generation_mode="deterministic_fallback",
                 provider=self.client.config.provider,
-                model=self.client.config.resolved_model() if self.client.config.is_enabled else "profiler",
+                model=self.client.config.resolved_model()
+                if self.client.config.is_enabled
+                else "profiler",
                 pii_masked=True,
                 suggested_config={},
                 validation_report=ValidationReport(
@@ -184,19 +259,36 @@ class AIRuleGenerator:
 
         try:
             # Stage 2A: Pass A — Chunked Table & Column Metadata Mapping
-            pass_a_decisions, repairs_a, warnings_a = self._run_pass_a(
-                schema_profile, goal, on_progress=on_progress
-            )
-            total_repairs += repairs_a
-            warnings.extend(warnings_a)
-
-            sources, table_explanations = self._materialize_sources(pass_a_decisions, schema_profile)
+            if self.mode == "rules":
+                sources = [
+                    SourceSpec.model_validate(s) for s in self.current_config.get("sources", [])
+                ]
+                table_explanations = []
+            else:
+                pass_a_decisions, repairs_a, warnings_a = self._run_pass_a(
+                    schema_profile, goal, on_progress=on_progress
+                )
+                self.model_excluded_tables = {
+                    decision.table for decision in pass_a_decisions if not decision.include_in_idr
+                }
+                total_repairs += repairs_a
+                warnings.extend(warnings_a)
+                sources, table_explanations = self._materialize_sources(
+                    pass_a_decisions, schema_profile
+                )
             if not sources:
-                return self._build_deterministic_fallback(
+                return self._finalize(
+                    GeneratedIDRPlan(
+                        generation_mode="ai_validated",
+                        provider=self.client.config.provider,
+                        model=self.client.config.resolved_model(),
+                        suggested_config={"sources": [], "rules": []},
+                        validation_report=ValidationReport(
+                            valid=False, errors=["No active identity sources proposed."]
+                        ),
+                        profile_summary=schema_profile.to_summary_dict(),
+                    ),
                     schema_profile,
-                    tables,
-                    sample_size=sample_size,
-                    reason="AI mapped 0 active identity sources; fell back to deterministic profiler.",
                 )
 
             # Stage 2B: Pass B — Cross-Table Rules, Fuzzy Templates, Survivorship & Lenses
@@ -205,9 +297,7 @@ class AIRuleGenerator:
                 4,
                 f"AI Pass B: Synthesizing matching rules, survivorship & lenses across {len(sources)} source(s)…",
             )
-            pass_b_out, repairs_b, warnings_b = self._run_pass_b(
-                sources, schema_profile, goal
-            )
+            pass_b_out, repairs_b, warnings_b = self._run_pass_b(sources, schema_profile, goal)
             total_repairs += repairs_b
             warnings.extend(warnings_b)
 
@@ -248,22 +338,25 @@ class AIRuleGenerator:
                 )
 
             mode = "ai_repaired" if total_repairs > 0 else "ai_validated"
-            return GeneratedIDRPlan(
-                generation_mode=mode,
-                provider=self.client.config.provider,
-                model=self.client.config.resolved_model(),
-                pii_masked=True,  # Zero-PII by construction
-                suggested_config=config_spec.to_idr_config_dict(),
-                explanations=explanations,
-                validation_report=val_report,
-                profile_summary=schema_profile.to_summary_dict(),
+            return self._finalize(
+                GeneratedIDRPlan(
+                    generation_mode=mode,
+                    provider=self.client.config.provider,
+                    model=self.client.config.resolved_model(),
+                    pii_masked=True,  # Zero-PII by construction
+                    suggested_config=config_spec.to_idr_config_dict(),
+                    explanations=explanations,
+                    validation_report=val_report,
+                    profile_summary=schema_profile.to_summary_dict(),
+                ),
+                schema_profile,
             )
-        except Exception as exc:
+        except Exception:
             return self._build_deterministic_fallback(
                 schema_profile,
                 tables,
                 sample_size=sample_size,
-                reason=f"AI generation unavailable ({exc}); fell back to deterministic profiler.",
+                reason="AI generation unavailable; fell back to deterministic profiler.",
             )
 
     # =========================================================================
@@ -281,7 +374,9 @@ class AIRuleGenerator:
         total_repairs = 0
         warnings: List[str] = []
         table_map = schema_profile.table_map()
-        total_batches = max(1, (len(schema_profile.tables) + self.batch_size - 1) // self.batch_size)
+        total_batches = max(
+            1, (len(schema_profile.tables) + self.batch_size - 1) // self.batch_size
+        )
 
         for i in range(0, len(schema_profile.tables), self.batch_size):
             batch_num = i // self.batch_size + 1
@@ -298,7 +393,8 @@ class AIRuleGenerator:
                 except Exception:
                     pass
             batch = schema_profile.tables[i : i + self.batch_size]
-            batch_payload = [t.to_prompt_dict() for t in batch]
+            evidence, refs = model_evidence(schema_profile)
+            batch_payload = evidence["tables"][i : i + self.batch_size]
             batch_fqns = {t.table_fqn for t in batch}
 
             system_msg = (
@@ -310,7 +406,7 @@ class AIRuleGenerator:
                 "and confirm or refine them based on column names, stats, and the user's goal.\n"
                 "3. Exclude non-identity lookup/catalog tables (`table_role == REFERENCE_LOOKUP`, include_in_idr=false) that have no person/account identifiers.\n"
                 "4. Use consistent lowercase snake_case semantic identifier types across tables (e.g., email, phone, customer_id, order_id, loyalty, device_id) — NEVER SQL data types like 'string'. When a table's `entity_key` ALSO has a `hint_identifier_type` (e.g., `orders.order_id` linking to `shipments.order_id`), include it in `identifiers` as well as `entity_key`.\n"
-                "5. Leave `attributes` as an empty list [] unless you need to rename a specific profile attribute; passive non-key/non-identifier columns are mapped automatically for MASTER_ENTITY and SUB_ENTITY tables (skipped for EVENT_FACT tables to keep golden profiles clean).\n"
+                "5. Within each table map each semantic identifier type once. If several columns qualify, choose the primary column and set needs_review=true. Leave `attributes` as an empty list [] unless you need to rename a specific profile attribute; passive non-key/non-identifier columns are mapped automatically for MASTER_ENTITY and SUB_ENTITY tables (skipped for EVENT_FACT tables to keep golden profiles clean).\n"
                 "6. Set needs_review=true and add concise risks if a key has duplicates/nulls, or if an identifier has high fanout (max_freq >= 5) or high null_rate (> 0.5).\n"
                 "Return JSON strictly matching the schema."
             )
@@ -333,15 +429,15 @@ class AIRuleGenerator:
                     temperature=0.0,
                 )
                 try:
-                    parsed = PassAMappingOutput.model_validate(raw_dict)
-                except Exception as val_exc:
+                    parsed = PassAMappingOutput.model_validate(restore_refs(raw_dict, refs))
+                except Exception:
                     if attempt < self.max_repairs:
                         total_repairs += 1
                         messages.append({"role": "assistant", "content": json.dumps(raw_dict)})
                         messages.append(
                             {
                                 "role": "user",
-                                "content": f"Your JSON failed schema validation: {val_exc}\nFix the JSON to strictly match the schema.",
+                                "content": "Your JSON failed schema validation. Fix it to strictly match the provided schema.",
                             }
                         )
                         continue
@@ -358,7 +454,7 @@ class AIRuleGenerator:
                             "role": "user",
                             "content": (
                                 "Fix these validation errors using ONLY exact column names from the profile:\n- "
-                                + "\n- ".join(errors)
+                                + "Invalid or unknown mapping references; use only the supplied profile and valid temporal watermarks."
                             ),
                         }
                     )
@@ -382,17 +478,19 @@ class AIRuleGenerator:
     ) -> List[str]:
         errors: List[str] = []
         for dec in decisions:
-            if dec.table not in table_map:
-                errors.append(
-                    f"Unknown table '{dec.table}'. Valid tables: {sorted(batch_fqns)}"
-                )
+            if dec.table not in batch_fqns:
+                errors.append(f"Unknown table '{dec.table}'. Valid tables: {sorted(batch_fqns)}")
                 continue
             if not dec.include_in_idr:
                 continue
             valid_cols = table_map[dec.table].column_names()
             if not dec.entity_key:
-                errors.append(f"{dec.table}: missing entity_key (valid columns: {sorted(valid_cols)})")
-            elif dec.entity_key.upper() != "AUTO" and not _extract_column_refs(dec.entity_key, valid_cols):
+                errors.append(
+                    f"{dec.table}: missing entity_key (valid columns: {sorted(valid_cols)})"
+                )
+            elif dec.entity_key.upper() != "AUTO" and not _extract_column_refs(
+                dec.entity_key, valid_cols
+            ):
                 errors.append(
                     f"{dec.table}: entity_key '{dec.entity_key}' not in columns {sorted(valid_cols)}"
                 )
@@ -438,10 +536,15 @@ class AIRuleGenerator:
                     and not _extract_column_refs(dec.entity_key, valid_cols)
                 ):
                     dec.entity_key = tprof.hint_entity_key or "AUTO"
-                if dec.watermark_column and not _is_valid_watermark_col(tprof, dec.watermark_column):
+                if dec.watermark_column and not _is_valid_watermark_col(
+                    tprof, dec.watermark_column
+                ):
                     dec.watermark_column = (
                         tprof.hint_watermark
-                        if (tprof.hint_watermark and _is_valid_watermark_col(tprof, tprof.hint_watermark))
+                        if (
+                            tprof.hint_watermark
+                            and _is_valid_watermark_col(tprof, tprof.hint_watermark)
+                        )
                         else None
                     )
                 dec.identifiers = [
@@ -457,6 +560,56 @@ class AIRuleGenerator:
                     dec.include_in_idr = False
             cleaned.append(dec)
         return cleaned
+
+    @staticmethod
+    def _unique_identifier_mappings(
+        mappings: List[IdentifierMappingSpec],
+        table: str,
+        explanations: List[ExplanationItem],
+    ) -> List[IdentifierMappingSpec]:
+        """The metadata key is (source, type), including for profiler backfills.
+
+        Preserve the first proposed mapping, and expose competing expressions for
+        review instead of silently overwriting them or emitting an invalid config.
+        """
+        grouped: Dict[str, List[IdentifierMappingSpec]] = {}
+        for mapping in mappings:
+            kind = mapping.type.strip().lower()
+            if kind and kind not in _DISALLOWED_ID_TYPES:
+                grouped.setdefault(kind, []).append(mapping)
+        unique = []
+        for kind, candidates in grouped.items():
+            selected = candidates[0]
+            unique.append(
+                IdentifierMappingSpec(
+                    type=kind,
+                    expr=selected.expr.strip(),
+                    is_hashed=selected.is_hashed,
+                )
+            )
+            if len(candidates) > 1:
+                alternatives = list(dict.fromkeys(c.expr.strip() for c in candidates))
+                ambiguous = len(alternatives) > 1
+                explanations.append(
+                    ExplanationItem(
+                        target=f"{table}:{kind}",
+                        summary=(
+                            f"Kept '{selected.expr.strip()}' as the '{kind}' mapping; "
+                            f"the source supports one mapping per identifier type."
+                        ),
+                        evidence=[f"candidate_expressions={alternatives}"],
+                        risks=(
+                            [
+                                "Multiple expressions suggest this identifier type; confirm the selected mapping."
+                            ]
+                            if ambiguous
+                            else []
+                        ),
+                        confidence="medium" if ambiguous else "high",
+                        needs_review=ambiguous,
+                    )
+                )
+        return unique
 
     def _materialize_sources(
         self,
@@ -497,19 +650,8 @@ class AIRuleGenerator:
             seen_ids.add(src_id)
 
             # Deduplicate identifiers by type per table
-            uniq_ids: List[IdentifierMappingSpec] = []
-            seen_types: Set[str] = set()
-            for ident in dec.identifiers:
-                itype = ident.type.strip().lower()
-                if itype and itype not in _DISALLOWED_ID_TYPES and itype not in seen_types:
-                    seen_types.add(itype)
-                    uniq_ids.append(
-                        IdentifierMappingSpec(
-                            type=itype,
-                            expr=ident.expr.strip(),
-                            is_hashed=ident.is_hashed,
-                        )
-                    )
+            uniq_ids = self._unique_identifier_mappings(dec.identifiers, dec.table, explanations)
+            seen_types = {mapping.type for mapping in uniq_ids}
             # If the LLM dropped high-confidence deterministic identifier columns (including PKs promoted
             # via cross-table overlap, e.g. customers.customer_id or orders.order_id), merge them back in
             # so cross-table linkages are preserved.
@@ -546,7 +688,14 @@ class AIRuleGenerator:
                     seen_attrs.add(aname)
                     uniq_attrs.append(AttributeMappingSpec(name=aname, expr=attr.expr.strip()))
 
-            if not uniq_attrs and tprof and tprof.table_role != "EVENT_FACT":
+            if (
+                not uniq_attrs
+                and tprof
+                and (
+                    tprof.table_role != "EVENT_FACT"
+                    or getattr(self, "context", AIConfigContext()).event_policy == "include"
+                )
+            ):
                 ek_l = (dec.entity_key or tprof.hint_entity_key or "").lower()
                 wm_l = (dec.watermark_column or tprof.hint_watermark or "").lower()
                 id_exprs_l = {u.expr.lower() for u in uniq_ids}
@@ -560,11 +709,20 @@ class AIRuleGenerator:
                     id=src_id,
                     table=dec.table,
                     entity_type=(dec.entity_type or "PERSON").upper(),
-                    entity_key=(dec.entity_key or (tprof.hint_entity_key if tprof else "AUTO") or "AUTO"),
+                    entity_key=(
+                        dec.entity_key or (tprof.hint_entity_key if tprof else "AUTO") or "AUTO"
+                    ),
                     watermark_column=dec.watermark_column,
-                    deduplicate=bool(dec.deduplicate or (tprof.duplicate_entity_keys_detected if tprof else False)),
+                    deduplicate=bool(
+                        dec.deduplicate
+                        or (tprof.duplicate_entity_keys_detected if tprof else False)
+                    ),
                     dedup_order_by=dec.dedup_order_by
-                    or (f"{dec.watermark_column} DESC" if dec.watermark_column and dec.deduplicate else None),
+                    or (
+                        f"{dec.watermark_column} DESC"
+                        if dec.watermark_column and dec.deduplicate
+                        else None
+                    ),
                     identifiers=uniq_ids,
                     attributes=uniq_attrs,
                 )
@@ -573,9 +731,7 @@ class AIRuleGenerator:
         # Completeness floor: backfill any profiled table with verified candidate identifiers
         # that a small local model (e.g. 3B) silently omitted or dropped.
         included_tables = {s.table for s in sources}
-        explicitly_excluded = {
-            d.table for d in decisions if not d.include_in_idr and not table_map.get(d.table, SafeTableProfile(table_fqn="")).has_candidate_identifiers
-        }
+        explicitly_excluded = {d.table for d in decisions if not d.include_in_idr}
         for tprof in schema_profile.tables:
             if tprof.table_fqn in included_tables or tprof.table_fqn in explicitly_excluded:
                 continue
@@ -590,6 +746,7 @@ class AIRuleGenerator:
                 for c in tprof.columns
                 if c.hint_role in ("identifier", "entity_key") and c.hint_identifier_type
             ]
+            hint_ids = self._unique_identifier_mappings(hint_ids, tprof.table_fqn, explanations)
             if not hint_ids:
                 continue
             src_id = _sanitize_source_id(tprof.table_fqn.replace(".", "_"), tprof.table_fqn)
@@ -602,10 +759,14 @@ class AIRuleGenerator:
             attrs = (
                 []
                 if tprof.table_role == "EVENT_FACT"
+                and getattr(self, "context", AIConfigContext()).event_policy != "include"
                 else [
                     AttributeMappingSpec(name=c.name, expr=c.name)
                     for c in tprof.columns
-                    if c.name != ek and c.name != wm and c.name.lower() not in id_exprs and c.non_null_count > 0
+                    if c.name != ek
+                    and c.name != wm
+                    and c.name.lower() not in id_exprs
+                    and c.non_null_count > 0
                 ]
             )
             sources.append(
@@ -616,7 +777,9 @@ class AIRuleGenerator:
                     entity_key=ek,
                     watermark_column=wm,
                     deduplicate=tprof.duplicate_entity_keys_detected,
-                    dedup_order_by=f"{wm} DESC" if (wm and tprof.duplicate_entity_keys_detected) else None,
+                    dedup_order_by=f"{wm} DESC"
+                    if (wm and tprof.duplicate_entity_keys_detected)
+                    else None,
                     identifiers=hint_ids,
                     attributes=attrs,
                 )
@@ -629,7 +792,9 @@ class AIRuleGenerator:
                         f"{[h.type for h in hint_ids]} with entity_key='{ek}'."
                     ),
                     evidence=[f"rows={tprof.row_count}"],
-                    risks=["Model omitted this identifier-bearing table; auto-populated from statistical hints."],
+                    risks=[
+                        "Model omitted this identifier-bearing table; auto-populated from statistical hints."
+                    ],
                     confidence="medium",
                     needs_review=True,
                 )
@@ -675,7 +840,9 @@ class AIRuleGenerator:
 
             renamed_labels: List[str] = []
             for src, attr in pairs:
-                tbl_short = re.sub(r"[^a-zA-Z0-9_]+", "_", src.table.split(".")[-1].lower()).strip("_")
+                tbl_short = re.sub(r"[^a-zA-Z0-9_]+", "_", src.table.split(".")[-1].lower()).strip(
+                    "_"
+                )
                 if not tbl_short:
                     tbl_short = src.id.lower()
                 if not attr_l.startswith(f"{tbl_short}_"):
@@ -695,7 +862,11 @@ class AIRuleGenerator:
                         summary=(
                             f"Namespaced colliding attribute '{attr_l}' across {len(distinct_sources)} tables "
                             f"({why}): {', '.join(renamed_labels[:5])}"
-                            + (f" (+{len(renamed_labels) - 5} more)" if len(renamed_labels) > 5 else "")
+                            + (
+                                f" (+{len(renamed_labels) - 5} more)"
+                                if len(renamed_labels) > 5
+                                else ""
+                            )
                             + "."
                         ),
                         evidence=[f"reason={reason}", f"tables={len(distinct_sources)}"],
@@ -730,7 +901,14 @@ class AIRuleGenerator:
             for ident in s.identifiers:
                 entry = id_type_stats.setdefault(
                     ident.type,
-                    {"sources": [], "max_freq": 1, "max_null_rate": 0.0, "plus_tag_rate": 0.0, "phone_us10_rate": 0.0, "is_hashed": False},
+                    {
+                        "sources": [],
+                        "max_freq": 1,
+                        "max_null_rate": 0.0,
+                        "plus_tag_rate": 0.0,
+                        "phone_us10_rate": 0.0,
+                        "is_hashed": False,
+                    },
                 )
                 entry["sources"].append(s.id)
                 cp = col_map.get(ident.expr.lower())
@@ -749,7 +927,9 @@ class AIRuleGenerator:
                 {
                     "id": s.id,
                     "table": s.table,
-                    "table_role": table_map[s.table].table_role if s.table in table_map else "MASTER_ENTITY",
+                    "table_role": table_map[s.table].table_role
+                    if s.table in table_map
+                    else "MASTER_ENTITY",
                     "entity_type": s.entity_type,
                     "has_watermark": bool(s.watermark_column),
                     "identifiers": [i.type for i in s.identifiers],
@@ -762,8 +942,27 @@ class AIRuleGenerator:
             "mapped_attributes_and_sources": {k: v for k, v in list(attr_sources.items())[:30]},
             "allowed_canonicalizers": canonicalizers,
             "allowed_survivorship_strategies": survivorship_strategies,
-            "allowed_fuzzy_templates": ["NAME_SOUNDEX_JW", "NAME_FIRST_LAST_JW", "EMAIL_LOCAL_LEVENSHTEIN"],
+            "allowed_fuzzy_templates": [
+                "NAME_SOUNDEX_JW",
+                "NAME_FIRST_LAST_JW",
+                "EMAIL_LOCAL_LEVENSHTEIN",
+            ],
         }
+
+        refs = {}
+
+        def safe_context(obj):
+            if isinstance(obj, dict):
+                return {safe_name(k): safe_context(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [safe_context(v) for v in obj]
+            if isinstance(obj, str):
+                token = safe_name(obj)
+                refs[token] = obj
+                return token
+            return obj
+
+        compact_context = safe_context(compact_context)
 
         system_msg = (
             "You are a Principal MarTech & Identity Resolution Architect. "
@@ -772,7 +971,7 @@ class AIRuleGenerator:
             "1. Only create exact rules for identifier types present in `identifier_type_stats`.\n"
             "2. Use ONLY canonicalizers from `allowed_canonicalizers` (e.g., EMAIL_STRIP_PLUS if plus_tag_rate >= 0.02 else EMAIL_STANDARD; PHONE_US_10 for US 10-digit phones; ALPHANUMERIC_UPPER for loyalty IDs).\n"
             "3. Set priority=1 for highest-precision personal identifiers (email, customer_id), lower priority (higher number) for shared ones (phone, device_id).\n"
-            "4. Set `max_group_size` to a realistic full-warehouse cluster cap (>= 25, typically 50-1000) — remember a single customer spans many order/event rows across all tables, so NEVER copy raw sample `max_freq` (like 2 or 3) as `max_group_size`!\n"
+            "4. Propose a justified max_group_size from fanout evidence and policy. Respect explicit limits; smaller limits can be intentional.\n"
             "5. Use ONLY strategies from `allowed_survivorship_strategies` and ONLY real attribute names from `mapped_attributes_and_sources`.\n"
             "6. For `lenses`, `include_types` and `exclude_types` MUST be UPPERCASE identifier types from `identifier_type_stats` (e.g., EMAIL, PHONE, CUSTOMER_ID, LOYALTY) — NEVER table `entity_type`s (like CUSTOMER, ORDER, ADDRESS).\n"
             "7. Only propose `fuzzy_templates` if name/email attributes exist across sources and the user goal benefits from probabilistic matching; leave empty if strict/deterministic.\n"
@@ -802,20 +1001,22 @@ class AIRuleGenerator:
                 temperature=0.0,
             )
             try:
-                parsed = PassBRuleOutput.model_validate(raw_dict)
-            except Exception as val_exc:
+                parsed = PassBRuleOutput.model_validate(restore_refs(raw_dict, refs))
+            except Exception:
                 if attempt < self.max_repairs:
                     total_repairs += 1
                     messages.append({"role": "assistant", "content": json.dumps(raw_dict)})
                     messages.append(
                         {
                             "role": "user",
-                            "content": f"Your JSON failed schema validation: {val_exc}\nFix the JSON to strictly match the schema.",
+                            "content": "Your JSON failed schema validation. Fix it to strictly match the provided schema.",
                         }
                     )
                     continue
                 raise
-            errors = self._validate_pass_b(parsed, valid_id_types, valid_source_ids, valid_attr_names)
+            errors = self._validate_pass_b(
+                parsed, valid_id_types, valid_source_ids, valid_attr_names
+            )
             if not errors:
                 return parsed, total_repairs, warnings
             if attempt < self.max_repairs:
@@ -826,7 +1027,7 @@ class AIRuleGenerator:
                         "role": "user",
                         "content": (
                             "Fix these validation errors strictly using allowed enums and mapped IDs:\n- "
-                            + "\n- ".join(errors)
+                            + "Invalid rule references; use only the supplied semantic identifiers, attributes and registries."
                         ),
                     }
                 )
@@ -834,7 +1035,13 @@ class AIRuleGenerator:
                 warnings.append(
                     f"Auto-sanitized {len(errors)} Pass B field(s) after {self.max_repairs} repairs."
                 )
-                return self._sanitize_pass_b(parsed, valid_id_types, valid_source_ids, valid_attr_names), total_repairs, warnings
+                return (
+                    self._sanitize_pass_b(
+                        parsed, valid_id_types, valid_source_ids, valid_attr_names
+                    ),
+                    total_repairs,
+                    warnings,
+                )
 
         return PassBRuleOutput(), total_repairs, warnings
 
@@ -847,7 +1054,9 @@ class AIRuleGenerator:
     ) -> List[str]:
         errors: List[str] = []
         if not out.rules:
-            errors.append(f"At least one exact rule is required for mapped identifier types: {sorted(valid_id_types)}")
+            errors.append(
+                f"At least one exact rule is required for mapped identifier types: {sorted(valid_id_types)}"
+            )
         for item in out.rules:
             r = item.rule
             if not r.match_keys:
@@ -959,15 +1168,23 @@ class AIRuleGenerator:
         for ln_item in out.lenses:
             ln_item.lens.id = _sanitize_source_id(ln_item.lens.id, "custom_lens")
             ln_item.lens.include_types = [
-                it.strip().upper() for it in ln_item.lens.include_types if it.strip().upper() in valid_id_types_upper
+                it.strip().upper()
+                for it in ln_item.lens.include_types
+                if it.strip().upper() in valid_id_types_upper
             ]
             ln_item.lens.exclude_types = [
-                et.strip().upper() for et in ln_item.lens.exclude_types if et.strip().upper() in valid_id_types_upper
+                et.strip().upper()
+                for et in ln_item.lens.exclude_types
+                if et.strip().upper() in valid_id_types_upper
             ]
             ln_item.lens.source_filter = [
                 sf for sf in ln_item.lens.source_filter if sf in valid_source_ids
             ]
-            if ln_item.lens.include_types or ln_item.lens.exclude_types or ln_item.lens.source_filter:
+            if (
+                ln_item.lens.include_types
+                or ln_item.lens.exclude_types
+                or ln_item.lens.source_filter
+            ):
                 clean_lenses.append(ln_item)
         out.lenses = clean_lenses
         return out
@@ -993,9 +1210,6 @@ class AIRuleGenerator:
             # Normalize match_keys to lowercase so they always match sources[].identifiers[].type
             # in SQL JOIN idr_meta.identifier_mapping ON im.identifier_type = r.identifier_type
             item.rule.match_keys = [mk.strip().lower() for mk in item.rule.match_keys if mk.strip()]
-            # Guardrail: prevent tiny sample max_freq (e.g. 2 or 3) from skipping real multi-table customers
-            if item.rule.max_group_size < 25:
-                item.rule.max_group_size = 50
             final_rules.append(item.rule)
             for mk in item.rule.match_keys:
                 covered_id_types.add(mk.lower())
@@ -1018,9 +1232,7 @@ class AIRuleGenerator:
             col_map = {c.name.lower(): c for c in (tprof.columns if tprof else [])}
             for ident in s.identifiers:
                 itype = ident.type.lower()
-                meta = id_type_meta.setdefault(
-                    itype, {"sources": 0, "max_freq": 1, "canon": None}
-                )
+                meta = id_type_meta.setdefault(itype, {"sources": 0, "max_freq": 1, "canon": None})
                 meta["sources"] += 1
                 cp = col_map.get(ident.expr.lower())
                 if cp:
@@ -1028,7 +1240,14 @@ class AIRuleGenerator:
                     if cp.hint_canonicalizer and not meta["canon"]:
                         meta["canon"] = cp.hint_canonicalizer
 
-        order_pref = {"email": 1, "phone": 2, "loyalty": 3, "loyalty_id": 3, "customer_id": 4, "device_id": 5}
+        order_pref = {
+            "email": 1,
+            "phone": 2,
+            "loyalty": 3,
+            "loyalty_id": 3,
+            "customer_id": 4,
+            "device_id": 5,
+        }
         next_prio = max((r.priority for r in final_rules), default=0) + 1
         had_llm_rules = bool(final_rules)
         for itype in sorted(id_type_meta.keys(), key=lambda k: (order_pref.get(k, 10), k)):
@@ -1036,13 +1255,15 @@ class AIRuleGenerator:
                 continue
             meta = id_type_meta[itype]
             # If the LLM already proposed rules, only backfill multi-source identifier types it missed
-            if had_llm_rules and meta["sources"] < 2:
+            if had_llm_rules:
                 continue
             canon = meta["canon"] or (
-                "EMAIL_STANDARD" if "email" in itype else (
-                    "PHONE_DIGITS" if "phone" in itype else (
-                        "ALPHANUMERIC_UPPER" if "loyalty" in itype else "LOWERCASE"
-                    )
+                "EMAIL_STANDARD"
+                if "email" in itype
+                else (
+                    "PHONE_DIGITS"
+                    if "phone" in itype
+                    else ("ALPHANUMERIC_UPPER" if "loyalty" in itype else "EXACT")
                 )
             )
             mgs = max(25, min(500, meta["max_freq"] * 10))
@@ -1072,9 +1293,7 @@ class AIRuleGenerator:
             next_prio += 1
 
         # Ground fuzzy templates strictly against mapped attribute names
-        mapped_attr_names: Set[str] = {
-            a.name.lower() for s in sources for a in s.attributes
-        }
+        mapped_attr_names: Set[str] = {a.name.lower() for s in sources for a in s.attributes}
         for ft in pass_b.fuzzy_templates:
             try:
                 validate_identifier(ft.id, "fuzzy_rule.id")
@@ -1097,9 +1316,11 @@ class AIRuleGenerator:
                 rule_explanations.append(
                     ExplanationItem(
                         target=ft.id,
-                        summary=f"Fuzzy matching template {ft.template} on {', '.join(req_cols)} (threshold={ft.threshold}).",
+                        summary=f"Fuzzy matching template {ft.template} with portable prefix blocking on {', '.join(req_cols)} (threshold={ft.threshold}).",
                         evidence=[f"template={ft.template}", f"threshold={ft.threshold}"],
-                        risks=["Probabilistic matching (beta); review false-positive rate in dry run."],
+                        risks=[
+                            "Probabilistic matching (beta); review false-positive rate in dry run."
+                        ],
                         confidence="medium",
                         needs_review=True,
                     )
@@ -1131,12 +1352,19 @@ class AIRuleGenerator:
                     cp = col_map.get(a.expr.lower())
                     if cp and cp.hint_role == "consent_flag":
                         consent_attrs.add(a.name)
-            role_rank = {"MASTER_ENTITY": 0, "SUB_ENTITY": 1, "EVENT_FACT": 2, "REFERENCE_LOOKUP": 3}
+            role_rank = {
+                "MASTER_ENTITY": 0,
+                "SUB_ENTITY": 1,
+                "EVENT_FACT": 2,
+                "REFERENCE_LOOKUP": 3,
+            }
             for aname in sorted(attr_to_sources.keys()):
                 srcs = sorted(
                     attr_to_sources[aname],
                     key=lambda s: (
-                        role_rank.get(table_map[s.table].table_role, 1) if s.table in table_map else 1,
+                        role_rank.get(table_map[s.table].table_role, 1)
+                        if s.table in table_map
+                        else 1,
                         0 if s.watermark_column else 1,
                         s.id,
                     ),
@@ -1178,7 +1406,10 @@ class AIRuleGenerator:
         merged_exclusions: List[ExclusionSpec] = []
         seen_excls: Set[Tuple[str, str]] = set()
         for ex in getattr(schema_profile, "discovered_exclusions", []) or []:
-            key = (str(ex.get("identifier_type", "ANY")).upper(), str(ex.get("identifier_value_pattern", "")).lower())
+            key = (
+                str(ex.get("identifier_type", "ANY")).upper(),
+                str(ex.get("identifier_value_pattern", "")).lower(),
+            )
             if key[1] and key not in seen_excls:
                 seen_excls.add(key)
                 merged_exclusions.append(
@@ -1254,7 +1485,9 @@ class AIRuleGenerator:
                 except ValueError as exc:
                     errors.append(str(exc))
                 if not _extract_column_refs(src.entity_key, valid_cols):
-                    errors.append(f"Source '{src.id}': entity_key '{src.entity_key}' not in {src.table}.")
+                    errors.append(
+                        f"Source '{src.id}': entity_key '{src.entity_key}' not in {src.table}."
+                    )
 
             if src.watermark_column and src.watermark_column.lower() not in valid_cols:
                 errors.append(
@@ -1299,7 +1532,9 @@ class AIRuleGenerator:
             for mk in rule.match_keys:
                 cnt = mapped_id_type_counts.get(mk.lower(), 0)
                 if cnt == 0:
-                    errors.append(f"Rule '{rule.id}': match_key '{mk}' is not mapped in any source.")
+                    errors.append(
+                        f"Rule '{rule.id}': match_key '{mk}' is not mapped in any source."
+                    )
                 elif cnt == 1 and len(config_spec.sources) > 1:
                     warnings.append(
                         f"Rule '{rule.id}' ({mk}) is only mapped in 1 source; it will only deduplicate within that table."
@@ -1316,22 +1551,23 @@ class AIRuleGenerator:
                 errors.append(f"Survivorship '{sv.attribute}': unknown strategy '{sv.strategy}'.")
             for sp in sv.source_priority:
                 if sp not in valid_source_ids:
-                    errors.append(
-                        f"Survivorship '{sv.attribute}': unknown source_priority '{sp}'."
-                    )
+                    errors.append(f"Survivorship '{sv.attribute}': unknown source_priority '{sp}'.")
 
         # Layer 4: Live warehouse SQL dry-parse verification (read-only, parallelized)
         sql_verified = False
         if verify_sql and not errors and self.adapter is not None:
+
             def _probe_source(src: SourceSpec) -> Optional[str]:
                 select_exprs: List[str] = []
-                if src.entity_key.upper() != "AUTO":
-                    select_exprs.append(f"({src.entity_key}) AS _ek")
+                from .config import resolve_entity_key_expr
+
+                key_expression = resolve_entity_key_expr(src.model_dump(), self.adapter.dialect)
+                select_exprs.append(f"({key_expression}) AS _ek")
                 if src.watermark_column:
                     select_exprs.append(f"({src.watermark_column}) AS _wm")
                 for idx, ident in enumerate(src.identifiers):
                     select_exprs.append(f"({ident.expr}) AS _id_{idx}")
-                for idx, attr in enumerate(src.attributes[:20]):
+                for idx, attr in enumerate(src.attributes):
                     select_exprs.append(f"({attr.expr}) AS _at_{idx}")
                 if not select_exprs:
                     return None
@@ -1374,87 +1610,151 @@ class AIRuleGenerator:
         sample_size: int,
         reason: str,
     ) -> GeneratedIDRPlan:
-        det = self.profiler.profile_and_generate_config(tables, sample_size=min(sample_size, 1000))
-        cfg = det.get("suggested_config") or {}
-        table_map = schema_profile.table_map()
-
-        tbl_exps: List[ExplanationItem] = []
-        for fqn, diag in (det.get("profiling_diagnostics") or {}).items():
-            tprof = table_map.get(fqn)
-            included = bool(diag.get("included"))
-            if included:
-                tbl_exps.append(
-                    ExplanationItem(
-                        target=fqn,
-                        summary=(
-                            f"Included with entity_key='{diag.get('selected_entity_key')}' "
-                            f"and identifiers={diag.get('identifiers_mapped')}."
-                        ),
-                        evidence=[
-                            f"rows={tprof.row_count if tprof else 'N/A'}",
-                            f"sample_rows={diag.get('sample_rows_analyzed', 0)}",
-                        ],
-                        risks=(
-                            ["Duplicate entity keys detected; deduplicate enabled."]
-                            if diag.get("duplicate_entity_keys_detected")
-                            else []
-                        ),
-                        confidence="medium",
-                        needs_review=bool(diag.get("duplicate_entity_keys_detected")),
-                    )
+        decisions = []
+        for tp in schema_profile.tables:
+            identifiers = [
+                IdentifierMappingSpec(
+                    type=c.hint_identifier_type, expr=c.name, is_hashed=c.hint_is_hashed
                 )
-            else:
-                tbl_exps.append(
-                    ExplanationItem(
-                        target=fqn,
-                        summary=str(diag.get("reason") or "Excluded: no identifiers detected."),
-                        confidence="high",
-                        needs_review=False,
-                    )
+                for c in tp.columns
+                if c.hint_identifier_type
+            ]
+            decisions.append(
+                PassATableDecision(
+                    table=tp.table_fqn,
+                    source_id=_sanitize_source_id(tp.table_fqn, tp.table_fqn),
+                    include_in_idr=bool(identifiers)
+                    and tp.table_fqn not in getattr(self, "model_excluded_tables", set()),
+                    entity_key=tp.hint_entity_key or "AUTO",
+                    watermark_column=tp.hint_watermark,
+                    deduplicate=tp.duplicate_entity_keys_detected,
+                    identifiers=identifiers,
+                    reasoning="Deterministic proposal from measured schema evidence.",
+                    needs_review=tp.duplicate_entity_keys_detected or tp.null_entity_keys_detected,
                 )
-
-        rule_exps = [
-            ExplanationItem(
-                target=str(r.get("id")),
-                summary=(
-                    f"Deterministic exact match on {r.get('match_keys')} "
-                    f"using {r.get('canonicalize')} (max_group_size={r.get('max_group_size')})."
-                ),
-                evidence=[f"priority={r.get('priority')}"],
-                confidence="medium",
-                needs_review=False,
             )
-            for r in (cfg.get("rules") or [])
-        ]
-
-        surv_exps = [
-            ExplanationItem(
-                target=str(s.get("attribute")),
-                summary=f"Selected {s.get('strategy')} survivorship based on source watermark availability.",
-                confidence="medium",
-                needs_review=False,
-            )
-            for s in (cfg.get("survivorship") or [])
-        ]
-
-        return GeneratedIDRPlan(
+        sources, exps = self._materialize_sources(decisions, schema_profile)
+        if getattr(self, "mode", "config") == "rules":
+            sources = [SourceSpec.model_validate(s) for s in self.current_config.get("sources", [])]
+        spec, explanations = self._assemble_plan(sources, exps, PassBRuleOutput(), schema_profile)
+        report = self.validate_plan(
+            spec, schema_profile, verify_sql=getattr(self, "verify_sql", True)
+        )
+        report.warnings.append(reason)
+        plan = GeneratedIDRPlan(
             generation_mode="deterministic_fallback",
             provider=self.client.config.provider,
-            model=self.client.config.resolved_model() if self.client.config.is_enabled else "profiler",
+            model="profiler",
             pii_masked=True,
-            suggested_config=cfg,
-            explanations=ExplanationBundle(
-                tables=tbl_exps,
-                rules=rule_exps,
-                survivorship=surv_exps,
-            ),
-            validation_report=ValidationReport(
-                valid=bool(det.get("is_valid_idr_config")),
-                errors=[det["config_validation_error"]] if det.get("config_validation_error") else [],
-                warnings=[reason],
-            ),
+            suggested_config=spec.to_idr_config_dict(),
+            explanations=explanations,
+            validation_report=report,
             profile_summary=schema_profile.to_summary_dict(),
         )
+        return self._finalize(plan, schema_profile)
+
+    def _finalize(self, plan: GeneratedIDRPlan, profile: SafeSchemaProfile) -> GeneratedIDRPlan:
+        context = getattr(self, "context", AIConfigContext()).model_copy(
+            update={"table_roles": {t.table_fqn: t.table_role for t in profile.tables}}
+        )
+        base = getattr(self, "current_config", {})
+        candidate = plan.suggested_config
+        if getattr(self, "mode", "config") == "rules":
+            candidate = {
+                **copy.deepcopy(base),
+                "rules": candidate.get("rules", []),
+                "fuzzy_rules": candidate.get("fuzzy_rules", []),
+            }
+        candidate, decisions = enforce_policy(candidate, context, profile)
+        if getattr(self, "mode", "config") == "rules":
+            for field in (
+                "sources",
+                "survivorship",
+                "exclusions",
+                "overrides",
+                "use_default_exclusions",
+                "lenses",
+            ):
+                if field in base:
+                    candidate[field] = copy.deepcopy(base[field])
+                else:
+                    candidate.pop(field, None)
+        for extension in ("evaluation", "grouped_outputs"):
+            if base.get(extension):
+                candidate[extension] = copy.deepcopy(base[extension])
+        errors = candidate_errors(candidate) + policy_errors(candidate, context, base, profile)
+        if not candidate.get("sources") or not (
+            candidate.get("rules") or candidate.get("fuzzy_rules")
+        ):
+            errors.append(
+                "No usable sources and matching rules; choose identifiers or revise the policy."
+            )
+        try:
+            validate_config(candidate)
+        except ValueError as exc:
+            errors.append(str(exc))
+        if getattr(self, "mode", "config") == "rules":
+            for field in (
+                "sources",
+                "survivorship",
+                "exclusions",
+                "overrides",
+                "use_default_exclusions",
+                "lenses",
+            ):
+                if candidate.get(field) != base.get(field):
+                    errors.append(f"Rules-only proposal changed {field}")
+        plan.suggested_config = candidate
+        plan.validation_report.errors.extend(errors)
+        plan.validation_report.valid = plan.validation_report.valid and not errors
+        if not plan.validation_report.valid:
+            plan.validation_report.sql_verified = False
+        plan.proposal_id = "proposal_" + uuid.uuid4().hex
+        plan.base_draft_hash = draft_hash(base)
+        plan.candidate_draft_hash = draft_hash(candidate)
+        for sv in candidate.get("survivorship", []):
+            if any(
+                x in sv["attribute"].lower() for x in ("consent", "opt_in", "permission")
+            ) and not any(d["target"] == sv["attribute"] for d in decisions):
+                decisions.append(
+                    {
+                        "target": sv["attribute"],
+                        "origin": "deterministic",
+                        "reason": "Confirm business semantics of consent aggregation",
+                        "needs_review": True,
+                    }
+                )
+        plan.decisions = decisions
+        plan.diff = config_diff(base, candidate)
+        plan.status = (
+            "invalid"
+            if not plan.validation_report.valid
+            else "needs_decisions"
+            if any(d["needs_review"] for d in decisions)
+            or any(
+                x.needs_review
+                for group in (
+                    plan.explanations.tables,
+                    plan.explanations.rules,
+                    plan.explanations.survivorship,
+                )
+                for x in group
+            )
+            else "ready_for_preview"
+        )
+        plan.validation_report.warnings.append(
+            "Free-text goals are kept local; structured policy controls model behavior."
+        )
+        import logging
+
+        logging.getLogger(__name__).info(
+            "AI config outcome=%s mode=%s sources=%d rules=%d",
+            plan.status,
+            plan.generation_mode,
+            len(candidate.get("sources", [])),
+            len(candidate.get("rules", [])),
+        )
+        return plan
 
 
 def render_config_yaml_with_reasoning(plan: GeneratedIDRPlan) -> str:

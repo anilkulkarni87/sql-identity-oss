@@ -5,6 +5,10 @@ Provides SQL execution capabilities for Databricks using Spark SQL,
 supporting both notebook and job execution contexts.
 """
 
+import threading
+import time
+import uuid
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from .base import IDRAdapter
@@ -35,6 +39,7 @@ class DatabricksAdapter(IDRAdapter):
         self.init_schema_mapping(schema_mapping)
         self.conn_obj = spark_or_conn
         self.catalog = catalog
+        self._budget_local = threading.local()
 
         # Detect mode
         # SparkSession has .sql() returning DataFrame, Connection has .cursor()
@@ -55,6 +60,79 @@ class DatabricksAdapter(IDRAdapter):
     def dialect(self) -> str:
         return "databricks"
 
+    @contextmanager
+    def query_budget(self, seconds: float, max_bytes_billed: Optional[int] = None):
+        """Enforce wall-clock timeout via Spark job-group cancel or SQL cursor cancel."""
+        expired = threading.Event()
+        deadline = time.monotonic() + seconds
+        job_group = f"idr_preview_{uuid.uuid4().hex[:12]}" if self.is_spark else None
+        state = {"active_cursor": None}
+        self._budget_local.state = state
+
+        if self.is_spark and hasattr(self.conn_obj, "sparkContext"):
+            self.conn_obj.sparkContext.setJobGroup(job_group, "IDR profile preview")
+
+        def interrupt():
+            expired.set()
+            if self.is_spark and hasattr(self.conn_obj, "sparkContext"):
+                try:
+                    self.conn_obj.sparkContext.cancelJobGroup(job_group)
+                except Exception:
+                    pass
+            else:
+                cur = state.get("active_cursor")
+                if cur is not None and hasattr(cur, "cancel"):
+                    try:
+                        cur.cancel()
+                    except Exception:
+                        pass
+
+        def check():
+            if expired.is_set() or time.monotonic() >= deadline:
+                raise ValueError(
+                    "Profile preview exceeded its time budget; no production outputs were changed"
+                )
+
+        timer = threading.Timer(seconds, interrupt)
+        timer.daemon = True
+        timer.start()
+        try:
+            yield check
+            if expired.is_set():
+                raise ValueError(
+                    "Profile preview exceeded its time budget; no production outputs were changed"
+                )
+        except Exception as exc:
+            if expired.is_set():
+                raise ValueError(
+                    "Profile preview exceeded its time budget; no production outputs were changed"
+                ) from exc
+            raise
+        finally:
+            timer.cancel()
+            timer.join()
+            self._budget_local.state = None
+            if self.is_spark and hasattr(self.conn_obj, "sparkContext"):
+                try:
+                    self.conn_obj.sparkContext.clearJobGroup()
+                except Exception:
+                    pass
+
+    def _run_cursor(self, cur, sql: str, params: Optional[List[Any]] = None) -> None:
+        state = getattr(self._budget_local, "state", None)
+        if state is not None:
+            state["active_cursor"] = cur
+        try:
+            if params and "?" in sql:
+                cur.execute(self._bind_spark_params(sql, params))
+            elif params:
+                cur.execute(sql, params)
+            else:
+                cur.execute(sql)
+        finally:
+            if state is not None:
+                state["active_cursor"] = None
+
     def execute(self, sql: str) -> None:
         """Execute a single SQL statement."""
         sql = self._rewrite_schemas(sql)
@@ -62,7 +140,7 @@ class DatabricksAdapter(IDRAdapter):
             self.conn_obj.sql(sql)
         else:
             with self.conn_obj.cursor() as cur:
-                cur.execute(sql)
+                self._run_cursor(cur, sql)
 
     def execute_script(self, sql: str) -> None:
         """Execute multiple SQL statements separated by semicolons."""
@@ -74,7 +152,7 @@ class DatabricksAdapter(IDRAdapter):
                     self.conn_obj.sql(stmt)
                 else:
                     with self.conn_obj.cursor() as cur:
-                        cur.execute(stmt)
+                        self._run_cursor(cur, stmt)
 
     @staticmethod
     def _bind_spark_params(sql: str, params: Optional[List[Any]]) -> str:
@@ -105,12 +183,7 @@ class DatabricksAdapter(IDRAdapter):
             return df.to_dict("records")
         else:
             with self.conn_obj.cursor() as cur:
-                if params and "?" in sql:
-                    cur.execute(self._bind_spark_params(sql, params))
-                elif params:
-                    cur.execute(sql, params)
-                else:
-                    cur.execute(sql)
+                self._run_cursor(cur, sql, params)
 
                 if cur.description:
                     cols = [col[0].lower() for col in cur.description]
@@ -129,12 +202,7 @@ class DatabricksAdapter(IDRAdapter):
             return None
         else:
             with self.conn_obj.cursor() as cur:
-                if params and "?" in sql:
-                    cur.execute(self._bind_spark_params(sql, params))
-                elif params:
-                    cur.execute(sql, params)
-                else:
-                    cur.execute(sql)
+                self._run_cursor(cur, sql, params)
                 result = cur.fetchone()
                 return result[0] if result else None
 

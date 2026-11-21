@@ -8,6 +8,7 @@ and fuzzy matching (probabilistic post-processing).
 import re
 from typing import Dict
 
+from ..exceptions import GraphNotConverged
 from .base import BaseStage, StageContext
 
 
@@ -22,7 +23,9 @@ class GraphStage(BaseStage):
     def _swap_tables(self, base_table: str, new_table: str) -> None:
         """Safely swap new_table into base_table across dialects (BigQuery lacks ALTER TABLE RENAME)."""
         if self.adapter.dialect == "bigquery":
-            self.adapter.execute(f"CREATE OR REPLACE TABLE {base_table} AS SELECT * FROM {new_table}")
+            self.adapter.execute(
+                f"CREATE OR REPLACE TABLE {base_table} AS SELECT * FROM {new_table}"
+            )
             self.adapter.execute(f"DROP TABLE IF EXISTS {new_table}")
         else:
             self.adapter.execute(f"DROP TABLE IF EXISTS {base_table}")
@@ -38,10 +41,13 @@ class GraphStage(BaseStage):
         try:
             if not self.adapter.table_exists("idr_meta.identity_override"):
                 return
-            iso_cnt = self.adapter.query_one("""
+            iso_cnt = (
+                self.adapter.query_one("""
                 SELECT COUNT(*) FROM idr_meta.identity_override
                 WHERE is_active = TRUE AND UPPER(override_type) = 'ISOLATE'
-            """) or 0
+            """)
+                or 0
+            )
             if iso_cnt > 0:
                 self.adapter.execute("""
                     DELETE FROM idr_work.identifiers_all
@@ -58,9 +64,12 @@ class GraphStage(BaseStage):
         try:
             if not self.adapter.table_exists("idr_meta.identity_override"):
                 return
-            ov_cnt = self.adapter.query_one("""
+            ov_cnt = (
+                self.adapter.query_one("""
                 SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE
-            """) or 0
+            """)
+                or 0
+            )
             if ov_cnt == 0:
                 return
 
@@ -71,8 +80,12 @@ class GraphStage(BaseStage):
                 WHERE is_active = TRUE AND UPPER(override_type) = 'DO_NOT_LINK'
             """)
             for row in dnl_rows:
-                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
-                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
+                a = self._validate_metadata_value(
+                    row["entity_key_a"], "expr", "override.entity_key_a"
+                )
+                b = self._validate_metadata_value(
+                    row["entity_key_b"], "expr", "override.entity_key_b"
+                )
                 high_key = max(a, b)
                 # Remove direct edge between a and b
                 self.adapter.execute(f"""
@@ -107,8 +120,12 @@ class GraphStage(BaseStage):
                 WHERE is_active = TRUE AND UPPER(override_type) = 'FORCE_LINK'
             """)
             for row in fl_rows:
-                a = self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a")
-                b = self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b")
+                a = self._validate_metadata_value(
+                    row["entity_key_a"], "expr", "override.entity_key_a"
+                )
+                b = self._validate_metadata_value(
+                    row["entity_key_b"], "expr", "override.entity_key_b"
+                )
                 if a == b:
                     continue
                 left_k, right_k = (a, b) if a > b else (b, a)
@@ -227,7 +244,12 @@ class GraphStage(BaseStage):
         count = self.adapter.query_one("SELECT COUNT(*) FROM idr_work.edges_new")
 
         # Generate edge evidence if enabled (audit trail for why edges matched)
-        if self._generate_evidence and count and count > 0 and not (self.config and self.config.dry_run):
+        if (
+            self._generate_evidence
+            and count
+            and count > 0
+            and not (self.config and self.config.dry_run)
+        ):
             try:
                 if self.run_mode == "FULL":
                     self.adapter.execute("DELETE FROM idr_out.edge_evidence WHERE 1=1")
@@ -273,7 +295,9 @@ class GraphStage(BaseStage):
         existing_edges_sql = ""
         if self.run_mode == "INCR":
             try:
-                edge_count = self.adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_edges_current")
+                edge_count = self.adapter.query_one(
+                    "SELECT COUNT(*) FROM idr_out.identity_edges_current"
+                )
                 if edge_count and edge_count > 0:
                     reextracted_filter = ""
                     if self.adapter.table_exists("idr_work.reextracted_entities"):
@@ -311,9 +335,7 @@ class GraphStage(BaseStage):
             except Exception:
                 pass
 
-        lp_edges_cluster = (
-            "CLUSTER BY src, dst " if self.adapter.dialect == "bigquery" else ""
-        )
+        lp_edges_cluster = "CLUSTER BY src, dst " if self.adapter.dialect == "bigquery" else ""
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.lp_edges {lp_edges_cluster}AS
             SELECT left_entity_key AS src, right_entity_key AS dst FROM idr_work.edges_new
@@ -325,9 +347,12 @@ class GraphStage(BaseStage):
         # Ensure ISOLATE and DO_NOT_LINK overrides are respected even over historical INCR edges
         try:
             if self.adapter.table_exists("idr_meta.identity_override"):
-                ov_cnt = self.adapter.query_one(
-                    "SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE"
-                ) or 0
+                ov_cnt = (
+                    self.adapter.query_one(
+                        "SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE"
+                    )
+                    or 0
+                )
                 if ov_cnt > 0:
                     self.adapter.execute("""
                         DELETE FROM idr_work.lp_edges
@@ -367,7 +392,9 @@ class GraphStage(BaseStage):
                 WHERE run_id = '{self.run_id}'
             """)
             self._stabilize_resolved_ids()
-            clusters = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
+            clusters = self.adapter.query_one(
+                "SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels"
+            )
             return 0, clusters or 0
 
         # Initialize labels for connected nodes only (skipping singletons during iterations)
@@ -403,11 +430,14 @@ class GraphStage(BaseStage):
             """)
 
             # Check for convergence
-            changes = self.adapter.query_one(f"""
+            changes = (
+                self.adapter.query_one(f"""
                 SELECT COUNT(*) FROM {curr_tbl} prev
                 JOIN {next_tbl} curr ON prev.entity_key = curr.entity_key
                 WHERE prev.label != curr.label
-            """) or 0
+            """)
+                or 0
+            )
 
             curr_tbl, next_tbl = next_tbl, curr_tbl
 
@@ -435,12 +465,7 @@ class GraphStage(BaseStage):
             self.adapter.execute(f"DROP TABLE IF EXISTS {next_tbl}")
 
         if changes > 0:
-            msg = (
-                f"Label propagation did not fully converge after {max_iters} iterations "
-                f"({changes} labels still changing). Consider increasing max_iters."
-            )
-            self._warnings.append(msg)
-            self.logger.warning(msg, extra={"run_id": self.run_id, "stage": "label_propagation"})
+            self._require_convergence("idr_work.lp_edges", "idr_work.lp_labels")
 
         # Re-attach singletons (entities in current run with no incident edges)
         self.adapter.execute(f"""
@@ -461,6 +486,8 @@ class GraphStage(BaseStage):
         # sever edges incident to high_key = max(a, b) and re-converge so DO_NOT_LINK holds.
         iterations += self._resolve_transitive_do_not_link_conflicts(max_iters)
 
+        self._require_convergence("idr_work.lp_edges", "idr_work.lp_labels")
+
         # Preserve existing cluster resolved_ids across runs (Largest cluster wins on merge)
         self._stabilize_resolved_ids()
 
@@ -468,6 +495,23 @@ class GraphStage(BaseStage):
         clusters = self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels")
 
         return iterations, clusters or 0
+
+    def _require_convergence(self, edges, labels, left="src", right="dst", view="default"):
+        """An iteration budget is not permission to publish a partial partition."""
+        unresolved = int(
+            self.adapter.query_one(f"""
+            SELECT COUNT(*) FROM {edges} e
+            LEFT JOIN {labels} a ON a.entity_key = e.{left}
+            LEFT JOIN {labels} b ON b.entity_key = e.{right}
+            WHERE a.label IS NULL OR b.label IS NULL OR a.label <> b.label
+        """)
+            or 0
+        )
+        if unresolved:
+            raise GraphNotConverged(
+                f"Graph did not converge for {view}: {unresolved} edges have unresolved endpoints. "
+                "Increase max_iters and retry; incomplete graph results cannot be published."
+            )
 
     def _resolve_transitive_do_not_link_conflicts(self, max_iters: int) -> int:
         """Sever multi-hop transitive bridges for any DO_NOT_LINK pair sharing a converged label."""
@@ -489,8 +533,12 @@ class GraphStage(BaseStage):
             high_keys = sorted(
                 {
                     max(
-                        self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a"),
-                        self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b"),
+                        self._validate_metadata_value(
+                            row["entity_key_a"], "expr", "override.entity_key_a"
+                        ),
+                        self._validate_metadata_value(
+                            row["entity_key_b"], "expr", "override.entity_key_b"
+                        ),
                     )
                     for row in conflicts
                 }
@@ -533,11 +581,14 @@ class GraphStage(BaseStage):
                         FROM candidate_labels
                         GROUP BY entity_key
                     """)
-                    changes = self.adapter.query_one(f"""
+                    changes = (
+                        self.adapter.query_one(f"""
                         SELECT COUNT(*) FROM {curr_tbl} prev
                         JOIN {next_tbl} curr ON prev.entity_key = curr.entity_key
                         WHERE prev.label != curr.label
-                    """) or 0
+                    """)
+                        or 0
+                    )
                     curr_tbl, next_tbl = next_tbl, curr_tbl
                     if changes == 0:
                         break
@@ -580,9 +631,12 @@ class GraphStage(BaseStage):
         try:
             if not self.adapter.table_exists("idr_out.identity_resolved_membership_current"):
                 return
-            prev_cnt = self.adapter.query_one(
-                "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
-            ) or 0
+            prev_cnt = (
+                self.adapter.query_one(
+                    "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
+                )
+                or 0
+            )
             if prev_cnt == 0:
                 return
 
@@ -697,7 +751,9 @@ class GraphStage(BaseStage):
                 for crow in collisions:
                     clabel = crow["colliding_label"]
                     safe_clabel = clabel.replace("'", "''")
-                    new_md5 = self._dialect["md5"](f"CONCAT(orig.label, ':{self.run_id}:{attempt}')")
+                    new_md5 = self._dialect["md5"](
+                        f"CONCAT(orig.label, ':{self.run_id}:{attempt}')"
+                    )
                     self.adapter.execute(f"""
                         CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized_next AS
                         SELECT
@@ -711,7 +767,9 @@ class GraphStage(BaseStage):
                         FROM idr_work.lp_labels_stabilized s
                         JOIN idr_work.lp_labels orig ON s.entity_key = orig.entity_key
                     """)
-                    self._swap_tables("idr_work.lp_labels_stabilized", "idr_work.lp_labels_stabilized_next")
+                    self._swap_tables(
+                        "idr_work.lp_labels_stabilized", "idr_work.lp_labels_stabilized_next"
+                    )
             self.adapter.execute("""
                 CREATE OR REPLACE TABLE idr_work.lp_labels_stabilized_final AS
                 SELECT entity_key, label FROM idr_work.lp_labels_stabilized
@@ -999,16 +1057,23 @@ class GraphStage(BaseStage):
                 GROUP BY entity_key
             """)
 
-            changes = self.adapter.query_one("""
+            changes = (
+                self.adapter.query_one("""
                 SELECT COUNT(*) FROM idr_work.lp_fuzzy_labels prev
                 JOIN idr_work.lp_fuzzy_labels_new curr ON prev.entity_key = curr.entity_key
                 WHERE prev.label != curr.label
-            """) or 0
+            """)
+                or 0
+            )
 
             self._swap_tables("idr_work.lp_fuzzy_labels", "idr_work.lp_fuzzy_labels_new")
 
             if changes == 0:
                 break
+
+        self._require_convergence(
+            "idr_work.fuzzy_edges", "idr_work.lp_fuzzy_labels", "left_id", "right_id", "fuzzy"
+        )
 
         # Re-attach clusters with no fuzzy links
         self.adapter.execute("""
@@ -1041,16 +1106,22 @@ class GraphStage(BaseStage):
         """Filter superset edges by lens policy and run LP + bijective stabilization for one lens."""
         lens_id = self._validate_metadata_value(lens_def["lens_id"], "identifier", "lens_id")
         include_types = [
-            self._validate_metadata_value(str(t).strip().upper(), "identifier", "lens.include_types")
+            self._validate_metadata_value(
+                str(t).strip().upper(), "identifier", "lens.include_types"
+            )
             for t in (lens_def.get("include_types") or [])
             if str(t).strip()
         ]
         exclude_types = [
-            self._validate_metadata_value(str(t).strip().upper(), "identifier", "lens.exclude_types")
+            self._validate_metadata_value(
+                str(t).strip().upper(), "identifier", "lens.exclude_types"
+            )
             for t in (lens_def.get("exclude_types") or [])
             if str(t).strip()
         ]
-        source_filter = [str(s).strip() for s in (lens_def.get("source_filter") or []) if str(s).strip()]
+        source_filter = [
+            str(s).strip() for s in (lens_def.get("source_filter") or []) if str(s).strip()
+        ]
 
         prefix_expr = (
             "SPLIT(entity_key, ':')[SAFE_OFFSET(0)]"
@@ -1058,7 +1129,9 @@ class GraphStage(BaseStage):
             else "SPLIT_PART(entity_key, ':', 1)"
         )
         if source_filter:
-            like_clauses = [f"{prefix_expr} LIKE '{self._glob_to_sql_like(pat)}'" for pat in source_filter]
+            like_clauses = [
+                f"{prefix_expr} LIKE '{self._glob_to_sql_like(pat)}'" for pat in source_filter
+            ]
             src_pred = "(" + " OR ".join(like_clauses) + ")"
         else:
             src_pred = "1=1"
@@ -1073,7 +1146,9 @@ class GraphStage(BaseStage):
         type_preds = ["1=1"]
         if include_types:
             in_list = ", ".join(f"'{t}'" for t in include_types)
-            type_preds.append(f"(UPPER(e.identifier_type) IN ({in_list}) OR UPPER(e.identifier_type) = 'MANUAL_OVERRIDE')")
+            type_preds.append(
+                f"(UPPER(e.identifier_type) IN ({in_list}) OR UPPER(e.identifier_type) = 'MANUAL_OVERRIDE')"
+            )
         if exclude_types:
             ex_list = ", ".join(f"'{t}'" for t in exclude_types)
             type_preds.append(f"UPPER(e.identifier_type) NOT IN ({ex_list})")
@@ -1082,7 +1157,10 @@ class GraphStage(BaseStage):
         existing_edges_sql = ""
         if self.run_mode == "INCR" and self.adapter.table_exists("idr_out.identity_edges_current"):
             try:
-                edge_cnt = self.adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_edges_current") or 0
+                edge_cnt = (
+                    self.adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_edges_current")
+                    or 0
+                )
                 if edge_cnt > 0:
                     reex_filter = ""
                     if self.adapter.table_exists("idr_work.reextracted_entities"):
@@ -1092,7 +1170,9 @@ class GraphStage(BaseStage):
                         )
                     excl_filter = ""
                     if self.adapter.table_exists("idr_meta.identifier_exclusion"):
-                        excl_e = self._exclusion_match_predicate("e.identifier_type", "e.identifier_value_norm")
+                        excl_e = self._exclusion_match_predicate(
+                            "e.identifier_type", "e.identifier_value_norm"
+                        )
                         excl_filter = f"AND NOT {excl_e}"
                     existing_edges_sql = f"""
                         UNION ALL
@@ -1129,9 +1209,12 @@ class GraphStage(BaseStage):
 
         if self.adapter.table_exists("idr_meta.identity_override"):
             try:
-                ov_cnt = self.adapter.query_one(
-                    "SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE"
-                ) or 0
+                ov_cnt = (
+                    self.adapter.query_one(
+                        "SELECT COUNT(*) FROM idr_meta.identity_override WHERE is_active = TRUE"
+                    )
+                    or 0
+                )
                 if ov_cnt > 0:
                     self.adapter.execute("""
                         DELETE FROM idr_work.lp_edges_lens
@@ -1211,11 +1294,14 @@ class GraphStage(BaseStage):
                     FROM candidate_labels
                     GROUP BY entity_key
                 """)
-                changes = self.adapter.query_one(f"""
+                changes = (
+                    self.adapter.query_one(f"""
                     SELECT COUNT(*) FROM {curr_tbl} prev
                     JOIN {next_tbl} curr ON prev.entity_key = curr.entity_key
                     WHERE prev.label != curr.label
-                """) or 0
+                """)
+                    or 0
+                )
                 curr_tbl, next_tbl = next_tbl, curr_tbl
                 if changes == 0:
                     break
@@ -1234,8 +1320,13 @@ class GraphStage(BaseStage):
             """)
 
         iterations += self._resolve_lens_do_not_link_conflicts(max_iters)
+        self._require_convergence(
+            "idr_work.lp_edges_lens", "idr_work.lp_labels_lens", view=f"lens {lens_id}"
+        )
         self._stabilize_lens_resolved_ids(lens_id)
-        clusters = int(self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels_lens") or 0)
+        clusters = int(
+            self.adapter.query_one("SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels_lens") or 0
+        )
         return {"lens_id": lens_id, "iterations": iterations, "clusters": clusters}
 
     def _resolve_lens_do_not_link_conflicts(self, max_iters: int) -> int:
@@ -1258,8 +1349,12 @@ class GraphStage(BaseStage):
             high_keys = sorted(
                 {
                     max(
-                        self._validate_metadata_value(row["entity_key_a"], "expr", "override.entity_key_a"),
-                        self._validate_metadata_value(row["entity_key_b"], "expr", "override.entity_key_b"),
+                        self._validate_metadata_value(
+                            row["entity_key_a"], "expr", "override.entity_key_a"
+                        ),
+                        self._validate_metadata_value(
+                            row["entity_key_b"], "expr", "override.entity_key_b"
+                        ),
                     )
                     for row in conflicts
                 }
@@ -1296,11 +1391,14 @@ class GraphStage(BaseStage):
                         FROM candidate_labels
                         GROUP BY entity_key
                     """)
-                    changes = self.adapter.query_one(f"""
+                    changes = (
+                        self.adapter.query_one(f"""
                         SELECT COUNT(*) FROM {curr_tbl} prev
                         JOIN {next_tbl} curr ON prev.entity_key = curr.entity_key
                         WHERE prev.label != curr.label
-                    """) or 0
+                    """)
+                        or 0
+                    )
                     curr_tbl, next_tbl = next_tbl, curr_tbl
                     if changes == 0:
                         break
@@ -1332,9 +1430,12 @@ class GraphStage(BaseStage):
         try:
             if not self.adapter.table_exists("idr_out.identity_lens_membership_current"):
                 return
-            prev_cnt = self.adapter.query_one(
-                f"SELECT COUNT(*) FROM idr_out.identity_lens_membership_current WHERE lens_id = '{lens_id}'"
-            ) or 0
+            prev_cnt = (
+                self.adapter.query_one(
+                    f"SELECT COUNT(*) FROM idr_out.identity_lens_membership_current WHERE lens_id = '{lens_id}'"
+                )
+                or 0
+            )
             if prev_cnt == 0:
                 return
 
@@ -1440,7 +1541,9 @@ class GraphStage(BaseStage):
                 for crow in collisions:
                     clabel = crow["colliding_label"]
                     safe_clabel = clabel.replace("'", "''")
-                    new_md5 = self._dialect["md5"](f"CONCAT(orig.label, ':{self.run_id}:{lens_id}:{attempt}')")
+                    new_md5 = self._dialect["md5"](
+                        f"CONCAT(orig.label, ':{self.run_id}:{lens_id}:{attempt}')"
+                    )
                     self.adapter.execute(f"""
                         CREATE OR REPLACE TABLE idr_work.lp_labels_lens_stabilized_next AS
                         SELECT
@@ -1454,7 +1557,10 @@ class GraphStage(BaseStage):
                         FROM idr_work.lp_labels_lens_stabilized s
                         JOIN idr_work.lp_labels_lens orig ON s.entity_key = orig.entity_key
                     """)
-                    self._swap_tables("idr_work.lp_labels_lens_stabilized", "idr_work.lp_labels_lens_stabilized_next")
+                    self._swap_tables(
+                        "idr_work.lp_labels_lens_stabilized",
+                        "idr_work.lp_labels_lens_stabilized_next",
+                    )
 
             self.adapter.execute("""
                 CREATE OR REPLACE TABLE idr_work.lp_labels_lens_stabilized_final AS

@@ -45,9 +45,7 @@ def _parse_priority_list(rule: Dict[str, Any]) -> List[str]:
         return []
 
 
-def _build_priority_case(
-    val_expr: str, p_list: List[str], source_id_lookup: Dict[str, str]
-) -> str:
+def _build_priority_case(val_expr: str, p_list: List[str], source_id_lookup: Dict[str, str]) -> str:
     when_clauses = [f"WHEN {val_expr} IS NULL THEN 999999"]
     for idx, src in enumerate(p_list):
         resolved_src = source_id_lookup.get(str(src), str(src).replace(".", "_"))
@@ -56,87 +54,79 @@ def _build_priority_case(
     return f"CASE {' '.join(when_clauses)} ELSE 999 END"
 
 
-def _surv_recency(
-    attr: str, rule: Dict[str, Any], dialect: str, source_id_lookup: Dict[str, str]
-) -> str:
-    if dialect == "duckdb":
-        return (
-            f"arg_max({attr}, CASE WHEN {attr} IS NOT NULL "
-            f"THEN COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00') ELSE NULL END) AS {attr}"
+def selection_order(rule, val_expr, source_id_lookup):
+    """Shared ordering for scalar fields and explicitly grouped whole-row winners."""
+    strategy = rule["strategy"].upper()
+    order = []
+    if strategy in ("PRIORITY", "PRIORITY_RECENCY", "LATEST_FROM_SOURCE"):
+        order.append(
+            (
+                _build_priority_case(val_expr, _parse_priority_list(rule), source_id_lookup),
+                False,
+                False,
+            )
         )
-    if dialect in ("snowflake", "databricks"):
-        return (
-            f"MAX_BY({attr}, CASE WHEN {attr} IS NOT NULL "
-            f"THEN COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00') ELSE NULL END) AS {attr}"
+    if strategy != "PRIORITY":
+        fallback = "9999-12-31" if strategy == "EARLIEST" else "1970-01-01"
+        recency = rule.get("_recency_expr", "recency_ts")
+        order.append(
+            (f"COALESCE({recency}, TIMESTAMP '{fallback} 00:00:00')", strategy != "EARLIEST", True)
         )
+    order.append(("source_id", False, False))
+    if rule.get("_stable_source_rows"):
+        order.append(("source_record_key", False, False))
+    return order
+
+
+def _ordered_value(attr, rule, dialect, source_id_lookup, strict_source=False):
+    value = attr
+    priority = _parse_priority_list(rule)
+    if strict_source and priority:
+        sources = ",".join(
+            "'" + validate_identifier(source_id_lookup.get(s, s.replace(".", "_")), "source") + "'"
+            for s in priority
+        )
+        value = f"CASE WHEN source_id IN ({sources}) THEN {attr} ELSE NULL END"
+    order = selection_order(rule, value, source_id_lookup)
+    # Stable value ordering also covers sources which legitimately repeat a key.
+    string_type = "STRING" if dialect in ("bigquery", "databricks") else "VARCHAR"
+    order.append((f"CAST({value} AS {string_type})", False, False))
+    sql_order = ", ".join(expr + (" DESC" if desc else " ASC") for expr, desc, _ in order)
     if dialect == "bigquery":
-        return (
-            f"ARRAY_AGG({attr} IGNORE NULLS ORDER BY recency_ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
-        )
-    return f"(ARRAY_AGG({attr} ORDER BY recency_ts DESC NULLS LAST))[1] AS {attr}"
-
-
-def _surv_priority(
-    attr: str, rule: Dict[str, Any], dialect: str, source_id_lookup: Dict[str, str]
-) -> str:
-    p_list = _parse_priority_list(rule)
-    priority_expr = _build_priority_case(attr, p_list, source_id_lookup)
-    if dialect == "duckdb":
-        return f"arg_min({attr}, {priority_expr}) AS {attr}"
-    if dialect in ("snowflake", "databricks"):
-        return f"MIN_BY({attr}, {priority_expr}) AS {attr}"
-    if dialect == "bigquery":
-        return f"ARRAY_AGG({attr} IGNORE NULLS ORDER BY {priority_expr} ASC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
-    return f"(ARRAY_AGG({attr} ORDER BY {priority_expr} ASC))[1] AS {attr}"
-
-
-def _surv_priority_recency(
-    attr: str,
-    rule: Dict[str, Any],
-    dialect: str,
-    source_id_lookup: Dict[str, str],
-    strict_source: Optional[bool] = None,
-) -> str:
-    p_list = _parse_priority_list(rule)
-    is_strict = bool(strict_source if strict_source is not None else rule.get("strict_source", False))
-
-    if is_strict and p_list:
-        resolved_sources = [
-            f"'{validate_identifier(source_id_lookup.get(str(s), str(s).replace('.', '_')), 'source_priority_item')}'"
-            for s in p_list
-        ]
-        val_expr = f"CASE WHEN source_id IN ({', '.join(resolved_sources)}) THEN {attr} ELSE NULL END"
-    else:
-        val_expr = attr
-
-    priority_expr = _build_priority_case(val_expr, p_list, source_id_lookup)
-    ts_expr = "COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00')"
-
-    if dialect == "duckdb":
-        return (
-            f"(ARRAY_AGG({val_expr} ORDER BY {priority_expr} ASC, {ts_expr} DESC) "
-            f"FILTER (WHERE {val_expr} IS NOT NULL))[1] AS {attr}"
-        )
-    if dialect == "bigquery":
-        return (
-            f"ARRAY_AGG({val_expr} IGNORE NULLS ORDER BY {priority_expr} ASC, "
-            f"recency_ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
-        )
+        return f"ARRAY_AGG({value} IGNORE NULLS ORDER BY {sql_order} LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
     if dialect == "snowflake":
-        return (
-            f"GET(ARRAY_AGG(CASE WHEN {val_expr} IS NOT NULL THEN {val_expr} END) "
-            f"WITHIN GROUP (ORDER BY {priority_expr} ASC, {ts_expr} DESC), 0) AS {attr}"
-        )
-    if dialect == "databricks":
-        return (
-            f"MIN_BY({val_expr}, CASE WHEN {val_expr} IS NOT NULL "
-            f"THEN STRUCT({priority_expr} AS p, -UNIX_MICROS({ts_expr}) AS neg_ts) "
-            f"ELSE NULL END) AS {attr}"
-        )
+        return f"GET(ARRAY_AGG({value}) WITHIN GROUP (ORDER BY {sql_order}), 0) AS {attr}"
+    if dialect in ("duckdb", "databricks"):
+        keys = [f"CASE WHEN {value} IS NULL THEN 1 ELSE 0 END AS missing"]
+        for i, (expr, desc, timestamp) in enumerate(order):
+            key = (
+                (f"EPOCH_US({expr})" if dialect == "duckdb" else f"UNIX_MICROS({expr})")
+                if timestamp
+                else expr
+            )
+            keys.append((f"-({key})" if desc else key) + f" AS k{i}")
+        if dialect == "duckdb":
+            packed = ", ".join(
+                part.rsplit(" AS ", 1)[1] + ":=" + part.rsplit(" AS ", 1)[0] for part in keys
+            )
+            return f"arg_min({value}, STRUCT_PACK({packed})) AS {attr}"
+        return f"MIN_BY({value}, STRUCT({', '.join(keys)})) AS {attr}"
     return (
-        f"(ARRAY_AGG({val_expr} ORDER BY {priority_expr} ASC, {ts_expr} DESC) "
-        f"FILTER (WHERE {val_expr} IS NOT NULL))[1] AS {attr}"
+        f"(ARRAY_AGG({value} ORDER BY {sql_order}) FILTER (WHERE {value} IS NOT NULL))[1] AS {attr}"
     )
+
+
+def _surv_recency(attr, rule, dialect, source_id_lookup):
+    return _ordered_value(attr, rule, dialect, source_id_lookup)
+
+
+def _surv_priority(attr, rule, dialect, source_id_lookup):
+    return _ordered_value(attr, rule, dialect, source_id_lookup)
+
+
+def _surv_priority_recency(attr, rule, dialect, source_id_lookup, strict_source=None):
+    strict = bool(strict_source if strict_source is not None else rule.get("strict_source", False))
+    return _ordered_value(attr, rule, dialect, source_id_lookup, strict)
 
 
 def _surv_latest_from_source(
@@ -177,24 +167,8 @@ def _surv_all_true(
     )
 
 
-def _surv_earliest(
-    attr: str, rule: Dict[str, Any], dialect: str, source_id_lookup: Dict[str, str]
-) -> str:
-    if dialect == "duckdb":
-        return (
-            f"arg_min({attr}, CASE WHEN {attr} IS NOT NULL "
-            f"THEN COALESCE(recency_ts, TIMESTAMP '9999-12-31 00:00:00') ELSE NULL END) AS {attr}"
-        )
-    if dialect in ("snowflake", "databricks"):
-        return (
-            f"MIN_BY({attr}, CASE WHEN {attr} IS NOT NULL "
-            f"THEN COALESCE(recency_ts, TIMESTAMP '9999-12-31 00:00:00') ELSE NULL END) AS {attr}"
-        )
-    if dialect == "bigquery":
-        return (
-            f"ARRAY_AGG({attr} IGNORE NULLS ORDER BY recency_ts ASC LIMIT 1)[SAFE_OFFSET(0)] AS {attr}"
-        )
-    return f"(ARRAY_AGG({attr} ORDER BY recency_ts ASC NULLS LAST))[1] AS {attr}"
+def _surv_earliest(attr, rule, dialect, source_id_lookup):
+    return _ordered_value(attr, rule, dialect, source_id_lookup)
 
 
 def _surv_agg_max(
@@ -305,4 +279,3 @@ def build_survivorship_expr(
         logger.warning("Unknown survivorship strategy '%s'; falling back to MAX()", strategy)
         return f"MAX({attr}) AS {attr}"
     return fn(attr, rule, dialect, source_id_lookup or {})
-

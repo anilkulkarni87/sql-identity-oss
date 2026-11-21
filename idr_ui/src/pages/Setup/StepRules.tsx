@@ -1,3 +1,6 @@
+import AIConfigPolicy from '../../components/AIConfigPolicy'
+import AIProposalReview from '../../components/AIProposalReview'
+import { defaultAIContext, localGoalObjectives } from '../../types'
 import { useEffect, useRef, useState } from 'react'
 import {
     GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2,
@@ -75,6 +78,10 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
 
     // AI Rule Generation state directly inside Rules tab
     const [aiRuleGoal, setAiRuleGoal] = useState('')
+    const [proposalBase, setProposalBase] = useState('')
+    const [aiContext, setAiContext] = useState(config.ai_assistance || {...defaultAIContext})
+    const generationContext = {...aiContext, objectives: Array.from(new Set([...(aiContext.objectives || []), ...localGoalObjectives(aiRuleGoal)]))}
+    useEffect(() => { if (config.ai_assistance) setAiContext(config.ai_assistance) }, [config.ai_assistance])
     const [aiGenerating, setAiGenerating] = useState(false)
     const [aiProgress, setAiProgress] = useState<AiProgressEvent | null>(null)
     const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null)
@@ -186,30 +193,13 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
         })
         setValidationError(null)
         try {
-            const goalPrompt =
-                aiRuleGoal.trim() ||
-                'Suggest deterministic exact rules, probabilistic fuzzy rules, survivorship, and multi-lens views (strict_person vs household) for these tables.'
-            const res = await api.suggestConfigAiStream(tables, goalPrompt, (evt) => {
-                setAiProgress(evt)
+            const base = latestConfigRef.current
+            setProposalBase(JSON.stringify({config:base, context:generationContext}))
+            const res = await api.suggestConfigAiStream(tables, '', setAiProgress, {
+                mode: 'rules', current_config: base,
+                context: generationContext,
             })
             setAiReport(res)
-            const suggested = res.suggested_config as unknown as IDRConfig
-            if (suggested) {
-                const nextRules = combineFromConfig({
-                    ...config,
-                    rules: suggested.rules?.length ? suggested.rules : config.rules,
-                    fuzzy_rules: suggested.fuzzy_rules ?? config.fuzzy_rules,
-                })
-                const nextLenses = suggested.lenses?.length ? suggested.lenses : lenses
-                setRules(nextRules)
-                setLenses(nextLenses)
-                emitChange(nextRules, exclusions, overrides, useDefaultExclusions, nextLenses)
-                toast(
-                    'success',
-                    'AI rules generated',
-                    `${res.provider}:${res.model} proposed ${(suggested.rules || []).length} exact and ${(suggested.fuzzy_rules || []).length} fuzzy rules.`
-                )
-            }
         } catch (err: any) {
             setValidationError(`AI Rule Generator failed: ${err?.message || err}`)
         } finally {
@@ -485,6 +475,18 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                 </p>
             </div>
 
+            <AIConfigPolicy context={aiContext} tables={config.sources.map(s => s.table)} onChange={setAiContext} showBasics />
+            {aiReport && <AIProposalReview proposal={aiReport}
+                stale={proposalBase !== JSON.stringify({config, context:generationContext})}
+                onApply={(candidate) => {
+                    const nextRules = combineFromConfig(candidate)
+                    setRules(nextRules)
+                    lastEmittedSigRef.current = serializeRuleSlice(candidate.rules || [], candidate.fuzzy_rules || [],
+                        exclusions, overrides, useDefaultExclusions, lenses)
+                    onChange?.(candidate)
+                    setAiReport(null)
+                    toast('success', 'Rules applied to draft', 'Mappings are preserved. Run a preview to evaluate changes.')
+                }} />}
             {validationError && (
                 <div role="alert" className="p-3 rounded-md bg-status-warning-soft border border-status-warning-border text-xs text-status-warning flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />
@@ -533,10 +535,10 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                         </div>
                         <input
                             type="text"
-                            aria-label="AI rule generation goal"
+                            aria-label="Local objective hints: precision, coverage, cross-source, auditability"
                             value={aiRuleGoal}
                             onChange={(e) => setAiRuleGoal(e.target.value)}
-                            placeholder="Optional goal: e.g. Strict B2C person matching on email & phone, household lens…"
+                            placeholder="Precision, coverage, cross-source matching, auditability; other text stays local."
                             className="input-field flex-1 text-xs py-1"
                         />
                         <button

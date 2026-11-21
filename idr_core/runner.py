@@ -22,6 +22,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .adapters.base import IDRAdapter, get_dialect_config
+from .exceptions import FullRebuildRequired
 from .logger_utils import get_logger
 from .stages.base import StageContext
 from .stages.extraction import ExtractionStage
@@ -114,10 +115,15 @@ class RunResult:
     identifiers_extracted: int = 0
     edges_created: int = 0
     clusters_impacted: int = 0
+    grouped_output_counts: Dict[str, int] = field(default_factory=dict)
+    clusters_resolved: int = 0
+    clusters_changed: int = 0
+    source_tables_processed: int = 0
     lp_iterations: int = 0
     duration_seconds: float = 0.0
     warnings: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    error_code: Optional[str] = None
 
 
 @dataclass
@@ -198,6 +204,10 @@ class IDRRunner:
         start_time = datetime.now(timezone.utc).replace(tzinfo=None)
         self._warnings = []
         self._stage_metrics = []
+        self._sources_verified = 0
+        self._clusters_changed = 0
+        self._grouped_output_counts = {}
+        self._prepared_lens_tables = []
 
         self.logger.info(
             f"Starting IDR run ({config.run_mode})",
@@ -240,6 +250,7 @@ class IDRRunner:
             # 1. Preflight validation (before recording run or locking)
             self._start_stage("preflight")
             sources_verified = preflight.run() or 0
+            self._sources_verified = sources_verified
             self._end_stage("preflight", sources_verified)
 
             # Acquire advisory run lock in idr_meta.run_state so concurrent runs / dry runs
@@ -354,14 +365,16 @@ class IDRRunner:
 
             # 6. Output generation
             if not config.dry_run:
+                prepared_lenses = self._prepare_configured_lenses(config, graph)
                 self._start_stage("output_generation")
                 self.logger.info(
                     "Materializing final output tables...",
                     extra={"run_id": self.run_id, "stage": "output_generation"},
                 )
-                output_rows = output.generate_output()
+                output_rows = output.generate_output(prepared_lenses=prepared_lenses)
                 self._end_stage("output_generation", output_rows or 0)
-                self._run_configured_lenses(config, graph, output)
+                self._clusters_changed = output.clusters_changed
+                self._grouped_output_counts = output.grouped_output_counts
                 status = "SUCCESS"
             else:
                 self._start_stage("dry_run_analysis")
@@ -369,6 +382,29 @@ class IDRRunner:
                     "Generating dry run analysis...",
                     extra={"run_id": self.run_id, "stage": "dry_run_analysis"},
                 )
+                target_lens = (config.lens or "default").strip()
+                if target_lens.lower() not in ("default", "none", "__none__"):
+                    from .ai_review import AIReviewService
+                    from .config import sql_to_config
+
+                    AIReviewService._selected_lens(
+                        self.adapter,
+                        graph,
+                        sql_to_config(self.adapter),
+                        {"lens": target_lens, "max_iters": config.max_iters},
+                    )
+                    clusters = int(
+                        self.adapter.query_one(
+                            "SELECT COUNT(DISTINCT label) FROM idr_work.lp_labels"
+                        )
+                        or 0
+                    )
+                    edges = int(
+                        self.adapter.query_one(
+                            "SELECT COUNT(*) FROM (SELECT DISTINCT src,dst FROM idr_work.lp_edges_lens WHERE src < dst) e"
+                        )
+                        or 0
+                    )
                 output.generate_dry_run_output()
                 self._end_stage("dry_run_analysis", entities)
                 status = "DRY_RUN_COMPLETE"
@@ -390,8 +426,19 @@ class IDRRunner:
                 exc_info=True,
                 extra={"run_id": self.run_id, "event": "run_failed"},
             )
-            return self._complete_run(start_time, config, status="FAILED", error=str(e))
+            return self._complete_run(
+                start_time,
+                config,
+                status="FAILED",
+                error=str(e),
+                error_code=getattr(e, "code", None),
+            )
         finally:
+            for cache in self._prepared_lens_tables:
+                try:
+                    self.adapter.execute(f"DROP TABLE IF EXISTS {cache}")
+                except Exception:
+                    self.logger.warning("Could not clean prepared lens workspace")
             if lock_acquired:
                 self._release_run_lock()
 
@@ -464,18 +511,63 @@ class IDRRunner:
                 extra={"run_id": self.run_id},
             )
 
-        utc_now_lit = f"TIMESTAMP '{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}'"
-        if rows:
-            self.adapter.execute(f"""
-                UPDATE idr_meta.run_state
-                SET last_run_id = '{self.run_id}', updated_at = {utc_now_lit}
-                WHERE table_id = '{lock_key}'
-            """)
+        utc_now = datetime.now(timezone.utc)
+        utc_now_lit = f"TIMESTAMP '{utc_now.strftime('%Y-%m-%d %H:%M:%S')}'"
+        if self.adapter.dialect in ("duckdb", "postgres"):
+            # Clear stale or explicitly forced lock, then claim atomically via PRIMARY KEY (table_id).
+            if config.force_unlock:
+                self.adapter.execute(
+                    f"DELETE FROM idr_meta.run_state WHERE table_id = '{lock_key}'"
+                )
+            elif rows:
+                stale_cutoff = datetime.fromtimestamp(
+                    utc_now.timestamp() - max(0, int(config.lock_ttl_seconds)), tz=timezone.utc
+                )
+                cutoff_lit = f"TIMESTAMP '{stale_cutoff.strftime('%Y-%m-%d %H:%M:%S')}'"
+                self.adapter.execute(f"""
+                    DELETE FROM idr_meta.run_state
+                    WHERE table_id = '{lock_key}'
+                      AND (updated_at IS NULL OR updated_at < {cutoff_lit})
+                """)
+            try:
+                self.adapter.execute(f"""
+                    INSERT INTO idr_meta.run_state (table_id, last_watermark_value, last_run_id, updated_at)
+                    VALUES ('{lock_key}', NULL, '{self.run_id}', {utc_now_lit})
+                """)
+            except Exception as exc:
+                holder = self.adapter.query(
+                    f"SELECT last_run_id, updated_at FROM idr_meta.run_state WHERE table_id = '{lock_key}'"
+                )
+                if holder and holder[0].get("last_run_id") and str(holder[0]["last_run_id"]) != self.run_id:
+                    raise RuntimeError(
+                        f"Concurrent IDR run in progress (run_id={holder[0]['last_run_id']}, started_at={holder[0].get('updated_at')}). "
+                        f"Wait for completion or pass force_unlock=True."
+                    ) from exc
+                raise
         else:
-            self.adapter.execute(f"""
-                INSERT INTO idr_meta.run_state (table_id, last_watermark_value, last_run_id, updated_at)
-                VALUES ('{lock_key}', NULL, '{self.run_id}', {utc_now_lit})
-            """)
+            if rows:
+                self.adapter.execute(f"""
+                    UPDATE idr_meta.run_state
+                    SET last_run_id = '{self.run_id}', updated_at = {utc_now_lit}
+                    WHERE table_id = '{lock_key}'
+                """)
+            else:
+                self.adapter.execute(f"""
+                    INSERT INTO idr_meta.run_state (table_id, last_watermark_value, last_run_id, updated_at)
+                    VALUES ('{lock_key}', NULL, '{self.run_id}', {utc_now_lit})
+                """)
+
+        # Post-write ownership verification catches concurrent overwrites on warehouses without enforced PKs.
+        verify = self.adapter.query(
+            f"SELECT last_run_id, updated_at FROM idr_meta.run_state WHERE table_id = '{lock_key}'"
+        )
+        if not verify or str(verify[0].get("last_run_id") or "") != self.run_id:
+            holder_id = verify[0].get("last_run_id") if verify else "unknown"
+            holder_at = verify[0].get("updated_at") if verify else None
+            raise RuntimeError(
+                f"Concurrent IDR run in progress (run_id={holder_id}, started_at={holder_at}). "
+                f"Wait for completion or pass force_unlock=True."
+            )
 
     def _release_run_lock(self) -> None:
         """Release the advisory run lock if still held by this run_id."""
@@ -489,15 +581,13 @@ class IDRRunner:
         except Exception as e:
             self.logger.warning(f"Failed to release advisory run lock: {e}")
 
-    def _run_configured_lenses(
-        self, config: RunConfig, graph: GraphStage, output: OutputStage
-    ) -> None:
-        """Resolve and materialize any active multi-lens definitions from idr_meta.lens_definition."""
+    def _prepare_configured_lenses(self, config: RunConfig, graph: GraphStage):
+        """Validate all selected lenses in work tables before any output publication."""
         target_lens = (config.lens or "").strip()
         if config.skip_lenses or target_lens.lower() in ("__none__", "none"):
-            return
+            return []
         if not self.adapter.table_exists("idr_meta.lens_definition"):
-            return
+            return []
         rows = self.adapter.query("""
             SELECT lens_id, include_types_json, exclude_types_json, source_filter_json, max_group_size
             FROM idr_meta.lens_definition
@@ -505,29 +595,49 @@ class IDRRunner:
             ORDER BY lens_id ASC
         """)
         if not rows:
-            return
+            return []
         selected_rows = [
-            row for row in rows
-            if not target_lens or str(row["lens_id"]) == target_lens
+            row for row in rows if not target_lens or str(row["lens_id"]) == target_lens
         ]
         if not selected_rows:
-            return
+            return []
 
         self._start_stage("lens_resolution")
         total_lens_clusters = 0
-        for row in selected_rows:
+        prepared = []
+        for index, row in enumerate(selected_rows):
             lid = str(row["lens_id"])
             lens_def = {
                 "lens_id": lid,
-                "include_types": json.loads(row["include_types_json"]) if row.get("include_types_json") else [],
-                "exclude_types": json.loads(row["exclude_types_json"]) if row.get("exclude_types_json") else [],
-                "source_filter": json.loads(row["source_filter_json"]) if row.get("source_filter_json") else [],
+                "include_types": json.loads(row["include_types_json"])
+                if row.get("include_types_json")
+                else [],
+                "exclude_types": json.loads(row["exclude_types_json"])
+                if row.get("exclude_types_json")
+                else [],
+                "source_filter": json.loads(row["source_filter_json"])
+                if row.get("source_filter_json")
+                else [],
                 "max_group_size": row.get("max_group_size"),
             }
             lens_stats = graph.resolve_lens(lens_def, config.max_iters)
-            output.materialize_lens_output(lid)
+            cache = f"idr_work.prepared_lens_{index}"
+            self.adapter.execute(
+                f"CREATE OR REPLACE TABLE {cache} AS SELECT * FROM idr_work.lp_labels_lens"
+            )
+            prepared.append((lid, cache))
+            self._prepared_lens_tables.append(cache)
             total_lens_clusters += int((lens_stats or {}).get("clusters", 0))
         self._end_stage("lens_resolution", total_lens_clusters)
+        return prepared
+
+    def _publish_prepared_lenses(self, prepared, output):
+        for lid, cache in prepared:
+            self.adapter.execute(
+                f"CREATE OR REPLACE TABLE idr_work.lp_labels_lens AS SELECT * FROM {cache}"
+            )
+            output.materialize_lens_output(lid)
+            self.adapter.execute(f"DROP TABLE {cache}")
 
     # ===== Run Tracking =====
 
@@ -538,7 +648,9 @@ class IDRRunner:
             f"Starting stage: {name}",
             extra={"run_id": self.run_id, "stage": name, "event": "stage_start"},
         )
-        self._stage_metrics.append(StageMetric(stage_name=name, started_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+        self._stage_metrics.append(
+            StageMetric(stage_name=name, started_at=datetime.now(timezone.utc).replace(tzinfo=None))
+        )
         self._emit_progress({"event": "stage_start", "run_id": self.run_id, "stage": name})
 
     def _end_stage(self, stage_name: Union[PipelineStage, str], rows_affected: int = 0) -> None:
@@ -565,7 +677,7 @@ class IDRRunner:
                         "run_id": self.run_id,
                         "stage": name,
                         "rows_affected": int(rows_affected or 0),
-                        "duration_seconds": round(metric.duration_seconds, 1),
+                        "duration_seconds": round(metric.duration_seconds, 6),
                     }
                 )
                 break
@@ -575,37 +687,81 @@ class IDRRunner:
         # Compute hash of metadata configuration for reproducibility
         config_hash = self._compute_config_hash(record_snapshot=not config.dry_run)
 
-        # Check for config drift in INCR mode against the last successful run
-        if config.run_mode == "INCR" and config_hash != "unknown":
-            try:
-                prev_hash = self.adapter.query_one("""
-                    SELECT config_hash
-                    FROM idr_out.run_history
-                    WHERE status LIKE 'SUCCESS%'
-                      AND config_hash IS NOT NULL
-                      AND config_hash != 'unknown'
-                    ORDER BY started_at DESC
-                    LIMIT 1
-                """)
-                if prev_hash and prev_hash != config_hash:
-                    msg = (
-                        f"Configuration drift detected in INCR mode "
-                        f"(previous={prev_hash}, current={config_hash}). "
-                        f"Run with --mode FULL to re-evaluate all historical entities."
-                    )
-                    self._warnings.append(msg)
-                    self.logger.warning(msg, extra={"run_id": self.run_id})
-            except Exception:
-                pass
-
+        matching_hash = self._matching_config_hash(config)
+        # Record even rejected requests, but never treat a failed/dry run as a baseline.
+        previous = (
+            self.adapter.query("""
+            SELECT matching_config_hash FROM idr_out.run_history
+            WHERE status LIKE 'SUCCESS%' AND run_id NOT LIKE 'dry_%'
+            ORDER BY started_at DESC, run_id DESC LIMIT 1
+        """)
+            if config.run_mode == "INCR"
+            else []
+        )
         # Note: We track dry run via run_id prefix (dry_run_*) instead of a column
         # This ensures compatibility with existing DDL schemas
         self.adapter.execute(f"""
             INSERT INTO idr_out.run_history
-            (run_id, run_mode, status, started_at, source_tables_processed, created_at, config_hash)
+            (run_id, run_mode, status, started_at, source_tables_processed, created_at, config_hash, matching_config_hash)
             VALUES ('{self.run_id}', '{config.run_mode}', 'RUNNING',
-                    {self._dialect["current_timestamp"]}, 0, {self._dialect["current_timestamp"]}, '{config_hash}')
+                    {self._dialect["current_timestamp"]}, {self._sources_verified}, {self._dialect["current_timestamp"]}, '{config_hash}', '{matching_hash}')
         """)
+
+        if config.run_mode == "INCR":
+            has_members = bool(
+                self.adapter.query_one(
+                    "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
+                )
+            )
+            if previous and previous[0].get("matching_config_hash") != matching_hash:
+                raise FullRebuildRequired(
+                    "Matching configuration changed or the baseline predates engine safeguards. Run with --mode FULL before INCR."
+                )
+            if has_members and not previous:
+                raise FullRebuildRequired(
+                    "No verified successful matching baseline. Run with --mode FULL before INCR."
+                )
+
+    def _matching_config_hash(self, config):
+        from .config import sql_to_config
+
+        # Use the canonical authoring form: NULL/default metadata round-trips and
+        # inactive definitions must not invalidate an otherwise identical baseline.
+        from .config_extensions import read_extensions
+        extensions = read_extensions(self.adapter)
+        current = sql_to_config(self.adapter)
+        if not current or not current.get("sources"):
+            raise FullRebuildRequired(
+                "Cannot verify matching configuration; repair the configuration and run with --mode FULL."
+            )
+        data = {
+            key: current.get(key, []) for key in ("sources", "rules", "fuzzy_rules", "survivorship")
+        }
+        if extensions.get("grouped_outputs"):
+            data["grouped_outputs"] = extensions["grouped_outputs"]
+        # Warehouse scan order is not semantic. Preserve source-priority lists,
+        # but sort collections of named definitions, mappings and attributes.
+        for key, field_name in (
+            ("sources", "id"),
+            ("rules", "id"),
+            ("fuzzy_rules", "id"),
+            ("survivorship", "attribute"),
+        ):
+            data[key] = sorted(data[key], key=lambda item: str(item[field_name]))
+        for source in data["sources"]:
+            source["identifiers"] = sorted(
+                source.get("identifiers", []), key=lambda item: (item["type"], item.get("expr", ""))
+            )
+            source["attributes"] = sorted(
+                source.get("attributes", []), key=lambda item: item["name"]
+            )
+        # Governance changes already have a separate retroactive INCR expansion path.
+        # Iteration budgets and blast-radius thresholds do not change match semantics.
+        data["execution"] = {"strict": config.strict, "max_group_size": config.max_group_size}
+        return (
+            "v1:"
+            + hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
+        )
 
     def _compute_config_hash(self, record_snapshot: bool = False) -> str:
         """Compute a hash of metadata tables for reproducibility tracking.
@@ -632,7 +788,7 @@ class IDRRunner:
                 survivorship = []
             try:
                 attr_mappings = self.adapter.query(
-                    "SELECT * FROM idr_meta.attribute_mapping ORDER BY table_id, attribute_name"
+                    "SELECT * FROM idr_meta.entity_attribute_mapping ORDER BY table_id, attribute_name"
                 )
             except Exception:
                 attr_mappings = []
@@ -659,18 +815,28 @@ class IDRRunner:
                         from .config import sql_to_config
 
                         full_cfg = sql_to_config(self.adapter)
-                        sources_json = json.dumps(full_cfg.get("sources", []), default=str).replace("'", "''")
+                        sources_json = json.dumps(full_cfg.get("sources", []), default=str).replace(
+                            "'", "''"
+                        )
                         rules_json = json.dumps(
                             {
                                 "rules": full_cfg.get("rules", []),
                                 "fuzzy_rules": full_cfg.get("fuzzy_rules", []),
                                 "exclusions": full_cfg.get("exclusions", []),
                                 "overrides": full_cfg.get("overrides", []),
-                                "use_default_exclusions": bool(full_cfg.get("use_default_exclusions", False)),
+                                "lenses": full_cfg.get("lenses", []),
+                                "ai_assistance": full_cfg.get("ai_assistance"),
+                                "evaluation": full_cfg.get("evaluation"),
+                                "grouped_outputs": full_cfg.get("grouped_outputs", []),
+                                "use_default_exclusions": bool(
+                                    full_cfg.get("use_default_exclusions", False)
+                                ),
                             },
                             default=str,
                         ).replace("'", "''")
-                        mappings_json = json.dumps(full_cfg.get("survivorship", []), default=str).replace("'", "''")
+                        mappings_json = json.dumps(
+                            full_cfg.get("survivorship", []), default=str
+                        ).replace("'", "''")
                         self.adapter.execute(f"""
                             INSERT INTO idr_out.config_snapshot
                             (config_hash, sources_json, rules_json, mappings_json, created_at)
@@ -695,6 +861,7 @@ class IDRRunner:
         iterations: int = 0,
         status: str = "SUCCESS",
         error: Optional[str] = None,
+        error_code: Optional[str] = None,
     ) -> RunResult:
         """Record run completion and return result."""
         duration = (datetime.now(timezone.utc).replace(tzinfo=None) - start_time).total_seconds()
@@ -726,6 +893,10 @@ class IDRRunner:
                 UPDATE idr_out.run_history SET
                     status = '{status_safe}',
                     duration_seconds = {int(duration)},
+                    duration_seconds_precise = {duration},
+                    ended_at = {self._dialect["current_timestamp"]},
+                    source_tables_processed = {getattr(self, "_sources_verified", 0)},
+                    clusters_changed = {getattr(self, "_clusters_changed", 0)},
                     entities_processed = {entities},
                     edges_created = {edges},
                     clusters_impacted = {clusters},
@@ -740,6 +911,10 @@ class IDRRunner:
                 UPDATE idr_out.run_history SET
                     status = '{status_safe}',
                     duration_seconds = {int(duration)},
+                    duration_seconds_precise = {duration},
+                    ended_at = {self._dialect["current_timestamp"]},
+                    source_tables_processed = {getattr(self, "_sources_verified", 0)},
+                    clusters_changed = {getattr(self, "_clusters_changed", 0)},
                     entities_processed = {entities},
                     edges_created = {edges},
                     clusters_impacted = {clusters},
@@ -752,11 +927,11 @@ class IDRRunner:
         for idx, metric in enumerate(self._stage_metrics):
             self.adapter.execute(f"""
                 INSERT INTO idr_out.stage_metrics
-                (run_id, stage_name, stage_order, started_at, ended_at, duration_seconds, rows_out)
+                (run_id, stage_name, stage_order, started_at, ended_at, duration_seconds, duration_seconds_precise, rows_out)
                 VALUES ('{self.run_id}', '{metric.stage_name}', {idx + 1},
                         TIMESTAMP '{metric.started_at.strftime("%Y-%m-%d %H:%M:%S")}',
                         TIMESTAMP '{(metric.ended_at or metric.started_at).strftime("%Y-%m-%d %H:%M:%S")}',
-                        {int(metric.duration_seconds)}, {metric.rows_affected})
+                        {int(metric.duration_seconds)}, {metric.duration_seconds}, {metric.rows_affected})
             """)
 
         self._emit_progress(
@@ -764,7 +939,7 @@ class IDRRunner:
                 "event": "run_complete",
                 "run_id": self.run_id,
                 "status": status,
-                "duration_seconds": round(duration, 1),
+                "duration_seconds": round(duration, 6),
                 "entities": entities,
                 "edges": edges,
                 "clusters": clusters,
@@ -835,8 +1010,13 @@ class IDRRunner:
             identifiers_extracted=identifiers,
             edges_created=edges,
             clusters_impacted=clusters,
+            clusters_resolved=clusters,
+            grouped_output_counts=getattr(self, "_grouped_output_counts", {}),
+            clusters_changed=getattr(self, "_clusters_changed", 0),
+            source_tables_processed=getattr(self, "_sources_verified", 0),
             lp_iterations=iterations,
             duration_seconds=duration,
             warnings=self._warnings,
             error=error,
+            error_code=error_code,
         )

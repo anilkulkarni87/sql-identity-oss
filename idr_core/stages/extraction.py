@@ -9,6 +9,7 @@ import os
 
 from ..canonicalizers import build_canonicalize_expr
 from ..config import build_where_clause
+from ..source_relation import source_relation_sql
 from .base import BaseStage
 
 
@@ -23,24 +24,7 @@ class ExtractionStage(BaseStage):
         dedup_order_by: str = "",
         watermark_col: str = "",
     ) -> str:
-        """Return either `table_fqn` or a ROW_NUMBER()-deduplicated subquery."""
-        if not deduplicate:
-            return table_fqn
-        order_expr = (dedup_order_by or "").strip()
-        if order_expr:
-            order_expr = self._validate_metadata_value(
-                order_expr, "expr", "source_table.dedup_order_by"
-            )
-        elif watermark_col:
-            order_expr = f"{watermark_col} DESC"
-        else:
-            order_expr = "1"
-        return (
-            f"(SELECT * FROM ("
-            f"SELECT *, ROW_NUMBER() OVER (PARTITION BY ({entity_key_expr}) ORDER BY {order_expr}) AS _idr_rn "
-            f"FROM {table_fqn} WHERE ({entity_key_expr}) IS NOT NULL"
-            f") _idr_dedup WHERE _idr_rn = 1)"
-        )
+        return source_relation_sql(table_fqn, entity_key_expr, deduplicate, dedup_order_by, watermark_col)
 
     def extract_entities(self, run_mode: str) -> int:
         """Extract entities from source tables."""
@@ -432,7 +416,7 @@ class ExtractionStage(BaseStage):
         # Get identifier mappings (joined with source_table to avoid N+1 lookup queries)
         mappings = self.adapter.query("""
             SELECT
-                im.table_id, im.identifier_type, im.identifier_value_expr, im.is_hashed,
+                im.table_id, im.identifier_type, im.identifier_value_expr, im.is_hashed, im.source_is_hashed,
                 r.canonicalize, r.max_group_size,
                 st.table_fqn, st.entity_key_expr
             FROM idr_meta.identifier_mapping im
@@ -489,7 +473,8 @@ class ExtractionStage(BaseStage):
             # Apply PII hashing if enabled
             is_hashed = bool(m.get("is_hashed", False))
             hash_pii = is_hashed or os.environ.get("IDR_HASH_PII", "").lower() in ("1", "true", "yes")
-            if hash_pii:
+            source_is_hashed = bool(m.get("source_is_hashed", False))
+            if hash_pii and not source_is_hashed:
                 if "sha256" in self._dialect:
                     norm_expr = self._dialect["sha256"](norm_expr)
                 elif "md5" in self._dialect:
@@ -497,7 +482,7 @@ class ExtractionStage(BaseStage):
 
             is_hashed_literal = (
                 self._dialect.get("bool_true", "TRUE")
-                if hash_pii
+                if hash_pii or source_is_hashed
                 else self._dialect.get("bool_false", "FALSE")
             )
 

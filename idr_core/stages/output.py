@@ -15,6 +15,9 @@ _CURRENT_OUTPUT_TABLES = (
     "identity_edges_current",
     "identity_identifiers_current",
     "identity_clusters_current",
+    "resolved_id_crosswalk",
+    "identity_lens_membership_current",
+    "identity_lens_clusters_current",
 )
 
 
@@ -24,6 +27,7 @@ class OutputStage(BaseStage):
     def __init__(self, ctx: StageContext, config=None):
         super().__init__(ctx)
         self.config = config
+        self.clusters_changed = 0
 
     def upsert(self, target_table, source_query, key_cols, update_cols, insert_cols):
         """Execute platform-specific upsert (MERGE or ON CONFLICT)."""
@@ -242,9 +246,12 @@ class OutputStage(BaseStage):
                 return
             if not self.adapter.table_exists("idr_out.identity_resolved_membership_current"):
                 return
-            prev_cnt = self.adapter.query_one(
-                "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
-            ) or 0
+            prev_cnt = (
+                self.adapter.query_one(
+                    "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
+                )
+                or 0
+            )
             if prev_cnt == 0:
                 return
 
@@ -291,12 +298,29 @@ class OutputStage(BaseStage):
     def _snapshot_current_outputs(self) -> Dict[str, bool]:
         """Snapshot mutable idr_out.*_current tables before Stage 8 writes begin."""
         snapshots: Dict[str, bool] = {}
-        for tbl in _CURRENT_OUTPUT_TABLES:
+        self._partial_profile_backups = set()
+        if self.config and self.config.run_mode == "INCR":
+            deleted = ""
+            if self.adapter.table_exists("idr_work.deleted_no_wm_entities"):
+                deleted = " UNION ALL SELECT m.resolved_id FROM idr_out.identity_resolved_membership_current m JOIN idr_work.deleted_no_wm_entities d ON d.entity_key=m.entity_key"
+            self.adapter.execute(
+                "CREATE OR REPLACE TABLE idr_work.output_affected_profile_ids AS "
+                "SELECT DISTINCT resolved_id FROM ("
+                "SELECT label AS resolved_id FROM idr_work.lp_labels "
+                "UNION ALL SELECT m.resolved_id FROM idr_out.identity_resolved_membership_current m JOIN idr_work.lp_labels l ON m.entity_key=l.entity_key"
+                + deleted
+                + ") affected_ids"
+            )
+        from ..grouped_outputs import definitions_from_warehouse
+        grouped = ["grouped_"+d.id for d in definitions_from_warehouse(self.adapter)]
+        for tbl in (*_CURRENT_OUTPUT_TABLES, "golden_profiles", *grouped):
             exists = bool(self.adapter.table_exists(f"idr_out.{tbl}"))
             if exists:
-                self.adapter.execute(
-                    f"CREATE OR REPLACE TABLE idr_work._backup_{tbl} AS SELECT * FROM idr_out.{tbl}"
-                )
+                predicate = ""
+                if self.config and self.config.run_mode == "INCR" and (tbl == "golden_profiles" or tbl.startswith("grouped_")):
+                    predicate = " WHERE resolved_id IN (SELECT resolved_id FROM idr_work.output_affected_profile_ids)"
+                    self._partial_profile_backups.add(tbl)
+                self.adapter.execute(f"CREATE OR REPLACE TABLE idr_work._backup_{tbl} AS SELECT * FROM idr_out.{tbl}{predicate}")
             snapshots[tbl] = exists
         return snapshots
 
@@ -304,9 +328,17 @@ class OutputStage(BaseStage):
         """Restore idr_out.*_current tables from pre-Stage-8 snapshots after a failure."""
         for tbl, existed in snapshots.items():
             if not existed:
+                self.adapter.execute(f"DROP TABLE IF EXISTS idr_out.{tbl}")
                 continue
             try:
                 if self.adapter.table_exists(f"idr_work._backup_{tbl}"):
+                    if tbl in self._partial_profile_backups:
+                        self.adapter.execute(f"DELETE FROM idr_out.{tbl} WHERE resolved_id IN (SELECT resolved_id FROM idr_work.output_affected_profile_ids)")
+                        self.adapter.execute(f"INSERT INTO idr_out.{tbl} SELECT * FROM idr_work._backup_{tbl}")
+                        continue
+                    if tbl == "golden_profiles" or tbl.startswith("grouped_"):
+                        self.adapter.execute(f"CREATE OR REPLACE TABLE idr_out.{tbl} AS SELECT * FROM idr_work._backup_{tbl}")
+                        continue
                     # Preserve table DDL constraints (e.g., DuckDB/Postgres PRIMARY KEY) while restoring rows.
                     self.adapter.execute(f"DELETE FROM idr_out.{tbl} WHERE 1=1")
                     self.adapter.execute(
@@ -365,7 +397,9 @@ class OutputStage(BaseStage):
                         f"({moved_pct:.2f}%) exceeds max_moved_entities_pct={float(max_moved_pct):.2f}%"
                     )
 
-        if max_cluster_delta_pct is not None and snapshots.get("identity_resolved_membership_current"):
+        if max_cluster_delta_pct is not None and snapshots.get(
+            "identity_resolved_membership_current"
+        ):
             run_mode = str(getattr(self.config, "run_mode", "FULL")).upper()
             if run_mode == "INCR":
                 prev_clusters = int(
@@ -404,7 +438,7 @@ class OutputStage(BaseStage):
                         f"({cluster_delta_pct:.2f}%) exceeds max_cluster_delta_pct={float(max_cluster_delta_pct):.2f}%"
                     )
 
-    def generate_output(self) -> int:
+    def generate_output(self, prepared_lenses=None) -> int:
         """Update output tables with resolved identities with rollback on mid-stage failure."""
         current_ts = self._dialect["current_timestamp"]
         snapshots = self._snapshot_current_outputs()
@@ -418,7 +452,6 @@ class OutputStage(BaseStage):
             raise
 
         try:
-
             # 1. Identify impacted clusters for confidence scoring
             self.adapter.execute("""
                 CREATE OR REPLACE TABLE idr_work.impacted_resolved_ids AS
@@ -458,7 +491,13 @@ class OutputStage(BaseStage):
                 """,
                 key_cols=["entity_key"],
                 update_cols=["resolved_id", "updated_at", "run_id", "super_cluster_id"],
-                insert_cols=["entity_key", "resolved_id", "updated_at", "run_id", "super_cluster_id"],
+                insert_cols=[
+                    "entity_key",
+                    "resolved_id",
+                    "updated_at",
+                    "run_id",
+                    "super_cluster_id",
+                ],
             )
 
             # 2b. Cleanup stale memberships (FULL run only) so removed/inactive source tables
@@ -562,7 +601,14 @@ class OutputStage(BaseStage):
                     """,
                     key_cols=["entity_key", "identifier_type"],
                     update_cols=["identifier_value_norm", "is_hashed", "updated_at", "run_id"],
-                    insert_cols=["entity_key", "identifier_type", "identifier_value_norm", "is_hashed", "updated_at", "run_id"],
+                    insert_cols=[
+                        "entity_key",
+                        "identifier_type",
+                        "identifier_value_norm",
+                        "is_hashed",
+                        "updated_at",
+                        "run_id",
+                    ],
                 )
                 if self.config and self.config.run_mode == "FULL":
                     self.adapter.execute(f"""
@@ -656,6 +702,45 @@ class OutputStage(BaseStage):
                 self._warnings.append(f"Profile generation failed: {str(e)}")
                 raise RuntimeError(f"Golden profile generation failed: {e}") from e
 
+            from ..grouped_outputs import materialize_grouped_outputs
+            self.grouped_output_counts = materialize_grouped_outputs(self.adapter, self.run_id, self.config.run_mode if self.config else "FULL")
+
+            # Publish prepared lenses inside the Stage 8 rollback window before advancing watermarks.
+            for lid, cache in (prepared_lenses or []):
+                self.adapter.execute(
+                    f"CREATE OR REPLACE TABLE idr_work.lp_labels_lens AS SELECT * FROM {cache}"
+                )
+                self.materialize_lens_output(lid)
+                self.adapter.execute(f"DROP TABLE IF EXISTS {cache}")
+
+            # Count distinct old/new cluster IDs whose memberships actually changed.
+            # Include retired IDs after merges and deleted records, not only this run's labels.
+            if snapshots.get("identity_resolved_membership_current"):
+                self.clusters_changed = int(
+                    self.adapter.query_one("""
+                    WITH changed AS (
+                        SELECT old.resolved_id AS old_id, new.resolved_id AS new_id
+                        FROM idr_work._backup_identity_resolved_membership_current old
+                        FULL OUTER JOIN idr_out.identity_resolved_membership_current new
+                          ON old.entity_key = new.entity_key
+                        WHERE old.resolved_id IS NULL OR new.resolved_id IS NULL
+                           OR old.resolved_id <> new.resolved_id
+                           OR COALESCE(old.super_cluster_id, old.resolved_id) <> COALESCE(new.super_cluster_id, new.resolved_id)
+                    ), ids AS (
+                        SELECT old_id AS resolved_id FROM changed
+                        UNION ALL SELECT new_id AS resolved_id FROM changed
+                    ) SELECT COUNT(DISTINCT resolved_id) FROM ids WHERE resolved_id IS NOT NULL
+                """)
+                    or 0
+                )
+            else:
+                self.clusters_changed = int(
+                    self.adapter.query_one(
+                        "SELECT COUNT(DISTINCT resolved_id) FROM idr_out.identity_resolved_membership_current"
+                    )
+                    or 0
+                )
+
             # 5. Update watermarks (ignore NULL watermark_value rows from candidate expansion / overrides)
             self.upsert(
                 target_table="idr_meta.run_state",
@@ -680,7 +765,9 @@ class OutputStage(BaseStage):
                 return int(res[0]["cnt"]) if res else 0
             except Exception:
                 try:
-                    res = self.adapter.query("SELECT COUNT(*) as cnt FROM idr_out.identity_clusters_current")
+                    res = self.adapter.query(
+                        "SELECT COUNT(*) as cnt FROM idr_out.identity_clusters_current"
+                    )
                     return int(res[0]["cnt"]) if res else 0
                 except Exception:
                     return 0
@@ -697,7 +784,19 @@ class OutputStage(BaseStage):
             if self.adapter.dialect == "bigquery"
             else ""
         )
-        # Analyze what would change
+        lens = (self.config.lens or "default") if self.config else "default"
+        named_lens = lens.lower() not in ("default", "none", "__none__")
+        membership = (
+            "idr_out.identity_lens_membership_current"
+            if named_lens
+            else "idr_out.identity_resolved_membership_current"
+        )
+        lens_pred = (
+            f" AND m.lens_id = '{self._validate_metadata_value(lens, 'identifier', 'lens_id')}'"
+            if named_lens
+            else ""
+        )
+        # Analyze what would change against the same saved graph view.
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_out.dry_run_results {dry_run_cluster}AS
             SELECT
@@ -711,8 +810,8 @@ class OutputStage(BaseStage):
                 END AS change_type,
                 '{self.run_id}' AS run_id
             FROM idr_work.lp_labels lp
-            LEFT JOIN idr_out.identity_resolved_membership_current m
-                ON lp.entity_key = m.entity_key
+            LEFT JOIN {membership} m
+                ON lp.entity_key = m.entity_key {lens_pred}
         """)
 
         # Summary statistics

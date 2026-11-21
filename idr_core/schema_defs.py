@@ -157,6 +157,7 @@ SYSTEM_TABLES: List[TableDef] = [
                 default="FALSE",
                 description="Whether the source value is already hashed",
             ),
+            ColumnDef("source_is_hashed", ColumnType.BOOL, default="FALSE", description="Source already holds a digest; preserve it without hashing again."),
         ],
     ),
     TableDef(
@@ -205,6 +206,7 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("source_priority_list", ColumnType.STRING),
             ColumnDef("recency_field", ColumnType.STRING),
             ColumnDef("is_active", ColumnType.BOOL, default="TRUE"),
+            ColumnDef("row_group", ColumnType.STRING),
         ],
     ),
     TableDef(
@@ -297,6 +299,9 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef(
                 "config_hash", ColumnType.STRING
             ),  # Hash of metadata config for reproducibility
+            ColumnDef("duration_seconds_precise", ColumnType.DOUBLE),
+            ColumnDef("clusters_changed", ColumnType.INT),
+            ColumnDef("matching_config_hash", ColumnType.STRING),
         ],
     ),
     TableDef(
@@ -310,6 +315,7 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("ended_at", ColumnType.TIMESTAMP),
             ColumnDef("duration_seconds", ColumnType.INT),
             ColumnDef("rows_out", ColumnType.INT),
+            ColumnDef("duration_seconds_precise", ColumnType.DOUBLE),
         ],
     ),
     TableDef(
@@ -642,9 +648,23 @@ _COLUMN_DESCRIPTIONS = {
     "sampled_at": "UTC timestamp when the evaluation pair was sampled.",
 }
 
+SYSTEM_TABLES.append(TableDef(schema="idr_out", name="ai_review_report", columns=[
+    ColumnDef("run_id", ColumnType.STRING, is_pk=True),
+    ColumnDef("owner_key", ColumnType.STRING, is_pk=True),
+    ColumnDef("report_json", ColumnType.STRING),
+    ColumnDef("scratch_token", ColumnType.STRING),
+    ColumnDef("input_expires_at", ColumnType.STRING),
+    ColumnDef("expires_at", ColumnType.STRING),
+], description="Owner-bound aggregate AI preview reports and retained workspace expiry."))
+
 for _tbl in SYSTEM_TABLES:
     if not _tbl.description and _tbl.fqn in _TABLE_DESCRIPTIONS:
         _tbl.description = _TABLE_DESCRIPTIONS[_tbl.fqn]
     for _col in _tbl.columns:
         if not _col.description and _col.name in _COLUMN_DESCRIPTIONS:
             _col.description = _COLUMN_DESCRIPTIONS[_col.name]
+
+SYSTEM_TABLES.append(TableDef(schema="idr_meta", name="config_extension", columns=[
+    ColumnDef("extension_key", ColumnType.STRING, is_pk=True),
+    ColumnDef("value_json", ColumnType.STRING),
+]))

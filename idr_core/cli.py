@@ -8,9 +8,12 @@ across all supported platforms.
 import argparse
 import os
 import sys
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from idr_core.logger_utils import configure_logging
+
+if TYPE_CHECKING:
+    from idr_core.llm import LLMClient
 
 
 def main(args: Optional[list] = None) -> int:
@@ -79,6 +82,8 @@ Examples:
     run_parser.add_argument(
         "--dry-run", action="store_true", help="Preview changes without committing"
     )
+    run_parser.add_argument("--evaluation-config", help="JSON label mapping and acceptance configuration for a dry run")
+    run_parser.add_argument("--ground-truth-table", help="Optional local warehouse entity_key/truth_id labels for dry-run evaluation")
     run_parser.add_argument(
         "--critique",
         action="store_true",
@@ -423,6 +428,8 @@ Examples:
         "--no-persist", action="store_true", help="Do not write sampled pairs to idr_out.evaluation_sample"
     )
 
+    eval_parser.add_argument("--evaluation-config", help="JSON label mapping and acceptance criteria; evaluates existing outputs without rebuilding the graph")
+
     # === idr plugins ===
     plugins_parser = subparsers.add_parser("plugins", help="Inspect registered plugins and extensions")
     plugins_subparsers = plugins_parser.add_subparsers(dest="plugins_cmd", help="Plugin commands")
@@ -437,6 +444,10 @@ Examples:
         ("models", "List locally available Ollama models"),
         ("ask", "Ask a natural-language question about the identity graph"),
         ("generate-config", "Profile warehouse tables (zero-PII) and generate a validated IDR config with AI reasoning"),
+        ("review", "Read a saved run-bound aggregate review"),
+        ("profile-preview", "Validate profiles without scanning or explicitly preview bounded complete clusters; no AI call"),
+        ("compare", "Compare one rule or lens change on frozen preview inputs"),
+        ("purge-reviews", "Purge this CLI owner's saved reviews and retained inputs"),
     ]:
         p = ai_subparsers.add_parser(sub_name, help=sub_help)
         p.add_argument("--provider", help="ollama | openai | anthropic | gemini | openai_compatible")
@@ -446,13 +457,39 @@ Examples:
         mask_grp = p.add_mutually_exclusive_group()
         mask_grp.add_argument("--mask-pii", action="store_true", help="Force PII masking before sending")
         mask_grp.add_argument("--no-mask-pii", action="store_true", help="Disable PII masking (local only)")
-        if sub_name == "ask":
+        if sub_name in ("review", "compare", "purge-reviews", "profile-preview"):
+            _add_connection_args(p)
+            if sub_name != "purge-reviews":
+                p.add_argument("--run-id", required=sub_name != "profile-preview")
+            if sub_name == "profile-preview":
+                p.add_argument("--config", required=True)
+                p.add_argument("--preview-mode", choices=["validate","targeted","full"], default="validate")
+                p.add_argument("--attributes", default="", help="Comma-separated profile fields")
+                p.add_argument("--grouped-outputs", default="", help="Comma-separated grouped output IDs")
+                p.add_argument("--max-clusters", type=int, default=25)
+                p.add_argument("--max-members", type=int, default=10000)
+                p.add_argument("--timeout-seconds", type=int, default=15)
+                p.add_argument("--max-bytes-billed", type=int, default=None, help="Optional BigQuery scan cost cap in bytes (min 1048576)")
+                p.add_argument("--allow-source-scan", action="store_true", help="Explicitly accept unknown source scan cost")
+                p.add_argument("--allow-full-population", action="store_true")
+                p.add_argument("--lens", default="default")
+            if sub_name == "compare":
+                p.add_argument("--config", required=True, help="Current draft YAML")
+                p.add_argument("--action", required=True, choices=["remove_rule", "set_group_limit", "raise_fuzzy_threshold", "set_lens_types"])
+                p.add_argument("--target", required=True, help="Exact rule or lens ID")
+                p.add_argument("--value", default="null", help="JSON value, e.g. 10, 0.95, or a list of identifier types")
+                p.add_argument("--lens", default="default")
+        elif sub_name == "ask":
             p.add_argument("question", help="Natural-language question")
             p.add_argument("--platform", "-p", choices=["duckdb", "bigquery", "snowflake", "databricks"])
             p.add_argument("--db", help="DuckDB database path")
             p.add_argument("--project", help="GCP project ID (BigQuery)")
         elif sub_name == "generate-config":
             _add_connection_args(p)
+            p.add_argument("--current-config", help="Current draft YAML for rules-only mode or locked decisions")
+            p.add_argument("--rules-only", action="store_true")
+            p.add_argument("--allow-match", help="Comma-separated approved identifier types")
+            p.add_argument("--allow-fuzzy", action="store_true", default=None)
             p.add_argument(
                 "--tables",
                 help="Comma-separated table FQNs to include (if omitted, auto-discovers non-system tables)",
@@ -461,18 +498,18 @@ Examples:
             p.add_argument(
                 "--goal",
                 default="Unify customer records accurately across sources with safe supernode guardrails and practical golden-profile survivorship.",
-                help="Business goal or domain guidance for the AI architect",
+                help="Local objective hints: precision, coverage, cross-source, auditability. Other text is not sent to AI.",
             )
             p.add_argument(
                 "--grain",
                 choices=["individual", "household", "account"],
-                default="individual",
-                help="Primary resolution grain policy (default: individual)",
+                default=None,
+                help="Primary resolution grain policy (new drafts default to individual)",
             )
             p.add_argument(
                 "--event-policy",
                 choices=["bridge", "include", "exclude"],
-                default="bridge",
+                default=None,
                 help="How to treat EVENT_FACT tables (bridge=link only without profile attrs, include=full, exclude=skip)",
             )
             p.add_argument(
@@ -980,8 +1017,6 @@ def handle_run(args) -> int:
     from idr_core.config import (
         apply_config_to_warehouse,
         compute_dry_run_summary,
-        restore_meta_tables,
-        snapshot_meta_tables,
     )
     from idr_core.runner import RunConfig
 
@@ -991,7 +1026,6 @@ def handle_run(args) -> int:
         print(f"Error: {e}")
         return 1
 
-    meta_snapshots = {}
     ephemeral_dry_run = False
     try:
         runner = IDRRunner(adapter)
@@ -1001,10 +1035,7 @@ def handle_run(args) -> int:
         if args.config:
             config_data = load_config(args.config)
             if args.dry_run:
-                IDRRunner.check_no_active_run_lock(adapter)
                 ephemeral_dry_run = True
-                meta_snapshots = snapshot_meta_tables(adapter)
-                apply_config_to_warehouse(adapter, config_data, record_snapshot=False)
             else:
                 apply_config_to_warehouse(adapter, config_data, record_snapshot=True)
 
@@ -1019,10 +1050,27 @@ def handle_run(args) -> int:
             lens=getattr(args, "lens", None),
             skip_lenses=getattr(args, "skip_lenses", False),
         )
-        result = runner.run(config)
-
         dry_summary = None
-        if args.dry_run and result.status == "DRY_RUN_COMPLETE":
+        if args.dry_run:
+            from types import SimpleNamespace
+
+            from idr_core.ai_review import AIReviewService
+            from idr_core.config import sql_to_config
+            draft_cfg = config_data if args.config else sql_to_config(adapter)
+            options = dict(run_mode=config.run_mode, max_iters=config.max_iters, strict=config.strict,
+                           max_group_size=config.max_group_size, lens=config.lens or "default")
+            truth = {"ground_truth_table": args.ground_truth_table} if getattr(args, "ground_truth_table", None) else None
+            if getattr(args, "evaluation_config", None):
+                import json
+                with open(args.evaluation_config) as label_file:
+                    truth = json.load(label_file)
+            preview = AIReviewService(adapter).preview(draft_cfg, options, ground_truth=truth)
+            result = SimpleNamespace(**{k:v for k,v in preview.items() if k not in ("review", "draft_hash", "dry_run_summary")})
+            dry_summary = preview["dry_run_summary"]
+        else:
+            result = runner.run(config)
+
+        if args.dry_run and dry_summary is None and result.status == "DRY_RUN_COMPLETE":
             dry_summary = compute_dry_run_summary(
                 adapter,
                 result.run_id,
@@ -1059,27 +1107,19 @@ def handle_run(args) -> int:
                 corr_suffix = f" (corroborated by: {corr_types})" if corr_types else ""
                 print(f"  Shadow-Kept:     {shadow_kept:,} entities{corr_suffix}")
             if ephemeral_dry_run:
-                print("  Config Mode:     Ephemeral (--dry-run restored prior idr_meta state)")
-        if result.warnings:
+                print("  Config Mode:     Isolated (--dry-run left active idr_meta unchanged)")
+        if getattr(result, "warnings", None):
             print(f"  {'-' * 56}")
             print("  Warnings:")
             for w in result.warnings:
                 print(f"    ! {w}")
-        if result.error:
+        if getattr(result, "error", None):
             print(f"  Error:           {result.error}")
         print(f"{'=' * 60}\n")
 
         if getattr(args, "critique", False) and args.dry_run and result.status == "DRY_RUN_COMPLETE":
-            from idr_core.ai_assistant import critique_dry_run_with_ai
-            from idr_core.config import sql_to_config
-
-            draft_cfg = config_data if args.config else sql_to_config(adapter)
-            critique = critique_dry_run_with_ai(
-                adapter=adapter,
-                draft_config=draft_cfg,
-                dry_run_summary=dry_summary or {},
-                warnings=result.warnings,
-            )
+            from idr_core.ai_review import AIReviewService
+            critique = AIReviewService(adapter).get(result.run_id)
             tel = critique.get("telemetry") or {}
             print(f"{'=' * 60}")
             print(
@@ -1102,8 +1142,6 @@ def handle_run(args) -> int:
         return 0 if ("SUCCESS" in result.status or result.status == "DRY_RUN_COMPLETE") else 1
 
     finally:
-        if meta_snapshots:
-            restore_meta_tables(adapter, meta_snapshots)
         adapter.close()
 
 
@@ -1289,7 +1327,7 @@ def handle_bootstrap(args) -> int:
     from idr_core.bootstrap import AutoBootstrapper
 
     print("=" * 70)
-    print(f"⚡  SQL Identity Resolution — Autonomous Bootstrapper")
+    print("⚡  SQL Identity Resolution — Autonomous Bootstrapper")
     print("=" * 70)
 
     schema = getattr(args, "schema", None)
@@ -1340,6 +1378,28 @@ def handle_evaluate(args) -> int:
     print(f"📊  SQL Identity Resolution — Quality Evaluation ({evaluator.dialect_name.upper()})")
     print("=" * 70)
 
+    if getattr(args, "evaluation_config", None):
+        import json
+        import uuid
+
+        from idr_core.config import sql_to_config
+        from idr_core.evaluation_config import EvaluationOptions, acceptance, materialize_labels
+        target = "idr_work.eval_labels_" + uuid.uuid4().hex[:12]
+        try:
+            with open(args.evaluation_config) as file:
+                options = EvaluationOptions.model_validate(json.load(file))
+            normalized = materialize_labels(adapter, sql_to_config(adapter), options, target)
+            result = evaluator.evaluate_ground_truth(**normalized)
+            check = acceptance(result, options)
+            print(json.dumps({"evaluation": result, "acceptance": check}, default=str, indent=2))
+            return 0 if check["status"] == "passed" else 1
+        except Exception as exc:
+            print(f"Evaluation configuration failed: {exc}")
+            return 1
+        finally:
+            adapter.execute(f"DROP TABLE IF EXISTS {target}")
+            adapter.close()
+
     gt_table = getattr(args, "ground_truth_table", None)
     if gt_table:
         res = evaluator.evaluate_ground_truth(
@@ -1355,9 +1415,9 @@ def handle_evaluate(args) -> int:
         print(f"Predicted Clusters : {res['predicted_clusters']:,}")
         print(f"True Clusters      : {res['true_clusters']:,}")
         print("-" * 70)
-        print(f"Pairwise Precision : {res['precision']:.4f}  (TP={res['tp_pairs']:,}, FP={res['fp_pairs']:,})")
-        print(f"Pairwise Recall    : {res['recall']:.4f}  (FN={res['fn_pairs']:,})")
-        print(f"Pairwise F1 Score  : {res['f1']:.4f}")
+        print(f"Pairwise Precision : {format(res['precision'], '.4f') if res['precision'] is not None else 'N/A'}  (TP={res['tp_pairs']:,}, FP={res['fp_pairs']:,})")
+        print(f"Pairwise Recall    : {format(res['recall'], '.4f') if res['recall'] is not None else 'N/A'}  (FN={res['fn_pairs']:,})")
+        print(f"Pairwise F1 Score  : {format(res['f1'], '.4f') if res['f1'] is not None else 'N/A'}")
         if res.get("top_overmerged_clusters"):
             print(f"\n⚠️  Top Over-Merged Clusters ({len(res['top_overmerged_clusters'])} shown):")
             for c in res["top_overmerged_clusters"][:5]:
@@ -1444,6 +1504,41 @@ def handle_ai(args) -> int:
             print(f"  - {m}")
         return 0
 
+    if args.ai_cmd in ("review", "compare", "purge-reviews", "profile-preview"):
+        import json
+
+        from .ai_review import AIReviewService
+        from .config import load_config
+        adapter = get_adapter(args)
+        try:
+            service = AIReviewService(adapter)
+            if args.ai_cmd == "profile-preview":
+                from .ai_config import draft_hash
+                from .profile_preview import ProfilePreviewOptions, preview_profiles
+                cfg = load_config(args.config)
+                options = ProfilePreviewOptions(mode=args.preview_mode, attributes=[v.strip() for v in args.attributes.split(',') if v.strip()],
+                    grouped_outputs=[v.strip() for v in args.grouped_outputs.split(',') if v.strip()],
+                    max_clusters=args.max_clusters, max_members=args.max_members, timeout_seconds=args.timeout_seconds,
+                    max_bytes_billed=args.max_bytes_billed,
+                    allow_unknown_scan_cost=args.allow_source_scan, allow_full_population=args.allow_full_population)
+                result = preview_profiles(service, cfg, args.run_id, draft_hash(cfg), args.lens, options)
+                print(json.dumps(result, indent=2, default=str))
+                return 0 if result['status'] in ('complete','validated') else 1
+            if args.ai_cmd == "purge-reviews":
+                print(json.dumps({"purged": service.purge(all_owned=True, limit=100)}))
+            elif args.ai_cmd == "review":
+                print(json.dumps(service.get(args.run_id), indent=2))
+            else:
+                cfg = load_config(args.config)
+                patch = service._patch(cfg, args.action, args.target, json.loads(args.value))
+                print(json.dumps(service.compare(args.run_id, cfg, patch, args.lens), indent=2))
+            return 0
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        finally:
+            adapter.close()
+
     client = _build_llm_client_from_args(args)
     if args.ai_cmd == "test":
         res = test_llm_connection(client)
@@ -1464,11 +1559,15 @@ def handle_ai(args) -> int:
         import json
 
         from idr_core.bootstrap import AutoBootstrapper
+        from idr_core.config import load_config
         from idr_core.rule_generator import AIRuleGenerator, render_config_yaml_with_reasoning
 
         adapter = get_adapter(args)
+        current = load_config(args.current_config) if args.current_config else {}
         tables_arg = getattr(args, "tables", None)
-        if tables_arg:
+        if args.rules_only and current:
+            tables = [source["table"] for source in current.get("sources", [])]
+        elif tables_arg:
             tables = [t.strip() for t in tables_arg.split(",") if t.strip()]
         else:
             tables = AutoBootstrapper(adapter)._discover_tables(getattr(args, "schema", None))
@@ -1483,32 +1582,25 @@ def handle_ai(args) -> int:
         print(f"Tables ({len(tables)}): {', '.join(tables)}")
         print(f"Model:  {client.config.provider}:{client.config.resolved_model()}")
 
-        policy_parts = []
-        grain = getattr(args, "grain", "individual")
-        event_policy = getattr(args, "event_policy", "bridge")
-        sor = (getattr(args, "system_of_record", "") or "").strip()
-        if grain == "individual":
-            policy_parts.append("Primary resolution grain: Strict Individual.")
-        elif grain == "household":
-            policy_parts.append("Primary resolution grain: Household (include shared phone/address identifiers).")
-        else:
-            policy_parts.append("Primary resolution grain: B2B Account / Organization.")
-        if event_policy == "bridge":
-            policy_parts.append("Event/fact tables: link for bridging only without mapping transactional attributes.")
-        elif event_policy == "exclude":
-            policy_parts.append("Event/fact tables: set include_in_idr=false for high-volume event/telemetry tables.")
-        else:
-            policy_parts.append("Event/fact tables: include fully in IDR.")
-        if sor:
-            policy_parts.append(f"System of Record for Survivorship source_priority #1: {sor}.")
-        full_goal = f"{getattr(args, 'goal', '').strip()} {' '.join(policy_parts)}".strip()
+        from idr_core.ai_config import AIConfigContext
+        ctx = AIConfigContext.model_validate(current.get("ai_assistance") or {})
+        ctx.grain = args.grain or ctx.grain
+        ctx.event_policy = args.event_policy or ctx.event_policy
+        ctx.system_of_record = args.system_of_record or ctx.system_of_record
+        ctx.fuzzy = args.allow_fuzzy if args.allow_fuzzy is not None else ctx.fuzzy
+        if args.allow_match is not None:
+            ctx.allowed_matching_identifiers = [k.strip() for k in args.allow_match.split(',') if k.strip()]
+        if args.rules_only and not current:
+            print("--rules-only requires --current-config", file=sys.stderr)
+            adapter.close()
+            return 1
 
         def _cli_progress(evt: dict) -> None:
             print(f"  [{evt.get('step', '?')}/{evt.get('total_steps', 5)}] {evt.get('message', '')}", flush=True)
 
         plan = AIRuleGenerator(adapter, client=client).generate(
             tables=tables,
-            goal=full_goal,
+            goal=getattr(args, "goal", ""), context=ctx, current_config=current, mode="rules" if args.rules_only else "config",
             sample_size=getattr(args, "sample_size", 2000),
             verify_sql=not getattr(args, "no_verify_sql", False),
             on_progress=_cli_progress,
@@ -1516,8 +1608,9 @@ def handle_ai(args) -> int:
 
         yaml_text = render_config_yaml_with_reasoning(plan)
         out_path = getattr(args, "output", "idr_config.yaml")
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(yaml_text)
+        if plan.validation_report.valid:
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(yaml_text)
 
         reasoning_out = getattr(args, "reasoning_out", None)
         if reasoning_out:
@@ -1550,6 +1643,12 @@ def handle_ai(args) -> int:
             for w in plan.validation_report.warnings:
                 print(f"  ! {w}")
 
+        adapter.close()
+        if not plan.validation_report.valid:
+            print("Invalid proposal; no usable config file written.", file=sys.stderr)
+            for error in plan.validation_report.errors:
+                print(error, file=sys.stderr)
+            return 1
         print(f"\n📁 Config written to: {out_path}")
         if reasoning_out:
             print(f"📄 Reasoning report written to: {reasoning_out}")

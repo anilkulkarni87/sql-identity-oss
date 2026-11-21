@@ -272,7 +272,7 @@ def test_recency_sql_handles_null_watermark_across_all_dialects(dialect):
     pb = ProfileBuilder(adapter=mock_adapter)
     sql = pb._build_column_selection({"attribute_name": "city", "strategy": "RECENCY"})
     if dialect == "bigquery":
-        assert "ARRAY_AGG(city IGNORE NULLS ORDER BY recency_ts DESC" in sql
+        assert "ARRAY_AGG(city IGNORE NULLS ORDER BY COALESCE(recency_ts" in sql
     else:
         assert "COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00')" in sql
     assert "city" in sql

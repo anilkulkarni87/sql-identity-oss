@@ -3,6 +3,7 @@ export interface Identifier {
     column: string; // Used in UI state (locally 'column', mapped to 'expr' in config)
     expr?: string;  // Used in final config
     is_hashed?: boolean;
+    source_is_hashed?: boolean;
     is_match_key?: boolean; // If true, used in matching rules
 }
 
@@ -74,6 +75,7 @@ export interface SurvivorshipRule {
         | (string & {});
     source_priority?: string[]; // List of table names or IDs
     recency_field?: string;
+    row_group?: string;
     strict_source?: boolean;
 }
 
@@ -85,8 +87,78 @@ export interface LensRule {
     max_group_size?: number;
 }
 
+export interface AIConfigContext {
+    version: 1;
+    grain: 'individual' | 'household' | 'account';
+    event_policy: 'bridge' | 'include' | 'exclude';
+    approved_event_aggregates?: Record<string, Record<string, 'AGG_SUM' | 'AGG_MIN' | 'AGG_MAX'>>;
+    excluded_tables: string[];
+    system_of_record?: string | null;
+    allowed_matching_identifiers?: string[] | null;
+    locked_fields: string[];
+    table_roles?: Record<string, string>;
+    objectives?: Array<'precision' | 'coverage' | 'cross_source' | 'auditability'>;
+    fuzzy: boolean;
+    requested_lenses: string[];
+}
+
+export const defaultAIContext: AIConfigContext = {
+    version: 1, grain: 'individual', event_policy: 'bridge', excluded_tables: [],
+    locked_fields: [], fuzzy: false, requested_lenses: [],
+};
+
+export function localGoalObjectives(note: string): NonNullable<AIConfigContext['objectives']> {
+    const matches: NonNullable<AIConfigContext['objectives']> = [];
+    if (/precision|false.positive|conservative|accurate/i.test(note)) matches.push('precision');
+    if (/coverage|recall|missing.match/i.test(note)) matches.push('coverage');
+    if (/cross.source|across.source|cross.channel/i.test(note)) matches.push('cross_source');
+    if (/audit|explain|traceab/i.test(note)) matches.push('auditability');
+    return matches;
+}
+
+export interface ReviewPatch {
+    action: 'remove_rule' | 'set_group_limit' | 'raise_fuzzy_threshold' | 'set_lens_types';
+    label: string;
+    target: string;
+    value: unknown;
+    base_draft_hash: string;
+    measured: boolean;
+    tradeoff: string;
+}
+
+export interface AIReview {
+    run_id: string;
+    run_mode?: string;
+    execution_options?: {run_mode?: string; strict?: boolean; max_iters?: number; max_group_size?: number | null};
+    draft_hash: string;
+    lens: string;
+    status: 'no_detected_risks' | 'needs_review' | 'high_risk' | 'insufficient_evidence';
+    health: string;
+    headline: string;
+    provider: string;
+    model: string;
+    pii_masked: boolean;
+    telemetry: {
+        total_entities: number; total_clusters: number; singletons: number;
+        singleton_pct: number; singleton_entity_pct?: number; max_cluster_size: number; large_clusters: number;
+        edges_by_type: Record<string, number>;
+        rule_contributions?: Array<{rule_id: string; edge_count: number; causal_effect_measured: boolean}>;
+        source_coverage?: Array<{source_id: string; total_entities: number; singleton_entities: number}>;
+        skipped_supernodes: Array<{ identifier_type: string; skipped_groups: number; max_group_size_seen: number }>;
+    };
+    findings: Array<{ severity: 'high' | 'medium' | 'info'; title: string; detail: string; metric: string; recommendation?: string; expected_effect?: string; tradeoff?: string; current_value?: number; proposed_value?: number | null; patch?: ReviewPatch | null }>;
+    evaluation?: Record<string, number | null> | null;
+    evaluation_acceptance?: {status:string; reasons:string[]; scope:string};
+    profile_validation?: ProfileValidation;
+    limitations: string[];
+    comparison?: { baseline_run_id: string; changes: Record<string, number>; same_extraction: boolean; patch: ReviewPatch };
+}
+
 export interface IDRConfig {
+    grouped_outputs?: Array<{id:string;kind?:'grouped_state';dimensions:string[];fields:string[];sources:Array<{source_id:string;dimensions:Record<string,string>;fields:Record<string,string>;recency_field?:string}>;strategy?:'RECENCY'|'PRIORITY_RECENCY';source_priority?:string[];conflict_policy?:'error'|'mark';null_dimensions?:'error'|'keep'}>;
+    evaluation?: EvaluationOptions;
     sources: SourceConfig[];
+    ai_assistance?: AIConfigContext;
     rules?: MatchingRule[];
     fuzzy_rules?: MatchingRule[];
     survivorship?: SurvivorshipRule[];
@@ -99,4 +171,21 @@ export interface IDRConfig {
 export interface TableColumn {
     name: string;
     type: string;
+}
+
+export interface EvaluationOptions {
+    ground_truth_table: string; entity_key_col?: string; truth_id_col?: string;
+    source_mappings?: Array<{source_id: string; key_columns: Record<string,string>; table?: string; truth_id_col?: string; source_column?: string; source_value?: string}>;
+    max_label_rows?: number; top_n_errors?: number; min_evaluated_entities?: number; min_true_pairs?: number;
+    min_label_overlap?: number; min_precision?: number; min_recall?: number;
+}
+export interface ProfileValidation {
+    mode: 'validate'; status: string; data_scanned: boolean; source_scan_cost: string;
+    attributes: Array<{attribute: string; strategy: string; sources: string[]}>; grouped_outputs?: Array<{id:string;dimensions:string[];fields:string[]}>; limitations: string[];
+}
+export interface ProfilePreviewResult {
+    grouped_outputs?: Record<string,{rows:number;conflicts:number}>;
+    mode: 'targeted' | 'full'; status: string; selected_clusters: number; selected_members: number; profile_count: number;
+    attributes: Array<{attribute: string; changed_profiles?: number; paired_profiles?: number; after: {profiles:number; non_null:number; sample_sum?: number | string | null}; before?: {profiles:number; non_null:number; sample_sum?: number | string | null}}>;
+    limitations: string[];
 }

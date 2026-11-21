@@ -299,6 +299,12 @@ def validate_config(config: Dict[str, Any]) -> bool:
         if not isinstance(config["generate_evidence"], bool):
             raise ValueError("Config 'generate_evidence' must be a boolean (true/false)")
 
+    if config.get("grouped_outputs"):
+        from .grouped_outputs import validate_grouped_outputs
+        validate_grouped_outputs(config)
+    if config.get("evaluation"):
+        from .evaluation_config import EvaluationOptions
+        EvaluationOptions.model_validate(config["evaluation"])
     return True
 
 
@@ -582,7 +588,8 @@ ON {join_cond}
                 "table_id": src["id"],
                 "identifier_type": id_type,
                 "identifier_value_expr": col_expr,
-                "is_hashed": False,
+                "is_hashed": next((bool(i.get("is_hashed", False)) for i in raw_ids if isinstance(i, dict) and i.get("type") == id_type), False) if isinstance(raw_ids, list) else False,
+                "source_is_hashed": next((bool(i.get("source_is_hashed", False)) for i in raw_ids if isinstance(i, dict) and i.get("type") == id_type), False) if isinstance(raw_ids, list) else False,
             }
             statements.append(
                 generate_upsert(
@@ -612,7 +619,7 @@ ON {join_cond}
 
     # Rules
     rules_list = config.get("rules") or []
-    if not rules_list:
+    if not rules_list and "rules" not in config:
         # Auto-infer rules from distinct identifier types found across sources
         seen_types = set()
         inferred_rules = []
@@ -768,9 +775,19 @@ ON {join_cond}
             "strategy": rule["strategy"],
             "source_priority_list": priority_list_str,
             "recency_field": recency_field,
+            "row_group": validate_identifier(rule["row_group"], "row_group") if rule.get("row_group") else None,
             "is_active": True,
         }
         statements.append(generate_upsert("idr_meta.survivorship_rule", ["attribute_name"], data))
+
+    for extension in ("evaluation", "grouped_outputs"):
+        if config.get(extension):
+            statements.append(generate_upsert("idr_meta.config_extension", ["extension_key"],
+                {"extension_key": extension, "value_json": json.dumps(config[extension])}))
+        elif extension in config:
+            statements.append(
+                f"DELETE FROM idr_meta.config_extension WHERE extension_key = '{extension}';"
+            )
 
     # Multi-Lens definitions (optional)
     for lens in (config.get("lenses") or []):
@@ -835,7 +852,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             try:
                 return adapter.query("""
                     SELECT table_id, table_fqn, entity_type, entity_key_expr,
-                           watermark_column, deduplicate, dedup_order_by
+                           watermark_column, watermark_lookback_minutes, deduplicate, dedup_order_by
                     FROM idr_meta.source_table
                     WHERE is_active = TRUE
                 """)
@@ -865,8 +882,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
 
         def _query_ids():
             return adapter.query("""
-                SELECT table_id, identifier_type, identifier_value_expr
-                FROM idr_meta.identifier_mapping
+                SELECT * FROM idr_meta.identifier_mapping
             """)
 
         def _query_attrs():
@@ -900,7 +916,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
         def _query_active_survivorship():
             try:
                 return adapter.query("""
-                    SELECT attribute_name, strategy, source_priority_list, recency_field
+                    SELECT *
                     FROM idr_meta.survivorship_rule
                     WHERE is_active = TRUE
                 """)
@@ -914,7 +930,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                         "Warning: 'is_active' column missing in survivorship_rule, assuming all active."
                     )
                     return adapter.query("""
-                        SELECT attribute_name, strategy, source_priority_list, recency_field
+                        SELECT *
                         FROM idr_meta.survivorship_rule
                     """)
                 raise e
@@ -1003,6 +1019,8 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                     "type": row["identifier_type"],
                     "column": row["identifier_value_expr"],
                     "expr": row["identifier_value_expr"],
+                    "is_hashed": bool(row.get("is_hashed", False)),
+                    "source_is_hashed": bool(row.get("source_is_hashed", False)),
                 }
             )
 
@@ -1033,6 +1051,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 "entity_type": src_row["entity_type"],
                 "entity_key": src_row["entity_key_expr"],
                 "watermark_column": clean_wm,
+                "watermark_lookback_minutes": int(src_row.get("watermark_lookback_minutes") or 0),
                 "identifiers": ids_map.get(tid, []),
                 "attributes": attrs_map.get(tid, []),
             }
@@ -1050,6 +1069,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 "match_keys": [rule_row["identifier_type"]],
                 "priority": rule_row["priority"],
                 "canonicalize": rule_row.get("canonicalize", "LOWERCASE"),
+                "max_group_size": int(rule_row.get("max_group_size") or 10000),
             }
             config["rules"].append(rule)
 
@@ -1078,6 +1098,8 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             if rec_f and str(rec_f).strip().lower() not in ("", "none", "null"):
                 rule["recency_field"] = str(rec_f).strip()
 
+            if srv_row.get("row_group"):
+                rule["row_group"] = srv_row["row_group"]
             config["survivorship"].append(rule)
 
         # 4. Fuzzy Rules
@@ -1132,6 +1154,23 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                     ldef["max_group_size"] = int(lrow["max_group_size"])
                 config["lenses"].append(ldef)
 
+        try:
+            rows = adapter.query("SELECT sources_json, rules_json, mappings_json FROM idr_out.config_snapshot ORDER BY created_at DESC LIMIT 1")
+            if rows:
+                saved = parse_config_snapshot_row(rows[0])
+                if saved.get("ai_assistance"):
+                    from .ai_config import AIConfigContext, policy_errors, restore_authoring_context
+                    config = restore_authoring_context(config, saved, adapter.dialect)
+                    ctx = AIConfigContext.model_validate(saved["ai_assistance"])
+                    def identities(cfg):
+                        return {(s["id"], s["table"]) for s in cfg.get("sources", [])}
+
+                    if identities(saved) == identities(config) and not policy_errors(config, ctx, saved):
+                        config["ai_assistance"] = ctx.model_dump(mode="json")
+        except Exception:
+            pass
+        from .config_extensions import read_extensions
+        config.update(read_extensions(adapter))
         return config
 
     except Exception as e:
@@ -1605,6 +1644,12 @@ def parse_config_snapshot_row(row: Dict[str, Any]) -> Dict[str, Any]:
             config_dict["exclusions"] = parsed_rules.get("exclusions", [])
             config_dict["overrides"] = parsed_rules.get("overrides", [])
             config_dict["use_default_exclusions"] = parsed_rules.get("use_default_exclusions", False)
+            if parsed_rules.get("evaluation"):
+                config_dict["evaluation"] = parsed_rules["evaluation"]
+            if parsed_rules.get("grouped_outputs"):
+                config_dict["grouped_outputs"] = parsed_rules["grouped_outputs"]
+            if parsed_rules.get("ai_assistance"):
+                config_dict["ai_assistance"] = parsed_rules["ai_assistance"]
             if parsed_rules.get("lenses"):
                 config_dict["lenses"] = parsed_rules["lenses"]
         else:
@@ -1683,12 +1728,19 @@ def apply_config_to_warehouse(
                 src["attributes"] = []
 
     validate_config(cfg)
+    if cfg.get("ai_assistance"):
+        from .ai_config import AIConfigContext, candidate_errors, policy_errors
+        context = AIConfigContext.model_validate(cfg["ai_assistance"])
+        errors = candidate_errors(cfg) + policy_errors(cfg, context, cfg)
+        if errors:
+            raise ValueError("; ".join(errors))
 
     _report("schema", "Ensuring metadata schema", 20, "Checking idr_meta & idr_out tables...")
     SchemaManager(adapter).initialize(reset=False)
 
     _report("clearing", "Clearing stale metadata", 30, "Removing obsolete mappings & rules...")
     for meta_table in (
+        "idr_meta.config_extension",
         "idr_meta.identifier_mapping",
         "idr_meta.entity_attribute_mapping",
         "idr_meta.source_table",
@@ -1729,6 +1781,9 @@ def apply_config_to_warehouse(
             "overrides": cfg.get("overrides", []),
             "use_default_exclusions": bool(cfg.get("use_default_exclusions", False)),
             "lenses": cfg.get("lenses", []),
+            "ai_assistance": cfg.get("ai_assistance"),
+            "evaluation": cfg.get("evaluation"),
+            "grouped_outputs": cfg.get("grouped_outputs", []),
         }
     )
     mappings_json = json.dumps(cfg.get("survivorship", []))

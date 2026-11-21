@@ -1,3 +1,6 @@
+import AIConfigPolicy from '../../components/AIConfigPolicy';
+import AIProposalReview from '../../components/AIProposalReview';
+import { defaultAIContext, localGoalObjectives } from '../../types';
 import { useState, useEffect, useRef } from 'react';
 import {
     Loader2, Key, Tag, Fingerprint, Clock, CheckSquare, Square,
@@ -119,11 +122,26 @@ export default function StepMap({
     const [aiProgress, setAiProgress] = useState<AiProgressEvent | null>(null);
     const [aiNotice, setAiNotice] = useState<string | null>(null);
     const [aiGoal, setAiGoal] = useState<string>('');
-    const [aiGrain, setAiGrain] = useState<'individual' | 'household' | 'account'>('individual');
-    const [aiEventPolicy, setAiEventPolicy] = useState<'bridge' | 'include' | 'exclude'>('bridge');
-    const [aiSystemOfRecord, setAiSystemOfRecord] = useState<string>('');
+    const [aiGrain, setAiGrain] = useState<'individual' | 'household' | 'account'>(initialConfig?.ai_assistance?.grain || 'individual');
+    const [aiEventPolicy, setAiEventPolicy] = useState<'bridge' | 'include' | 'exclude'>(initialConfig?.ai_assistance?.event_policy || 'bridge');
+    const [aiSystemOfRecord, setAiSystemOfRecord] = useState<string>(initialConfig?.ai_assistance?.system_of_record || '');
+    const [aiFuzzy, setAiFuzzy] = useState(initialConfig?.ai_assistance?.fuzzy || false);
+    const [proposalBase, setProposalBase] = useState('');
+    const [advancedPolicy, setAdvancedPolicy] = useState(initialConfig?.ai_assistance || {...defaultAIContext});
     const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null);
     const [aiReportOpen, setAiReportOpen] = useState<boolean>(true);
+
+    const generationContext = {...advancedPolicy, grain: aiGrain, event_policy: aiEventPolicy,
+        system_of_record: aiSystemOfRecord || null, fuzzy: aiFuzzy,
+        objectives: Array.from(new Set([...(advancedPolicy.objectives || []), ...localGoalObjectives(aiGoal)]))};
+
+    useEffect(() => {
+        const next = initialConfig?.ai_assistance;
+        if (next) {
+            setAiGrain(next.grain); setAiEventPolicy(next.event_policy);
+            setAiSystemOfRecord(next.system_of_record || ''); setAiFuzzy(next.fuzzy); setAdvancedPolicy(next);
+        }
+    }, [initialConfig?.ai_assistance]);
 
     const latestInitialConfigRef = useRef<IDRConfig | undefined>(initialConfig);
     latestInitialConfigRef.current = initialConfig;
@@ -197,6 +215,7 @@ export default function StepMap({
             .map(t => {
                 const s = srcMap[t];
                 return {
+                    ...s,
                     id: s.id || t.replace(/\./g, '_'),
                     table: t,
                     entity_key: s.entity_key,
@@ -206,6 +225,7 @@ export default function StepMap({
                     watermark_column: s.watermark_column,
                     watermark_lookback_minutes: s.watermark_lookback_minutes || 0,
                     identifiers: (s.identifiers || []).map(i => ({
+                        ...i,
                         type: i.type,
                         column: i.column || i.expr || '',
                         expr: i.column || i.expr || '',
@@ -398,11 +418,10 @@ export default function StepMap({
         const newAttrs: Attribute[] = exists
             ? currentAttrs.filter(a => (a.column || a.expr || a.name) !== colName)
             : [...currentAttrs, { name: colName, column: colName, expr: colName, data_type: colMeta?.type }];
-        const newIds = exists ? (curr.identifiers || []) : (curr.identifiers || []).filter(i => i.column !== colName);
 
         commitUpdate({
             ...config,
-            [table]: { ...curr, attributes: newAttrs, identifiers: newIds },
+            [table]: { ...curr, attributes: newAttrs },
         });
     };
 
@@ -420,21 +439,20 @@ export default function StepMap({
         const curr = config[table];
         if (!curr) return;
         const currentIds = curr.identifiers || [];
-        const exists = currentIds.find(i => i.column === colName);
+        const exists = currentIds.find(i => (i.column || i.expr) === colName);
 
         let newIds: Identifier[];
         if (exists) {
-            newIds = currentIds.filter(i => i.column !== colName);
+            newIds = currentIds.filter(i => (i.column || i.expr) !== colName);
         } else {
             const matchedPattern = IDENTIFIER_PATTERNS.find(p => p.pattern.test(colName));
             const defaultType = matchedPattern ? matchedPattern.type : colName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
             newIds = [...currentIds, { column: colName, type: defaultType, expr: colName, is_match_key: true }];
         }
-        const newAttrs = exists ? (curr.attributes || []) : (curr.attributes || []).filter(a => (a.column || a.expr || a.name) !== colName);
 
         commitUpdate({
             ...config,
-            [table]: { ...curr, identifiers: newIds, attributes: newAttrs },
+            [table]: { ...curr, identifiers: newIds },
         });
     };
 
@@ -443,7 +461,7 @@ export default function StepMap({
         if (!curr) return;
         const safeType = newType.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
         const newIds = (curr.identifiers || []).map(i =>
-            i.column === colName ? { ...i, type: safeType } : i
+            (i.column || i.expr) === colName ? { ...i, type: safeType } : i
         );
         commitUpdate({ ...config, [table]: { ...curr, identifiers: newIds } });
     };
@@ -452,21 +470,19 @@ export default function StepMap({
         const curr = config[table];
         if (!curr) return;
         const newIds = (curr.identifiers || []).map(i =>
-            i.column === colName ? { ...i, is_match_key: i.is_match_key === false } : i
+            (i.column || i.expr) === colName ? { ...i, is_match_key: i.is_match_key === false } : i
         );
         commitUpdate({ ...config, [table]: { ...curr, identifiers: newIds } });
     };
 
     const getColumnState = (table: string, colName: string) => {
-        const attrs = config[table]?.attributes || [];
-        const attrMatch = attrs.find(a => (a.column || a.expr || a.name) === colName);
-        if (attrMatch) return { isAttr: true, attrName: attrMatch.name };
-
-        const ids = config[table]?.identifiers || [];
-        const idMatch = ids.find(i => (i.column || i.expr) === colName);
-        if (idMatch) return { isId: true, type: idMatch.type, isMatch: idMatch.is_match_key !== false };
-
-        return {};
+        const attrMatch = (config[table]?.attributes || []).find(a => (a.column || a.expr || a.name) === colName);
+        const idMatch = (config[table]?.identifiers || []).find(i => (i.column || i.expr) === colName);
+        return {
+            isAttr: Boolean(attrMatch), attrName: attrMatch?.name,
+            isId: Boolean(idMatch), type: idMatch?.type,
+            isMatch: idMatch ? idMatch.is_match_key !== false : false,
+        };
     };
 
     // Track which target attribute names appear on multiple tables so we can flag homonym collisions
@@ -516,6 +532,10 @@ export default function StepMap({
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                     {tables.length > 0 && (
                         <>
+                            <label className="inline-flex items-center gap-2 text-xs text-ink-secondary">
+                                <input type="checkbox" checked={aiFuzzy} onChange={e => setAiFuzzy(e.target.checked)} />
+                                Allow fuzzy matching proposals
+                            </label>
                             <button
                                 type="button"
                                 disabled={aiSuggesting}
@@ -530,51 +550,15 @@ export default function StepMap({
                                     setValidationError(null);
                                     setAiNotice(null);
                                     try {
-                                        const policyParts: string[] = [];
-                                        if (aiGrain === 'individual') {
-                                            policyParts.push('Primary resolution grain: Strict Individual (person-level; keep household/shared identifiers in a separate household lens).');
-                                        } else if (aiGrain === 'household') {
-                                            policyParts.push('Primary resolution grain: Household (include shared phone/address identifiers in primary matching).');
-                                        } else {
-                                            policyParts.push('Primary resolution grain: B2B Account / Organization (prioritize company/account/domain identifiers).');
-                                        }
-                                        if (aiEventPolicy === 'bridge') {
-                                            policyParts.push('Event/fact tables: include only for cross-channel bridging without mapping transactional attributes into golden_profile.');
-                                        } else if (aiEventPolicy === 'exclude') {
-                                            policyParts.push('Event/fact tables: set include_in_idr=false for high-volume clickstream/telemetry/event tables.');
-                                        } else {
-                                            policyParts.push('Event/fact tables: include fully in IDR.');
-                                        }
-                                        if (aiSystemOfRecord) {
-                                            policyParts.push(`System of Record for Survivorship source_priority #1: ${aiSystemOfRecord}.`);
-                                        }
-                                        const baseGoal = aiGoal.trim() || 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views.';
-                                        const goalPrompt = `${baseGoal} ${policyParts.join(' ')}`;
-                                        const res = await api.suggestConfigAiStream(tables, goalPrompt, (evt) => {
+                                        const base = latestInitialConfigRef.current || { sources: [] };
+                                        const context = generationContext;
+                                        setProposalBase(JSON.stringify({config:base, context}));
+                                        const res = await api.suggestConfigAiStream(tables, '', (evt) => {
                                             setAiProgress(evt);
-                                        });
+                                        }, {mode: 'config', current_config: base, context});
                                         setAiReport(res);
                                         setAiReportOpen(true);
-                                        const suggested = res.suggested_config as unknown as IDRConfig;
-                                        if (suggested && Array.isArray(suggested.sources) && suggested.sources.length > 0) {
-                                            const merged: IDRConfig = {
-                                                ...latestInitialConfigRef.current,
-                                                ...suggested,
-                                            };
-                                            const nextTables = suggested.sources
-                                                .map(s => s.table)
-                                                .filter((t): t is string => Boolean(t));
-                                            if (nextTables.length > 0) {
-                                                onTablesChange?.(nextTables);
-                                            }
-                                            onChange?.(merged);
-                                            const modeLabel = res.generation_mode === 'deterministic_fallback'
-                                                ? 'Deterministic Fallback'
-                                                : `AI (${res.provider}:${res.model})`;
-                                            setAiNotice(`${modeLabel} proposed mappings, rules, and survivorship. Review reasoning below and click Save Config.`);
-                                        } else {
-                                            setValidationError('AI did not return any source mappings.');
-                                        }
+                                        setAiNotice('Proposal generated. Review the diff and apply it to your draft before starting a preview. Free-text notes stay local; structured policy controls generation.');
                                     } catch (err: any) {
                                         setValidationError(`AI Suggest failed: ${err?.message || err}`);
                                     } finally {
@@ -627,13 +611,13 @@ export default function StepMap({
                     </div>
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                         <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0">
-                            AI Goal (Optional)
+                            Local objective hints (optional)
                         </span>
                         <input
                             type="text"
                             value={aiGoal}
                             onChange={e => setAiGoal(e.target.value)}
-                            placeholder="e.g. Strict B2C person matching on email & loyalty, prioritize CRM over web for names..."
+                            placeholder="Precision, coverage, cross-source matching, auditability. Other text stays local."
                             className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
                         />
                     </div>
@@ -657,7 +641,7 @@ export default function StepMap({
                                 onChange={e => setAiEventPolicy(e.target.value as 'bridge' | 'include' | 'exclude')}
                                 className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
                             >
-                                <option value="bridge">Bridge Only (Clean Profile)</option>
+                                <option value="bridge">Bridge (Approve Aggregates Separately)</option>
                                 <option value="include">Include Fully</option>
                                 <option value="exclude">Exclude Event Tables</option>
                             </select>
@@ -704,17 +688,24 @@ export default function StepMap({
                 </div>
             )}
 
+            <AIConfigPolicy context={advancedPolicy} tables={tables} onChange={setAdvancedPolicy} />
+
             {aiReport && aiReportOpen && (
                 <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-4 space-y-3 text-xs">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
                         <div className="flex flex-wrap items-center gap-2">
                             <span className="font-semibold text-white">AI Proposal &amp; Reasoning</span>
+                            <span className="text-slate-400">Decisions are proposals; confidence is not measured accuracy.</span>
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                                aiReport.generation_mode === 'deterministic_fallback'
+                                aiReport.status === 'invalid'
+                                    ? 'bg-red-950/60 text-red-300 border-red-500/40'
+                                    : aiReport.generation_mode === 'deterministic_fallback'
                                     ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
                                     : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
                             }`}>
-                                {aiReport.generation_mode === 'deterministic_fallback'
+                                {aiReport.status === 'invalid'
+                                    ? 'Validation failed'
+                                    : aiReport.generation_mode === 'deterministic_fallback'
                                     ? 'Deterministic Fallback'
                                     : `${aiReport.generation_mode === 'ai_repaired' ? 'AI Repaired' : 'AI Validated'} (${aiReport.provider}:${aiReport.model})`}
                             </span>
@@ -735,6 +726,15 @@ export default function StepMap({
                             Collapse
                         </button>
                     </div>
+
+                    <AIProposalReview proposal={aiReport}
+                        stale={proposalBase !== JSON.stringify({config:initialConfig || {sources: []}, context:generationContext})}
+                        onApply={(candidate) => {
+                            onTablesChange?.(candidate.sources.map(source => source.table));
+                            onChange?.(candidate);
+                            setAiNotice('Proposal applied to draft. Start a Dry Run to evaluate it.');
+                            setAiReport(null);
+                        }} />
 
                     {aiReport.validation_report?.warnings && aiReport.validation_report.warnings.length > 0 && (
                         <div className="bg-amber-950/30 border border-amber-500/30 rounded-lg p-2.5 text-amber-200 space-y-1">
@@ -1133,11 +1133,12 @@ export default function StepMap({
                                 </div>
 
                                 <div className="border border-slate-800 rounded-xl bg-slate-950/80 max-h-[340px] overflow-y-auto">
+                                    <p className="px-3.5 py-2 text-xs text-slate-400">A column can be both an Identifier and an Attribute. Select Attribute to make it available in Survivorship for the golden profile.</p>
                                     <div className="grid grid-cols-12 gap-2 px-3.5 py-2 border-b border-slate-800 text-[11px] font-semibold text-slate-500 uppercase sticky top-0 bg-slate-900/95 backdrop-blur z-10">
                                         <div className="col-span-4">Column</div>
                                         <div className="col-span-2">SQL Type</div>
                                         <div className="col-span-1 text-center" title="Include in matching rules">Match</div>
-                                        <div className="col-span-5 text-right">Role &amp; Type</div>
+                                        <div className="col-span-5 text-right">Roles &amp; Types</div>
                                     </div>
 
                                     {filteredActiveCols.map(c => {
@@ -1210,6 +1211,9 @@ export default function StepMap({
                                                     <button
                                                         type="button"
                                                         onClick={() => toggleIdentifier(activeTable, c.name)}
+                                                        aria-pressed={state.isId}
+                                                        aria-label={`${c.name}: identifier`}
+                                                        title="Use for identity matching; can also be a profile attribute"
                                                         className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
                                                             state.isId
                                                                 ? 'bg-blue-600 border-blue-500 text-white font-medium'
@@ -1221,6 +1225,9 @@ export default function StepMap({
                                                     <button
                                                         type="button"
                                                         onClick={() => toggleAttribute(activeTable, c.name)}
+                                                        aria-pressed={state.isAttr}
+                                                        aria-label={`${c.name}: profile attribute`}
+                                                        title="Make available in Survivorship and the golden profile; keeps identifier mapping"
                                                         className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
                                                             state.isAttr
                                                                 ? 'bg-emerald-600/20 border-emerald-500/70 text-emerald-300 font-medium'

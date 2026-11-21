@@ -156,7 +156,12 @@ class PreflightStage(BaseStage):
             sm = SchemaManager(self.adapter)
             for table_def in SYSTEM_TABLES:
                 try:
-                    if not self.adapter.table_exists(table_def.fqn):
+                    if table_def.fqn in {
+                        "idr_meta.identifier_mapping",
+                        "idr_meta.survivorship_rule",
+                        "idr_out.run_history",
+                        "idr_out.stage_metrics",
+                    } or not self.adapter.table_exists(table_def.fqn):
                         sm._create_table(table_def)
                 except Exception:
                     pass
@@ -186,7 +191,11 @@ class PreflightStage(BaseStage):
             cluster_cols = self.adapter.get_table_columns("idr_out.identity_clusters_current")
             cluster_col_names = [c["name"].lower() for c in cluster_cols] if cluster_cols else []
             if cluster_col_names:
-                int_type = "INT64" if self.adapter.dialect == "bigquery" else ("INTEGER" if self.adapter.dialect in ("duckdb", "snowflake") else "INT")
+                int_type = (
+                    "INT64"
+                    if self.adapter.dialect == "bigquery"
+                    else ("INTEGER" if self.adapter.dialect in ("duckdb", "snowflake") else "INT")
+                )
                 float_type = "FLOAT64" if self.adapter.dialect == "bigquery" else "DOUBLE"
                 for col_name, col_type in [
                     ("edge_diversity", int_type),

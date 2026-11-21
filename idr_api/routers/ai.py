@@ -8,23 +8,23 @@ PII masking is automatically enabled for non-local endpoints.
 from __future__ import annotations
 
 from threading import RLock
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from idr_api.dependencies import get_adapter, get_current_user, get_user_key
+from idr_api.dependencies import get_adapter, get_current_user, get_user_key, require_write_access
 from idr_core.ai_assistant import (
     ask_identity_graph,
     copilot_chat,
-    critique_dry_run_with_ai,
     explain_cluster_with_ai,
     suggest_config_with_ai,
     test_llm_connection,
     triage_with_ai,
 )
+from idr_core.ai_config import AIConfigContext, draft_hash
+from idr_core.ai_review import AIReviewService, StaleReview
 from idr_core.llm import LLMClient, LLMConfig, list_ollama_models
-from idr_core.profiler import IDRDataProfiler
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -77,8 +77,12 @@ class AIAskRequest(BaseModel):
 class AISuggestConfigRequest(BaseModel):
     prompt: str = "Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views."
     goal: Optional[str] = None
-    tables: list[str] = []
-    sample_size: int = 2000
+    tables: list[str] = Field(default_factory=list, max_length=50)
+    sample_size: int = Field(default=2000, ge=1, le=10000)
+    mode: Literal["config", "rules"] = "config"
+    current_config: Optional[dict] = None
+    context: Optional[AIConfigContext] = None
+    base_draft_hash: Optional[str] = None
     verify_sql: bool = True
 
 
@@ -217,6 +221,27 @@ def copilot(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _generation_options(payload):
+    context = payload.context
+    if context is None and payload.current_config:
+        raw = payload.current_config.get("ai_assistance")
+        context = AIConfigContext.model_validate(raw) if raw else None
+    if context is None:
+        raise HTTPException(422, "Select a structured AI configuration policy first.")
+    if payload.mode == "rules" and not payload.current_config:
+        raise HTTPException(422, "Rules generation requires the current draft.")
+    if payload.base_draft_hash and payload.base_draft_hash != draft_hash(
+        payload.current_config or {}
+    ):
+        raise HTTPException(409, "Draft changed; regenerate the proposal.")
+    return dict(
+        context=context,
+        current_config=payload.current_config,
+        mode=payload.mode,
+        base_draft_hash=payload.base_draft_hash,
+    )
+
+
 @router.post("/suggest-config")
 def suggest_config(
     payload: AISuggestConfigRequest,
@@ -226,6 +251,8 @@ def suggest_config(
 ):
     try:
         from idr_core.profiler import is_system_table
+
+        options = _generation_options(payload)
 
         tables = [t for t in (payload.tables or []) if t and not is_system_table(t)]
         if not tables and hasattr(adapter, "list_tables"):
@@ -241,13 +268,11 @@ def suggest_config(
                 tables=tables,
                 sample_size=payload.sample_size,
                 verify_sql=payload.verify_sql,
+                **options,
             )
-        profile = IDRDataProfiler(adapter).profile_and_generate_config(tables) if tables else {}
-        return suggest_config_with_ai(
-            profile,
-            goal_text,
-            client=LLMClient(cfg),
-        )
+        raise HTTPException(422, "No readable source tables selected.")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -263,9 +288,12 @@ def suggest_config_stream(
     import json
     import queue
     import threading
+
     from fastapi.responses import StreamingResponse
+
     from idr_core.profiler import is_system_table
 
+    options = _generation_options(payload)
     tables = [t for t in (payload.tables or []) if t and not is_system_table(t)]
     if not tables and hasattr(adapter, "list_tables"):
         tables = [t for t in adapter.list_tables() if not is_system_table(t)][:15]
@@ -289,9 +317,10 @@ def suggest_config_stream(
                     sample_size=payload.sample_size,
                     verify_sql=payload.verify_sql,
                     on_progress=_on_progress,
+                    **options,
                 )
             else:
-                res = suggest_config_with_ai({}, goal_text, client=LLMClient(cfg))
+                raise ValueError("No readable source tables selected")
             ev_queue.put(("result", res))
         except Exception as exc:
             ev_queue.put(("error", {"detail": str(exc)}))
@@ -326,6 +355,9 @@ class AIDryRunCritiqueRequest(BaseModel):
     config: dict = Field(default_factory=dict)
     dry_run_summary: Optional[dict] = None
     warnings: List[str] = Field(default_factory=list)
+    run_id: str
+    draft_hash: str
+    lens: str = "default"
 
 
 @router.post("/critique-dry-run")
@@ -338,13 +370,133 @@ def critique_dry_run(
     """Analyze zero-PII Dry Run graph telemetry and return actionable one-click refinement patches."""
     try:
         cfg = store.get(get_user_key(current_user))
-        return critique_dry_run_with_ai(
-            adapter=adapter,
-            draft_config=payload.config or {},
-            dry_run_summary=payload.dry_run_summary,
-            warnings=payload.warnings,
-            client=LLMClient(cfg),
+        if payload.draft_hash != draft_hash(payload.config):
+            raise StaleReview("Draft changed; run a fresh preview")
+        return AIReviewService(adapter, get_user_key(current_user)).explain(
+            payload.run_id, payload.draft_hash, payload.lens, LLMClient(cfg), payload.config
         )
+    except StaleReview as exc:
+        raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+class AICompareRequest(BaseModel):
+    run_id: str
+    config: dict
+    patch: dict
+    lens: str = "default"
+
+
+class AIPatchRequest(BaseModel):
+    config: dict
+    patch: dict
+
+
+@router.post("/compare")
+def compare_config(
+    payload: AICompareRequest,
+    adapter=Depends(get_adapter),
+    current_user: dict = Depends(require_write_access),
+):
+    try:
+        return AIReviewService(adapter, get_user_key(current_user)).compare(
+            payload.run_id, payload.config, payload.patch, payload.lens
+        )
+    except StaleReview as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/compare/stream")
+def compare_config_stream(
+    payload: AICompareRequest,
+    adapter=Depends(get_adapter),
+    current_user: dict = Depends(require_write_access),
+):
+    import json
+    import queue
+    import threading
+
+    from fastapi.responses import StreamingResponse
+
+    service = AIReviewService(adapter, get_user_key(current_user))
+    try:
+        service.get(payload.run_id, draft_hash(payload.config), payload.lens)
+        service.patch(payload.config, payload.patch)
+    except StaleReview as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    events = queue.Queue()
+
+    def worker():
+        try:
+            result = service.compare(
+                payload.run_id,
+                payload.config,
+                payload.patch,
+                payload.lens,
+                progress=lambda event: events.put(("progress", event)),
+            )
+            events.put(("result", result))
+        except Exception as exc:
+            events.put(("error", {"detail": str(exc)}))
+        finally:
+            events.put(("done", None))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def stream():
+        while True:
+            try:
+                kind, data = events.get(timeout=15)
+            except queue.Empty:
+                yield ": keepalive\n\n"
+                continue
+            if kind == "done":
+                break
+            yield f"event: {kind}\ndata: {json.dumps(data, default=str)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/patch")
+def apply_draft_patch(
+    payload: AIPatchRequest,
+    adapter=Depends(get_adapter),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        candidate = AIReviewService(adapter, get_user_key(current_user)).patch(
+            payload.config, payload.patch
+        )
+        return {"config": candidate, "draft_hash": draft_hash(candidate), "review_stale": True}
+    except StaleReview as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/reviews/{run_id}")
+def get_review(
+    run_id: str, adapter=Depends(get_adapter), current_user: dict = Depends(get_current_user)
+):
+    try:
+        return AIReviewService(adapter, get_user_key(current_user)).get(run_id)
+    except StaleReview as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/reviews/purge")
+def purge_reviews(adapter=Depends(get_adapter), current_user: dict = Depends(require_write_access)):
+    return {
+        "purged": AIReviewService(adapter, get_user_key(current_user)).purge(
+            all_owned=True, limit=100
+        )
+    }

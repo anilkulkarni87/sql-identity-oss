@@ -45,6 +45,9 @@ That's it! The engine will:
 - **🔒 Ephemeral Dry Run & Config Versioning** - Preview draft YAML/UI rule changes (`--config ... --dry-run`) with hash equi-join `Edges Delta`, `Clusters Delta`, & corroborating-edge shadow attribution without mutating `idr_meta.*`, plus `idr config history` / `idr config rollback`
 - **⚡ Dialect-Optimized Warehouse Engine** - Canonical `CLUSTER BY` table definitions across BigQuery, Snowflake, and Databricks (with zero-downtime BigQuery clustering auto-migration), pointer ping-pong Label Propagation, and single-query metadata joins
 
+See [PII-safe AI configuration and review](docs/ai-configuration-and-review.md) for explicit policy controls, draft proposals, isolated previews, and measured comparisons. See [engine safeguards](docs/engine-safeguards.md) for convergence checks, incremental rebuild requirements, reproducible survivorship and run metrics.
+See [output previews and repeatable acceptance checks](docs/output-previews-and-evaluation.md) for bounded profile previews, generic grouped state outputs and schema-independent reviewed-label mappings.
+
 ## 📊 Architecture
 
 ```mermaid

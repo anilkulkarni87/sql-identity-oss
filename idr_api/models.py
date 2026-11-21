@@ -150,10 +150,13 @@ class RunSummary(BaseModel):
     run_mode: str
     status: str
     started_at: str
-    duration_seconds: Optional[int] = None
+    duration_seconds: Optional[float] = None
     entities_processed: Optional[int] = 0
     edges_created: Optional[int] = 0
     clusters_impacted: Optional[int] = 0
+    clusters_resolved: Optional[int] = 0
+    clusters_changed: Optional[int] = None
+    source_tables_processed: Optional[int] = None
 
 
 class StageMetricInfo(BaseModel):
@@ -161,7 +164,7 @@ class StageMetricInfo(BaseModel):
     stage_order: int
     started_at: Optional[str] = None
     ended_at: Optional[str] = None
-    duration_seconds: Optional[int] = 0
+    duration_seconds: Optional[float] = 0
     rows_out: Optional[int] = 0
 
 

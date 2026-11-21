@@ -6,6 +6,8 @@ supporting both file-based and in-memory databases.
 """
 
 import threading
+import time
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 import duckdb
@@ -125,6 +127,41 @@ class DuckDBAdapter(IDRAdapter):
         with self._lock:
             result = self.conn.execute(query, params).fetchall()
             return [f"{row[0]}.{row[1]}" for row in result]
+
+    @contextmanager
+    def query_budget(self, seconds: float, max_bytes_billed: Optional[int] = None):
+        """Enforce a wall-clock timeout using DuckDB connection interruption under the adapter lock."""
+        with self._lock:
+            expired = threading.Event()
+
+            def interrupt():
+                expired.set()
+                self.conn.interrupt()
+
+            deadline = time.monotonic() + seconds
+
+            def check():
+                if expired.is_set() or time.monotonic() >= deadline:
+                    raise ValueError(
+                        "Profile preview exceeded its time budget; no production outputs were changed"
+                    )
+
+            timer = threading.Timer(seconds, interrupt)
+            timer.daemon = True
+            timer.start()
+            try:
+                yield check
+                if expired.is_set():
+                    raise ValueError("Profile preview exceeded its time budget")
+            except Exception as exc:
+                if expired.is_set():
+                    raise ValueError(
+                        "Profile preview exceeded its time budget; no production outputs were changed"
+                    ) from exc
+                raise
+            finally:
+                timer.cancel()
+                timer.join()
 
     def close(self) -> None:
         """Close database connection."""

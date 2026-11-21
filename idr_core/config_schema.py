@@ -12,7 +12,7 @@ Serves as the single source of truth for:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -46,43 +46,34 @@ def expand_fuzzy_template(
     tmpl = (template or "").strip().upper()
     cols = [c.strip() for c in columns if c and c.strip()]
 
-    if tmpl == "NAME_SOUNDEX_JW":
-        first_col = cols[0] if len(cols) >= 1 else "first_name"
-        last_col = cols[1] if len(cols) >= 2 else first_col
-        blocking = f"CONCAT(SOUNDEX({last_col}), '_', LEFT({first_col}, 1))"
+    if tmpl not in FUZZY_TEMPLATE_NAMES:
+        raise ValueError(f"Unknown fuzzy template '{template}'")
+    from .config import validate_identifier
+    for col in cols:
+        validate_identifier(col, "fuzzy template attribute")
+    if not cols:
+        raise ValueError("Fuzzy templates require mapped attributes")
+    selected = cols[:2] if tmpl in ("NAME_SOUNDEX_JW", "NAME_FIRST_LAST_JW") else cols[:1]
+    # Keep the legacy template names as API aliases. Prefix blocking is portable
+    # across all supported warehouses and avoids deploying a phonetic UDF.
+    blocking = f"SUBSTR(LOWER(TRIM({selected[-1]})), 1, 2)"
+    def ratio(col, distance):
+        a, b = f"<a>.{col}", f"<b>.{col}"
+        return f"(1.0 - (1.0 * {distance}({a}, {b}) / GREATEST(LENGTH({a}), LENGTH({b}), 1)))"
+    if tmpl == "EMAIL_LOCAL_LEVENSHTEIN":
         score_expr = {
-            "default": "idr_meta.jaro_winkler_similarity(<a>, <b>)",
-            "bigquery": (
-                "1 - SAFE_DIVIDE(CAST(EDIT_DISTANCE(<a>, <b>) AS FLOAT64), "
-                "CAST(GREATEST(LENGTH(<a>), LENGTH(<b>), 1) AS FLOAT64))"
-            ),
-        }
-    elif tmpl == "NAME_FIRST_LAST_JW":
-        first_col = cols[0] if len(cols) >= 1 else "first_name"
-        blocking = (
-            f"CASE WHEN {first_col} IS NOT NULL THEN SUBSTRING({first_col}, 1, 2) ELSE '' END"
-        )
-        score_expr = {
-            "default": f"jaro_winkler_similarity({first_col})",
-            "bigquery": (
-                "1 - SAFE_DIVIDE(CAST(EDIT_DISTANCE(<a>, <b>) AS FLOAT64), "
-                "CAST(GREATEST(LENGTH(<a>), LENGTH(<b>), 1) AS FLOAT64))"
-            ),
-        }
-    elif tmpl == "EMAIL_LOCAL_LEVENSHTEIN":
-        email_col = cols[0] if cols else "email"
-        blocking = f"LEFT(LOWER(TRIM({email_col})), 3)"
-        score_expr = {
-            "default": "idr_meta.jaro_winkler_similarity(<a>, <b>)",
-            "bigquery": (
-                "1 - SAFE_DIVIDE(CAST(EDIT_DISTANCE(<a>, <b>) AS FLOAT64), "
-                "CAST(GREATEST(LENGTH(<a>), LENGTH(<b>), 1) AS FLOAT64))"
-            ),
+            "default": ratio(selected[0], "LEVENSHTEIN"),
+            "bigquery": ratio(selected[0], "EDIT_DISTANCE"),
+            "snowflake": ratio(selected[0], "EDITDISTANCE"),
+            "databricks": ratio(selected[0], "LEVENSHTEIN"),
         }
     else:
-        raise ValueError(
-            f"Unknown fuzzy template '{template}'. Supported: {', '.join(FUZZY_TEMPLATE_NAMES)}"
-        )
+        score_expr = {
+            "default": "(" + " + ".join(f"jaro_winkler_similarity(<a>.{col}, <b>.{col})" for col in selected) + f") / {len(selected)}.0",
+            "snowflake": "(" + " + ".join(f"JAROWINKLER_SIMILARITY(<a>.{col}, <b>.{col}) / 100.0" for col in selected) + f") / {len(selected)}.0",
+            "bigquery": "(" + " + ".join(ratio(col, "EDIT_DISTANCE") for col in selected) + f") / {len(selected)}.0",
+            "databricks": "(" + " + ".join(ratio(col, "LEVENSHTEIN") for col in selected) + f") / {len(selected)}.0",
+        }
 
     return {
         "id": rule_id,
@@ -109,6 +100,7 @@ class IdentifierMappingSpec(BaseModel):
         description="Source column name or safe SQL expression.",
     )
     is_hashed: bool = Field(default=False, description="True if source values are pre-hashed (e.g., SHA-256/MD5).")
+    source_is_hashed: bool = Field(default=False, description="True if source already stores a digest that should not be hashed again.")
 
 
 class AttributeMappingSpec(BaseModel):
@@ -128,7 +120,9 @@ class SourceSpec(BaseModel):
     id: str = Field(..., description="Unique alphanumeric/underscore source identifier.")
     table: str = Field(..., description="Fully qualified source table name (schema.table).")
     entity_type: str = Field(default="PERSON", description="Entity type (e.g., PERSON, CUSTOMER, ORDER, EVENT, ACCOUNT).")
-    entity_key: str = Field(..., description="Primary key column or 'AUTO'.")
+    entity_key: str = Field(default="AUTO", description="Primary key column or 'AUTO'.")
+    key_columns: List[str] = Field(default_factory=list)
+    watermark_lookback_minutes: int = Field(default=0, ge=0)
     watermark_column: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("watermark_column", "watermark"),
@@ -234,6 +228,7 @@ class SurvivorshipSpec(BaseModel):
         description="Ordered list of source IDs for PRIORITY / PRIORITY_RECENCY / LATEST_FROM_SOURCE.",
     )
     recency_field: Optional[str] = Field(default=None, description="Optional recency column override.")
+    row_group: Optional[str] = Field(default=None, description="Select related attributes from the same winning source row.")
 
 
 class ExclusionSpec(BaseModel):
@@ -303,12 +298,16 @@ class IDRConfigSpec(BaseModel):
                     {
                         "type": i.type,
                         "expr": i.expr,
-                        **({"is_hashed": True} if i.is_hashed else {}),
+                        **({"source_is_hashed": True} if (i.source_is_hashed or i.is_hashed) else {}),
                     }
                     for i in s.identifiers
                 ],
                 "attributes": [{"name": a.name, "expr": a.expr} for a in s.attributes],
             }
+            if s.key_columns:
+                src_dict["key_columns"] = s.key_columns
+            if s.watermark_lookback_minutes:
+                src_dict["watermark_lookback_minutes"] = s.watermark_lookback_minutes
             if s.watermark_column:
                 src_dict["watermark_column"] = s.watermark_column
             if s.deduplicate:
@@ -339,6 +338,8 @@ class IDRConfigSpec(BaseModel):
                 item["source_priority"] = sv.source_priority
             if sv.recency_field:
                 item["recency_field"] = sv.recency_field
+            if sv.row_group:
+                item["row_group"] = sv.row_group
             survivorship_out.append(item)
 
         out: Dict[str, Any] = {
@@ -500,6 +501,12 @@ class GeneratedIDRPlan(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    proposal_id: str = ""
+    base_draft_hash: str = ""
+    candidate_draft_hash: str = ""
+    status: Literal["ready_for_preview", "needs_decisions", "invalid"] = "invalid"
+    decisions: List[dict[str, Any]] = Field(default_factory=list)
+    diff: List[dict[str, Any]] = Field(default_factory=list)
     generation_mode: GenerationMode
     provider: str = "deterministic"
     model: str = "profiler"

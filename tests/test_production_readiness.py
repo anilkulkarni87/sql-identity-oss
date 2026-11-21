@@ -186,7 +186,7 @@ def test_custom_schema_mapping_duckdb():
     adapter.close()
 
 
-def test_incr_config_drift_warning():
+def test_incr_config_drift_blocks_execution():
     adapter = DuckDBAdapter(":memory:")
     _setup_crm_source(
         adapter,
@@ -206,8 +206,8 @@ def test_incr_config_drift_warning():
     """)
 
     r2 = IDRRunner(adapter).run(RunConfig(run_mode="INCR"))
-    assert r2.status == "SUCCESS"
-    assert any("Configuration drift detected in INCR mode" in w for w in r2.warnings)
+    assert r2.status == "FAILED"
+    assert "--mode FULL" in r2.error
     adapter.close()
 
 
@@ -839,7 +839,7 @@ def test_cli_ephemeral_dry_run_and_config_history_rollback(tmp_path, capsys):
     dry_out = capsys.readouterr().out
     assert "Edges Delta:     -1" in dry_out
     assert "Clusters Delta:  +1" in dry_out
-    assert "Ephemeral (--dry-run restored prior idr_meta state)" in dry_out
+    assert "Isolated (--dry-run left active idr_meta unchanged)" in dry_out
 
     check_conn = DuckDBAdapter(db_file)
     assert sql_to_config(check_conn).get("exclusions", []) == []
