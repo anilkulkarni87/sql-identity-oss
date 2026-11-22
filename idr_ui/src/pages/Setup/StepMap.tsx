@@ -605,19 +605,19 @@ export default function StepMap({
                                 Beta
                             </span>
                             <span className="hidden md:inline">
-                                — Profiles column shapes &amp; cross-table overlaps (zero raw PII sent), detects table roles, and drafts mappings, rules, survivorship &amp; lenses for review.
+                                — Profiles schemas &amp; key overlaps locally (zero PII sent) to draft mappings, rules &amp; survivorship.
                             </span>
                         </span>
                     </div>
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                        <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0">
-                            Local objective hints (optional)
+                        <span className="text-[11px] font-semibold text-accent shrink-0">
+                            Goal (optional)
                         </span>
                         <input
                             type="text"
                             value={aiGoal}
                             onChange={e => setAiGoal(e.target.value)}
-                            placeholder="Precision, coverage, cross-source matching, auditability. Other text stays local."
+                            placeholder="e.g., High precision, maximize coverage, or prefer CRM as system of record"
                             className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
                         />
                     </div>
@@ -641,7 +641,7 @@ export default function StepMap({
                                 onChange={e => setAiEventPolicy(e.target.value as 'bridge' | 'include' | 'exclude')}
                                 className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
                             >
-                                <option value="bridge">Bridge (Approve Aggregates Separately)</option>
+                                <option value="bridge">Bridge Only</option>
                                 <option value="include">Include Fully</option>
                                 <option value="exclude">Exclude Event Tables</option>
                             </select>
@@ -660,6 +660,7 @@ export default function StepMap({
                             </select>
                         </label>
                     </div>
+                    <AIConfigPolicy context={advancedPolicy} tables={tables} onChange={setAdvancedPolicy} />
                 </div>
             )}
 
@@ -687,8 +688,6 @@ export default function StepMap({
                     </div>
                 </div>
             )}
-
-            <AIConfigPolicy context={advancedPolicy} tables={tables} onChange={setAdvancedPolicy} />
 
             {aiReport && aiReportOpen && (
                 <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-4 space-y-3 text-xs">
