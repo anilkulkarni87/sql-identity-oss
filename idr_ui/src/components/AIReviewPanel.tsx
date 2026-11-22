@@ -38,8 +38,20 @@ export default function AIReviewPanel({ report, config, stale, onUpdate, onPrevi
         measured: false, tradeoff: 'May remove legitimate links or introduce new links. Compare against the same extracted records.',
     })
     const targets = action === 'raise_fuzzy_threshold' ? config.fuzzy_rules || [] : action === 'set_lens_types' ? config.lenses || [] : config.rules || []
+    const isHealthyDeterministic = report.provider === 'deterministic' && !report.findings.length
     return <section className="rounded-xl border border-purple-500/40 bg-gray-900 p-4 space-y-3 text-xs text-gray-200" aria-label="Draft graph review">
-        <p className="font-semibold">{report.status.replace(/_/g, ' ')} · {report.lens} · {report.run_mode ?? 'preview'}</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-semibold">{report.status.replace(/_/g, ' ')} · {report.lens} · {report.run_mode ?? 'preview'}</p>
+            {isHealthyDeterministic ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                    Healthy graph · deterministic review (no LLM refinement needed)
+                </span>
+            ) : report.provider ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-500/15 text-purple-200 border border-purple-500/30">
+                    Provider: {report.provider}
+                </span>
+            ) : null}
+        </div>
         <p>{report.headline}</p>
         {report.execution_options && <p>Evaluated settings: {report.execution_options.strict ? 'exact only' : 'fuzzy enabled when configured'} · group cap {report.execution_options.max_group_size || 'per rule'} · {report.execution_options.max_iters || 30} maximum iterations</p>}
         <p className="font-mono text-[10px] break-all">Preview: {report.run_id}</p>

@@ -23,8 +23,19 @@ def get_dashboard_metrics(adapter=Depends(get_adapter)):
         str_type = get_dialect_config(getattr(adapter, "dialect", "duckdb")).get(
             "string_type", "VARCHAR"
         )
+        try:
+            run_cols = {
+                col["name"].lower() for col in adapter.get_table_columns("idr_out.run_history")
+            }
+        except Exception:
+            run_cols = set()
+        duration_expr = (
+            "COALESCE(duration_seconds_precise, duration_seconds)"
+            if "duration_seconds_precise" in run_cols
+            else "duration_seconds"
+        )
         rows = adapter.query(f"""
-            SELECT run_id, duration_seconds, CAST(started_at AS {str_type}) as started_at
+            SELECT run_id, {duration_expr} as duration_seconds, CAST(started_at AS {str_type}) as started_at
             FROM idr_out.run_history
             ORDER BY started_at DESC
             LIMIT 1

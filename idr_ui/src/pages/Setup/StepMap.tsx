@@ -745,17 +745,20 @@ export default function StepMap({
                     )}
 
                     {aiReport.profile_summary?.cross_table_overlaps && aiReport.profile_summary.cross_table_overlaps.length > 0 && (
-                        <div className="space-y-1">
-                            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Cross-Table Key Overlaps</div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {aiReport.profile_summary.cross_table_overlaps.slice(0, 8).map((ov, idx) => (
+                        <details className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2">
+                            <summary className="cursor-pointer select-none text-[11px] font-semibold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                                <span>Cross-Table Key Overlaps ({aiReport.profile_summary.cross_table_overlaps.length} detected)</span>
+                                <span className="text-[10px] font-normal normal-case text-slate-400">Expand to inspect</span>
+                            </summary>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                {aiReport.profile_summary.cross_table_overlaps.slice(0, 12).map((ov, idx) => (
                                     <span key={idx} className="px-2 py-1 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">
                                         <span className="text-purple-300 font-semibold">{ov.identifier_type}</span>: {ov.table_a.split('.').pop()}.{ov.column_a} ↔ {ov.table_b.split('.').pop()}.{ov.column_b}{' '}
                                         <span className="text-emerald-300 font-mono">{Math.round(ov.overlap_a_in_b * 100)}% / {Math.round(ov.overlap_b_in_a * 100)}%</span>
                                     </span>
                                 ))}
                             </div>
-                        </div>
+                        </details>
                     )}
 
                     {aiReport.explanations && (

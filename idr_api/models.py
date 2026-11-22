@@ -56,7 +56,7 @@ class MetricsSummary(BaseModel):
     total_edges: int
     avg_confidence: float
     last_run_id: Optional[str] = None
-    last_run_duration: Optional[int] = None
+    last_run_duration: Optional[float] = None
     last_run_started_at: Optional[str] = None
 
 

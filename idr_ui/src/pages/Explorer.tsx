@@ -719,7 +719,7 @@ export default function Explorer() {
                     </div>
 
                     {aiExplanation && (
-                        <div className="p-3.5 rounded-md bg-subtle border border-line text-xs text-ink whitespace-pre-wrap relative">
+                        <div className="p-3.5 pr-8 rounded-md bg-subtle border border-line text-xs text-ink space-y-1.5 relative leading-relaxed">
                             <button
                                 type="button"
                                 onClick={() => setAiExplanation(null)}
@@ -728,7 +728,34 @@ export default function Explorer() {
                             >
                                 <X className="w-3.5 h-3.5" />
                             </button>
-                            {aiExplanation}
+                            {aiExplanation.split('\n').map((rawLine, lineIdx) => {
+                                const line = rawLine.trimEnd()
+                                if (!line.trim()) return <div key={lineIdx} className="h-1" />
+                                const renderInline = (text: string) =>
+                                    text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) => {
+                                        if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+                                            return <strong key={i} className="font-semibold text-ink">{part.slice(2, -2)}</strong>
+                                        }
+                                        if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+                                            return <code key={i} className="px-1 py-0.5 rounded bg-surface border border-line font-mono text-[11px]">{part.slice(1, -1)}</code>
+                                        }
+                                        return <span key={i}>{part}</span>
+                                    })
+                                const headingMatch = line.match(/^#{1,4}\s+(.*)$/)
+                                if (headingMatch) {
+                                    return <div key={lineIdx} className="font-semibold text-ink pt-1">{renderInline(headingMatch[1])}</div>
+                                }
+                                const bulletMatch = line.match(/^[-*]\s+(.*)$/)
+                                if (bulletMatch) {
+                                    return (
+                                        <div key={lineIdx} className="flex items-start gap-1.5 pl-1">
+                                            <span className="text-ink-muted select-none">•</span>
+                                            <span>{renderInline(bulletMatch[1])}</span>
+                                        </div>
+                                    )
+                                }
+                                return <p key={lineIdx}>{renderInline(line)}</p>
+                            })}
                         </div>
                     )}
 

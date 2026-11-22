@@ -287,6 +287,22 @@ def ask_identity_graph(
         summary["cluster_stats"] = []
 
     try:
+        summary["edges_by_rule"] = adapter.query(
+            """
+            SELECT
+                rule_id,
+                identifier_type,
+                COUNT(*) AS edge_count
+            FROM idr_out.identity_edges_current
+            GROUP BY rule_id, identifier_type
+            ORDER BY edge_count DESC
+            LIMIT 25
+            """
+        )
+    except Exception:
+        summary["edges_by_rule"] = []
+
+    try:
         summary["recent_runs"] = adapter.query(
             "SELECT run_id, run_mode, status, started_at, duration_seconds, "
             "entities_processed, edges_created, clusters_impacted "
