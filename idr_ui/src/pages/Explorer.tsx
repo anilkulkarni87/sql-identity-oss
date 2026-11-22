@@ -930,8 +930,27 @@ export default function Explorer() {
                                         )}
                                     </button>
                                     {clusterDetail.confidence_score != null && (
-                                        <span className="badge-success font-mono tabular-nums">
+                                        <span
+                                            className="badge-success font-mono tabular-nums"
+                                            title={clusterDetail.confidence_breakdown?.reason || 'Deterministic confidence score'}
+                                        >
                                             {(clusterDetail.confidence_score * 100).toFixed(1)}%
+                                        </span>
+                                    )}
+                                    {clusterDetail.confidence_breakdown && clusterDetail.cluster_size > 1 && (
+                                        <span
+                                            className="badge-neutral font-mono text-[11px]"
+                                            title={clusterDetail.confidence_breakdown.reason}
+                                        >
+                                            {clusterDetail.confidence_breakdown.subject_count} subj
+                                            {clusterDetail.confidence_breakdown.child_count > 0
+                                                ? ` + ${clusterDetail.confidence_breakdown.child_count} child`
+                                                : ''}
+                                            {' · '}
+                                            {clusterDetail.confidence_breakdown.edge_diversity} rule
+                                            {clusterDetail.confidence_breakdown.edge_diversity === 1 ? '' : 's'}
+                                            {' · fanout '}
+                                            {clusterDetail.confidence_breakdown.subject_fanout}
                                         </span>
                                     )}
                                     {clusterDetail.super_cluster_id &&

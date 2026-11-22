@@ -183,6 +183,19 @@ export const api = {
         super_cluster_id?: string | null
         cluster_size: number
         confidence_score: number | null
+        confidence_breakdown?: {
+            verdict: string
+            confidence_score: number | null
+            subject_count: number
+            child_count: number
+            subject_fanout: number
+            max_fanout: number
+            edge_diversity: number
+            edge_count: number
+            match_density?: number | null
+            has_fuzzy_bridge: boolean
+            reason: string
+        } | null
         entities: Array<{
             entity_key: string
             source_id: string
@@ -704,6 +717,19 @@ export const api = {
         super_cluster_id?: string | null
         cluster_size: number
         confidence_score: number | null
+        confidence_breakdown?: {
+            verdict: string
+            confidence_score: number | null
+            subject_count: number
+            child_count: number
+            subject_fanout: number
+            max_fanout: number
+            edge_diversity: number
+            edge_count: number
+            match_density?: number | null
+            has_fuzzy_bridge: boolean
+            reason: string
+        } | null
         entities: Array<{
             entity_key: string
             source_id: string

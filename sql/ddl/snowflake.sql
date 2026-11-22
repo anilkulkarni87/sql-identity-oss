@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS idr_meta.rule (
   canonicalize VARCHAR,
   allow_hashed BOOLEAN,
   require_non_null BOOLEAN,
-  max_group_size INTEGER DEFAULT 10000  -- Skip identifier groups larger than this
+  max_group_size INTEGER DEFAULT 10000, -- Skip identifier groups larger than this
+  confidence_weight FLOAT,
+  fanout_threshold INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.identifier_mapping (
@@ -134,7 +136,10 @@ CREATE TABLE IF NOT EXISTS idr_out.identity_clusters_current (
   primary_reason VARCHAR,
   updated_ts TIMESTAMP_NTZ,
   run_id VARCHAR,
-  super_cluster_id VARCHAR -- Fuzzy merged ID (nullable)
+  super_cluster_id VARCHAR, -- Fuzzy merged ID (nullable)
+  subject_count INTEGER DEFAULT 0,
+  child_count INTEGER DEFAULT 0,
+  subject_fanout INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS idr_out.golden_profile_current (

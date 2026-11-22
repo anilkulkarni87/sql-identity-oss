@@ -45,7 +45,9 @@ CREATE TABLE IF NOT EXISTS idr_meta.rule (
   canonicalize STRING,
   allow_hashed BOOL,
   require_non_null BOOL,
-  max_group_size INT64  -- Skip identifier groups larger than this (default 10000)
+  max_group_size INT64, -- Skip identifier groups larger than this (default 10000)
+  confidence_weight FLOAT64,
+  fanout_threshold INT64
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.identifier_mapping (
@@ -184,7 +186,10 @@ CREATE TABLE IF NOT EXISTS idr_out.identity_clusters_current (
   edge_diversity INT64,
   match_density FLOAT64,
   primary_reason STRING,
-  updated_ts TIMESTAMP
+  updated_ts TIMESTAMP,
+  subject_count INT64,
+  child_count INT64,
+  subject_fanout INT64
 );
 
 CREATE TABLE IF NOT EXISTS idr_out.golden_profile_current (

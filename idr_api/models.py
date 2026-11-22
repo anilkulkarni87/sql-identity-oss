@@ -108,6 +108,7 @@ class ClusterDetail(BaseModel):
     resolved_id: str
     cluster_size: int
     confidence_score: Optional[float] = None
+    confidence_breakdown: Optional[Dict[str, Any]] = None
     super_cluster_id: Optional[str] = None
     entities: List[EntityInfo]
     edges: List[EdgeInfo]

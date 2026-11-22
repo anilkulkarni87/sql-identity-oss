@@ -46,9 +46,13 @@ def get_dashboard_metrics(adapter=Depends(get_adapter)):
         """)
         cluster_stats = rows[0] if rows else {}
 
-        # Calculate avg confidence from clusters table which has confidence_score
+        # Calculate avg confidence over multi-entity clusters (matching "Multi-entity mean" label),
+        # falling back to all clusters when no multi-entity clusters exist.
         conf_rows = adapter.query(
-            "SELECT AVG(confidence_score) as avg_conf FROM idr_out.identity_clusters_current"
+            "SELECT COALESCE("
+            "AVG(CASE WHEN cluster_size > 1 THEN confidence_score END), "
+            "AVG(confidence_score)"
+            ") as avg_conf FROM idr_out.identity_clusters_current"
         )
         avg_confidence = (
             conf_rows[0]["avg_conf"] if conf_rows and conf_rows[0]["avg_conf"] is not None else 0.0

@@ -116,7 +116,7 @@ def get_cluster(
     try:
         rows = adapter.query(
             """
-            SELECT resolved_id, cluster_size, COALESCE(confidence_score, 0.0) as confidence_score, super_cluster_id
+            SELECT *
             FROM idr_out.identity_clusters_current
             WHERE resolved_id = ?
         """,
@@ -242,10 +242,46 @@ def get_cluster(
     except Exception:
         pass
 
+    c_size = int(cluster.get("cluster_size") or 0)
+    subj_cnt = int(cluster.get("subject_count") if cluster.get("subject_count") is not None else c_size)
+    child_cnt = int(cluster.get("child_count") or 0)
+    subj_fanout = int(cluster.get("subject_fanout") or cluster.get("max_fanout") or 1)
+    edge_div = int(cluster.get("edge_diversity") or 0)
+    edge_cnt = int(cluster.get("edge_count") or 0)
+    has_fuzzy = bool(
+        cluster.get("super_cluster_id")
+        and str(cluster.get("super_cluster_id")) != str(cluster.get("resolved_id"))
+    )
+    verdict = (
+        "SINGLETON"
+        if c_size <= 1
+        else "REVIEW_OVERMERGE"
+        if subj_fanout >= 20
+        else "REVIEW_FUZZY"
+        if has_fuzzy
+        else "HIGH_CORROBORATED"
+        if edge_div >= 2
+        else "SINGLE_RULE"
+    )
+    confidence_breakdown = {
+        "verdict": verdict,
+        "confidence_score": cluster.get("confidence_score"),
+        "subject_count": subj_cnt,
+        "child_count": child_cnt,
+        "subject_fanout": subj_fanout,
+        "max_fanout": int(cluster.get("max_fanout") or 1),
+        "edge_diversity": edge_div,
+        "edge_count": edge_cnt,
+        "match_density": cluster.get("match_density"),
+        "has_fuzzy_bridge": has_fuzzy,
+        "reason": cluster.get("primary_reason") or "",
+    }
+
     return ClusterDetail(
         resolved_id=cluster["resolved_id"],
         cluster_size=cluster["cluster_size"],
         confidence_score=cluster.get("confidence_score"),
+        confidence_breakdown=confidence_breakdown,
         super_cluster_id=cluster.get("super_cluster_id"),
         entities=entities,
         edges=edges,

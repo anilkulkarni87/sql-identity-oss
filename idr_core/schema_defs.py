@@ -127,6 +127,16 @@ SYSTEM_TABLES: List[TableDef] = [
                 default="TRUE",
                 description="Whether this rule is enabled",
             ),
+            ColumnDef(
+                "confidence_weight",
+                ColumnType.DOUBLE,
+                description="Optional per-rule trust weight (0.05-0.99); defaults from rule priority",
+            ),
+            ColumnDef(
+                "fanout_threshold",
+                ColumnType.INT,
+                description="Optional subject fanout threshold before over-merge damping applies (default 4)",
+            ),
         ],
     ),
     TableDef(
@@ -417,6 +427,24 @@ SYSTEM_TABLES: List[TableDef] = [
                 description="Primary reason for the confidence score",
             ),
             ColumnDef("updated_at", ColumnType.TIMESTAMP),
+            ColumnDef(
+                "subject_count",
+                ColumnType.INT,
+                default="0",
+                description="Number of subject-role records in this cluster",
+            ),
+            ColumnDef(
+                "child_count",
+                ColumnType.INT,
+                default="0",
+                description="Number of child/event-role records attached to this cluster",
+            ),
+            ColumnDef(
+                "subject_fanout",
+                ColumnType.INT,
+                default="1",
+                description="Maximum subject-role records sharing one identifier value in this cluster",
+            ),
         ],
     ),
     TableDef(

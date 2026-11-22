@@ -157,6 +157,7 @@ class PreflightStage(BaseStage):
             for table_def in SYSTEM_TABLES:
                 try:
                     if table_def.fqn in {
+                        "idr_meta.rule",
                         "idr_meta.identifier_mapping",
                         "idr_meta.survivorship_rule",
                         "idr_out.run_history",
@@ -202,6 +203,9 @@ class PreflightStage(BaseStage):
                     ("edge_count", int_type),
                     ("max_fanout", int_type),
                     ("match_density", float_type),
+                    ("subject_count", int_type),
+                    ("child_count", int_type),
+                    ("subject_fanout", int_type),
                 ]:
                     if col_name not in cluster_col_names:
                         self.logger.info(

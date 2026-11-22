@@ -537,6 +537,12 @@ ON {join_cond}
             if raw_wm is None or str(raw_wm).strip().lower() in ("", "none", "null")
             else str(raw_wm).strip()
         )
+        role = str(src.get("role") or "").strip().lower()
+        entity_type = src.get("entity_type")
+        if role == "child" and (not entity_type or str(entity_type).upper() == "PERSON"):
+            entity_type = "CHILD"
+        elif role == "subject" and not entity_type:
+            entity_type = "SUBJECT"
         data = {
             "table_id": src["id"],
             "table_fqn": (
@@ -544,7 +550,7 @@ ON {join_cond}
                 if config.get("schema_source") and "." not in src["table"]
                 else src["table"]
             ),
-            "entity_type": src.get("entity_type", "PERSON"),
+            "entity_type": entity_type or "PERSON",
             "entity_key_expr": resolve_entity_key_expr(src, dialect),
             "watermark_column": wm_col,
             "deduplicate": bool(src.get("deduplicate", False)),
@@ -669,6 +675,16 @@ ON {join_cond}
             "max_group_size": rule.get("max_group_size", 10000),
             "priority": rule.get("priority", 100),
             "is_active": True,
+            "confidence_weight": (
+                float(rule["confidence_weight"])
+                if rule.get("confidence_weight") is not None
+                else None
+            ),
+            "fanout_threshold": (
+                int(rule["fanout_threshold"])
+                if rule.get("fanout_threshold") is not None
+                else None
+            ),
         }
         statements.append(generate_upsert("idr_meta.rule", ["rule_id"], data))
 
@@ -894,7 +910,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
         def _query_active_rules():
             try:
                 return adapter.query("""
-                    SELECT rule_id, identifier_type, max_group_size, priority, canonicalize
+                    SELECT *
                     FROM idr_meta.rule
                     WHERE is_active = TRUE
                     ORDER BY priority ASC
@@ -907,7 +923,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 ):
                     print("Warning: 'is_active' column missing in rule, assuming all active.")
                     return adapter.query("""
-                        SELECT rule_id, identifier_type, max_group_size, priority, canonicalize
+                        SELECT *
                         FROM idr_meta.rule
                         ORDER BY priority ASC
                     """)
@@ -1071,6 +1087,10 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 "canonicalize": rule_row.get("canonicalize", "LOWERCASE"),
                 "max_group_size": int(rule_row.get("max_group_size") or 10000),
             }
+            if rule_row.get("confidence_weight") is not None:
+                rule["confidence_weight"] = float(rule_row["confidence_weight"])
+            if rule_row.get("fanout_threshold") is not None:
+                rule["fanout_threshold"] = int(rule_row["fanout_threshold"])
             config["rules"].append(rule)
 
         # 3. Survivorship Rules

@@ -106,8 +106,17 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
             };
         });
 
+        const missingFromConfig = attrList.some(attr => !existingByAttr.has(attr));
         if (incomingSig !== lastEmittedSigRef.current || Object.keys(rules).length !== attrList.length) {
             setRules(initialRules);
+            if (missingFromConfig && onChange) {
+                const list = Object.values(initialRules);
+                lastEmittedSigRef.current = JSON.stringify(list);
+                onChange({
+                    ...latestConfigRef.current,
+                    survivorship: list,
+                });
+            }
         }
 
         if (tablesMissingTypes.size > 0) {

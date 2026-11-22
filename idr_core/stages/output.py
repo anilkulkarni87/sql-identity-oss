@@ -75,100 +75,161 @@ class OutputStage(BaseStage):
             else "SPLIT_PART(entity_key, ':', 1)"
         )
 
-        # 0. Calculate cluster sizes and source diversity for impacted clusters
+        # Structural child roles (engine cardinality contract; zero domain-specific names)
+        child_roles = "('CHILD', 'EVENT_FACT', 'SUB_ENTITY', 'REFERENCE_LOOKUP')"
+        left_src = source_prefix_expr.replace("entity_key", "e.left_entity_key")
+        right_src = source_prefix_expr.replace("entity_key", "e.right_entity_key")
+
+        # 0. Calculate cluster sizes, subject vs. child counts, and source diversity
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_sizes_updates AS
             SELECT
-                resolved_id,
+                m.resolved_id,
                 COUNT(*) AS cluster_size,
-                COUNT(DISTINCT {source_prefix_expr}) AS source_diversity
-            FROM idr_out.identity_resolved_membership_current
-            WHERE resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
-            GROUP BY resolved_id
+                SUM(
+                    CASE
+                        WHEN UPPER(COALESCE(st.entity_type, '')) IN {child_roles} THEN 0
+                        ELSE 1
+                    END
+                ) AS subject_count,
+                SUM(
+                    CASE
+                        WHEN UPPER(COALESCE(st.entity_type, '')) IN {child_roles} THEN 1
+                        ELSE 0
+                    END
+                ) AS child_count,
+                COUNT(DISTINCT {source_prefix_expr.replace('entity_key', 'm.entity_key')}) AS source_diversity
+            FROM idr_out.identity_resolved_membership_current m
+            LEFT JOIN idr_meta.source_table st
+              ON st.table_id = {source_prefix_expr.replace('entity_key', 'm.entity_key')}
+            WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
+            GROUP BY m.resolved_id
         """)
 
-        # 1. Edge stats per cluster with calibrated identifier fidelity & diversity
-        self.adapter.execute("""
+        # 1. Edge stats per cluster: rule-configured trust weight (defaults from rule priority)
+        self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_edge_stats AS
+            WITH rule_weights AS (
+                SELECT
+                    LOWER(identifier_type) AS id_type_lower,
+                    MAX(
+                        COALESCE(
+                            CAST(confidence_weight AS {float_type}),
+                            CASE
+                                WHEN priority <= 1 THEN 0.80
+                                WHEN priority = 2 THEN 0.76
+                                WHEN priority = 3 THEN 0.70
+                                ELSE 0.60
+                            END
+                        )
+                    ) AS rule_weight
+                FROM idr_meta.rule
+                WHERE is_active = TRUE
+                GROUP BY LOWER(identifier_type)
+            )
             SELECT
                 m.resolved_id,
                 COUNT(DISTINCT e.identifier_type) AS edge_diversity,
                 COUNT(*) AS edge_count,
-                MAX(
-                    CASE
-                        WHEN LOWER(e.identifier_type) IN ('ssn', 'tax_id', 'national_id') THEN 0.85
-                        WHEN LOWER(e.identifier_type) LIKE '%customer%'
-                          OR LOWER(e.identifier_type) LIKE '%account%'
-                          OR LOWER(e.identifier_type) LIKE '%loyalty%' THEN 0.80
-                        WHEN LOWER(e.identifier_type) LIKE '%email%' THEN 0.76
-                        WHEN LOWER(e.identifier_type) LIKE '%phone%' THEN 0.72
-                        WHEN LOWER(e.identifier_type) LIKE '%device%'
-                          OR LOWER(e.identifier_type) LIKE '%cookie%' THEN 0.62
-                        WHEN LOWER(e.identifier_type) LIKE '%address%'
-                          OR LOWER(e.identifier_type) LIKE '%ip%'
-                          OR LOWER(e.identifier_type) LIKE '%session%' THEN 0.45
-                        ELSE 0.55
-                    END
-                ) AS max_fidelity,
-                MAX(
-                    CASE
-                        WHEN LOWER(e.identifier_type) LIKE '%customer%'
-                          OR LOWER(e.identifier_type) LIKE '%account%'
-                          OR LOWER(e.identifier_type) LIKE '%loyalty%'
-                          OR LOWER(e.identifier_type) IN ('ssn', 'tax_id') THEN 1
-                        ELSE 0
-                    END
-                ) AS has_strong_key,
-                MAX(CASE WHEN LOWER(e.identifier_type) LIKE '%email%' THEN 1 ELSE 0 END) AS has_email,
-                MAX(CASE WHEN LOWER(e.identifier_type) LIKE '%phone%' THEN 1 ELSE 0 END) AS has_phone
+                MAX(COALESCE(rw.rule_weight, 0.70)) AS max_fidelity
             FROM idr_out.identity_edges_current e
             JOIN idr_out.identity_resolved_membership_current m
               ON e.left_entity_key = m.entity_key
             JOIN idr_out.identity_resolved_membership_current m2
               ON e.right_entity_key = m2.entity_key
              AND m.resolved_id = m2.resolved_id
+            LEFT JOIN rule_weights rw
+              ON rw.id_type_lower = LOWER(e.identifier_type)
             WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
             GROUP BY m.resolved_id
         """)
 
-        # 1b. Single-value fanout per cluster (detects mega-star hubs regardless of edge_diversity)
-        self.adapter.execute("""
+        # 1b. Structural over-merge fanout per cluster.
+        # Counts distinct subject-role records sharing each identifier value; 1-to-many child/event
+        # records do not inflate subject_fanout. Damping threshold is per-rule configurable (default 4).
+        self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_value_fanout AS
-            SELECT
-                resolved_id,
-                MAX(value_fanout) AS max_fanout
-            FROM (
+            WITH rule_thresholds AS (
+                SELECT
+                    LOWER(identifier_type) AS id_type_lower,
+                    MAX(COALESCE(fanout_threshold, 4)) AS fanout_threshold
+                FROM idr_meta.rule
+                WHERE is_active = TRUE
+                GROUP BY LOWER(identifier_type)
+            ),
+            edge_endpoints AS (
                 SELECT
                     m.resolved_id,
                     e.identifier_type,
                     e.identifier_value_norm,
-                    COUNT(DISTINCT e.left_entity_key) + 1 AS value_fanout
+                    e.left_entity_key AS entity_key,
+                    CASE WHEN UPPER(COALESCE(st_l.entity_type, '')) IN {child_roles} THEN 1 ELSE 0 END AS is_child
                 FROM idr_out.identity_edges_current e
                 JOIN idr_out.identity_resolved_membership_current m
                   ON e.left_entity_key = m.entity_key
                 JOIN idr_out.identity_resolved_membership_current m2
                   ON e.right_entity_key = m2.entity_key
                  AND m.resolved_id = m2.resolved_id
+                LEFT JOIN idr_meta.source_table st_l ON st_l.table_id = {left_src}
                 WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
-                GROUP BY m.resolved_id, e.identifier_type, e.identifier_value_norm
-            ) vf
+                UNION ALL
+                SELECT
+                    m.resolved_id,
+                    e.identifier_type,
+                    e.identifier_value_norm,
+                    e.right_entity_key AS entity_key,
+                    CASE WHEN UPPER(COALESCE(st_r.entity_type, '')) IN {child_roles} THEN 1 ELSE 0 END AS is_child
+                FROM idr_out.identity_edges_current e
+                JOIN idr_out.identity_resolved_membership_current m
+                  ON e.left_entity_key = m.entity_key
+                JOIN idr_out.identity_resolved_membership_current m2
+                  ON e.right_entity_key = m2.entity_key
+                 AND m.resolved_id = m2.resolved_id
+                LEFT JOIN idr_meta.source_table st_r ON st_r.table_id = {right_src}
+                WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
+            ),
+            value_groups AS (
+                SELECT
+                    ep.resolved_id,
+                    ep.identifier_type,
+                    ep.identifier_value_norm,
+                    COUNT(DISTINCT ep.entity_key) AS raw_fanout,
+                    COUNT(DISTINCT CASE WHEN ep.is_child = 0 THEN ep.entity_key END) AS subj_fanout,
+                    COALESCE(MAX(rt.fanout_threshold), 4) AS fanout_threshold
+                FROM edge_endpoints ep
+                LEFT JOIN rule_thresholds rt ON rt.id_type_lower = LOWER(ep.identifier_type)
+                GROUP BY ep.resolved_id, ep.identifier_type, ep.identifier_value_norm
+            )
+            SELECT
+                resolved_id,
+                MAX(raw_fanout) AS max_fanout,
+                GREATEST(1, COALESCE(MAX(subj_fanout), 1)) AS subject_fanout,
+                MIN(
+                    LEAST(
+                        1.0,
+                        SQRT(CAST(GREATEST(2, fanout_threshold) AS {float_type})) /
+                        SQRT(GREATEST(CAST(GREATEST(2, fanout_threshold) AS {float_type}), CAST(GREATEST(1, subj_fanout) AS {float_type})))
+                    )
+                ) AS fanout_damping
+            FROM value_groups
             GROUP BY resolved_id
         """)
 
-        # 2. Spanning Tree Connectivity, Source Diversity & Max Fanout
+        # 2. Spanning Tree Connectivity, Source Diversity & Structural Fanout
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_density AS
             SELECT
                 c.resolved_id,
                 c.cluster_size,
+                c.subject_count,
+                c.child_count,
                 c.source_diversity,
                 COALESCE(es.edge_diversity, 0) AS edge_diversity,
                 COALESCE(es.edge_count, 0) AS edge_count,
                 LEAST(c.cluster_size, COALESCE(vf.max_fanout, 1)) AS max_fanout,
-                COALESCE(es.max_fidelity, 0.55) AS max_fidelity,
-                COALESCE(es.has_strong_key, 0) AS has_strong_key,
-                COALESCE(es.has_email, 0) AS has_email,
-                COALESCE(es.has_phone, 0) AS has_phone,
+                LEAST(GREATEST(1, c.subject_count), COALESCE(vf.subject_fanout, 1)) AS subject_fanout,
+                COALESCE(vf.fanout_damping, 1.0) AS fanout_damping,
+                COALESCE(es.max_fidelity, 0.70) AS max_fidelity,
                 CASE
                     WHEN c.cluster_size <= 1 THEN 1.0
                     ELSE LEAST(
@@ -182,15 +243,18 @@ class OutputStage(BaseStage):
             LEFT JOIN idr_work.cluster_value_fanout vf ON vf.resolved_id = c.resolved_id
         """)
 
-        # 3. Continuous Confidence Ranking: Corroboration Base (Noisy-OR + Source Diversity) * Fan-out Damping (2/sqrt(max_fanout))
+        # 3. Continuous, Explainable Confidence Ranking (Domain-Agnostic)
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_confidence AS
             SELECT
                 cd.resolved_id,
                 cd.cluster_size,
+                cd.subject_count,
+                cd.child_count,
                 cd.edge_diversity,
                 cd.edge_count,
                 cd.max_fanout,
+                cd.subject_fanout,
                 cd.connectivity_ratio,
                 CASE
                     WHEN cd.cluster_size = 1 THEN 1.0
@@ -212,10 +276,7 @@ class OutputStage(BaseStage):
                                         WHEN cd.edge_count > cd.cluster_size - 1 THEN 0.005
                                         ELSE 0.0
                                     END
-                                ) * LEAST(
-                                    1.0,
-                                    2.0 / SQRT(GREATEST(4.0, CAST(cd.max_fanout AS {float_type})))
-                                )
+                                ) * cd.fanout_damping
                             )
                         ),
                         3
@@ -223,18 +284,13 @@ class OutputStage(BaseStage):
                 END AS confidence_score,
                 CASE
                     WHEN cd.cluster_size = 1 THEN 'SINGLETON_NO_MATCH_REQUIRED'
-                    WHEN cd.max_fanout >= 20 THEN
-                        CONCAT('High fan-out over-merge risk (max_fanout=', CAST(cd.max_fanout AS {str_type}), ', ', CAST(cd.edge_diversity AS {str_type}), ' identifier types)')
+                    WHEN cd.subject_fanout >= 20 THEN
+                        CONCAT('High fan-out over-merge risk (subject_fanout=', CAST(cd.subject_fanout AS {str_type}), ', ', CAST(cd.edge_diversity AS {str_type}), ' corroborating rules)')
                     WHEN cd.edge_diversity >= 2 THEN
-                        CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types across ', CAST(cd.source_diversity AS {str_type}), ' sources (High Confidence Corroboration)')
-                    WHEN cd.has_strong_key = 1 THEN
-                        'Deterministic account/customer key match (Single Key)'
-                    WHEN cd.has_email = 1 THEN
-                        'Deterministic exact email match (Single Key)'
-                    WHEN cd.has_phone = 1 THEN
-                        'Deterministic exact phone match (Single Key)'
-                    ELSE
-                        CONCAT('Deterministic match via ', CAST(cd.edge_diversity AS {str_type}), ' identifier type(s)')
+                        CONCAT(CAST(cd.subject_count AS {str_type}), ' subject + ', CAST(cd.child_count AS {str_type}), ' child records corroborated by ', CAST(cd.edge_diversity AS {str_type}), ' rules across ', CAST(cd.source_diversity AS {str_type}), ' sources')
+                    WHEN cd.edge_diversity = 1 THEN
+                        CONCAT('Single-rule match (', CAST(cd.subject_count AS {str_type}), ' subject + ', CAST(cd.child_count AS {str_type}), ' child records across ', CAST(cd.source_diversity AS {str_type}), ' sources)')
+                    ELSE 'Single-node or fuzzy-only cluster'
                 END AS primary_reason
             FROM idr_work.cluster_density cd
         """)
@@ -634,7 +690,10 @@ class OutputStage(BaseStage):
                         COALESCE(cc.edge_count, 0) AS edge_count,
                         COALESCE(cc.max_fanout, 1) AS max_fanout,
                         COALESCE(cc.connectivity_ratio, 1.0) AS match_density,
-                        COALESCE(cc.primary_reason, 'Single-node cluster') AS primary_reason
+                        COALESCE(cc.primary_reason, 'Single-node cluster') AS primary_reason,
+                        COALESCE(cc.subject_count, COUNT(*)) AS subject_count,
+                        COALESCE(cc.child_count, 0) AS child_count,
+                        COALESCE(cc.subject_fanout, 1) AS subject_fanout
                     FROM idr_work.lp_labels l
                     LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
                     LEFT JOIN idr_work.cluster_confidence cc ON l.label = cc.resolved_id
@@ -646,7 +705,10 @@ class OutputStage(BaseStage):
                         cc.edge_count,
                         cc.max_fanout,
                         cc.connectivity_ratio,
-                        cc.primary_reason
+                        cc.primary_reason,
+                        cc.subject_count,
+                        cc.child_count,
+                        cc.subject_fanout
                 """,
                 key_cols=["resolved_id"],
                 update_cols=[
@@ -660,6 +722,9 @@ class OutputStage(BaseStage):
                     "max_fanout",
                     "match_density",
                     "primary_reason",
+                    "subject_count",
+                    "child_count",
+                    "subject_fanout",
                 ],
                 insert_cols=[
                     "resolved_id",
@@ -673,6 +738,9 @@ class OutputStage(BaseStage):
                     "max_fanout",
                     "match_density",
                     "primary_reason",
+                    "subject_count",
+                    "child_count",
+                    "subject_fanout",
                 ],
             )
 
