@@ -54,6 +54,22 @@ FULL rebuilds publish the complete output. INCR recomputes complete state for af
 
 ## Reviewed labels across different schemas
 
+### How accuracy testing works in production (without full ground truth)
+
+Normal production pipelines do **not** require ground-truth labels—the entire purpose of identity resolution is to produce resolved IDs. In day-to-day production, teams rely on:
+
+- **Dry Run diffs & circuit breakers** (`max_moved_entities_pct`, `max_cluster_delta_pct`, `max_group_size`) to block accidental over-merging before committing.
+- **Structural graph diagnostics & explainable confidence** (singleton rate, max cluster size, skipped high-fanout identifier groups, per-rule edge attribution, and subject fanout).
+- **Manual steward overrides** in Explorer when a false merge or missed match is spotted.
+
+Labeled evaluation is an **optional CLI / CI-first regression gate** built for teams that want quantitative precision and recall before promoting rule changes (for example, adding a new source table or lowering a fuzzy threshold). You do **not** need labels for the whole warehouse—typically a small, versioned cohort of **100–500 reviewed records** is enough, sourced from:
+
+- **Steward audit samples:** Borderline fuzzy matches, large clusters, or high-value records manually verified by a data steward.
+- **High-trust oracle events:** Authenticated SSO logins, verified KYC/government IDs, or support-confirmed account merges.
+- **Legacy MDM / CDP shadow cutovers:** Comparing SQL-IDR outputs against an existing golden ID table during migration.
+
+### Configuring evaluation for CLI & CI
+
 Evaluation consumes reviewed identity groups. Configure the label table/columns once; source mappings translate local record keys using the same configured engine key construction, including composite/AUTO keys. Labels remain in the warehouse. No specific table or customer column is assumed.
 
 ```json
@@ -79,7 +95,7 @@ Evaluation consumes reviewed identity groups. Configure the label table/columns 
 
 `key_columns` maps **source column -> label column**. For composite keys, map every input column used by the configured key expression. Multiple mappings can use different `table` and `truth_id_col` overrides. The optional discriminator is paired `source_column`/`source_value`. If labels already contain engine entity keys (including their source prefix), omit mappings and configure `entity_key_col` instead.
 
-Store this object under `evaluation` in application config, use the optional labeled-evaluation editor in Run & Verify, or keep it in a separate JSON file for CI:
+Store this object under `evaluation` in your YAML/JSON config (if present, Dry Run previews in the UI will automatically display the acceptance scorecard), or keep it in a separate `acceptance.json` file for CLI and CI pipelines:
 
 ```sh
 # Evaluate already published memberships; no graph/profile rebuild or AI call

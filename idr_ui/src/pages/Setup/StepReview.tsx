@@ -1,5 +1,4 @@
 import ProfilePreviewPanel from '../../components/ProfilePreviewPanel';
-import EvaluationConfigEditor from '../../components/EvaluationConfigEditor';
 import AIReviewPanel from '../../components/AIReviewPanel';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -84,7 +83,6 @@ export default function StepReview({
     const [previewBase, setPreviewBase] = useState('');
     const [previewOptions, setPreviewOptions] = useState('');
     const currentPreviewOptions = JSON.stringify([runMode, strictMode, maxIterations, maxGroupSize, selectedLens && selectedLens !== '__none__' ? selectedLens : 'default']);
-    const [savedReviewId, setSavedReviewId] = useState('');
 
     const handleCritiqueDryRun = async () => {
         if (!runResult) return;
@@ -932,7 +930,7 @@ export default function StepReview({
 
                 <details className="rounded-lg border border-gray-700/80 bg-gray-950/40 p-3 text-xs">
                     <summary className="cursor-pointer font-medium text-gray-300 select-none">
-                        Advanced runtime guardrails &amp; saved preview tools
+                        Advanced runtime guardrails &amp; circuit breakers
                     </summary>
                     <div className="mt-3 space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1012,49 +1010,6 @@ export default function StepReview({
                                 <span className="text-gray-400">Skip probabilistic fuzzy matching pass</span>
                             </div>
                         </label>
-
-                        <EvaluationConfigEditor value={config.evaluation} onChange={onUpdateConfig ? next => onUpdateConfig({...config, evaluation:next}) : undefined} />
-
-                        <details className="text-xs text-gray-400">
-                            <summary className="cursor-pointer select-none hover:text-gray-200">
-                                Load a previous Dry Run review by ID
-                            </summary>
-                            <div className="flex flex-wrap gap-2 items-center mt-2">
-                                <input
-                                    value={savedReviewId}
-                                    onChange={e => setSavedReviewId(e.target.value)}
-                                    placeholder="e.g. preview_2026..."
-                                    className="rounded bg-gray-900 border border-gray-700 px-2.5 py-1.5 text-white font-mono text-xs w-64"
-                                />
-                                <button
-                                    type="button"
-                                    disabled={!savedReviewId.trim() || critiqueLoading}
-                                    className="rounded border border-purple-500/70 hover:bg-purple-950/40 px-2.5 py-1.5 text-purple-200 disabled:opacity-40"
-                                    onClick={async () => {
-                                        setCritiqueLoading(true);
-                                        try {
-                                            const saved = await api.getAiReview(savedReviewId.trim());
-                                            const review = saved;
-                                            setCritiqueReport(null); setPreviewBase(JSON.stringify(config));
-                                            const opts = review.execution_options;
-                                            const mode = opts?.run_mode === 'INCR' ? 'INCREMENTAL' : 'FULL';
-                                            const exact = opts?.strict || false;
-                                            const iterations = opts?.max_iters || 30;
-                                            const cap = opts?.max_group_size || 100000;
-                                            setRunMode(mode); setStrictMode(exact); setMaxIterations(iterations); setMaxGroupSize(cap);
-                                            setPreviewOptions(JSON.stringify([mode, exact, iterations, cap, review.lens || 'default']));
-                                            setSelectedLens(review.lens === 'default' ? '' : review.lens);
-                                            setDryRun(true);
-                                            setRunResult({run_id: review.run_id, draft_hash: review.draft_hash, lens:review.lens, profile_validation:review.profile_validation, review, dry_run_summary: {total_entities: review.telemetry.total_entities}});
-                                            setPhase('success');
-                                        } catch (err) { toast('error', 'Unable to load review', err instanceof Error ? err.message : String(err)); }
-                                        finally { setCritiqueLoading(false); }
-                                    }}
-                                >
-                                    Load review
-                                </button>
-                            </div>
-                        </details>
                     </div>
                 </details>
             </div>
