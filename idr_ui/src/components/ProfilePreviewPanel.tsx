@@ -52,7 +52,10 @@ export default function ProfilePreviewPanel({config, runId, fingerprint, lens, s
         {result && <div className="space-y-2"><p>{result.selected_clusters} complete clusters · {result.selected_members} member records · {result.profile_count} proposed profiles. Current source values are evaluated against frozen graph membership.</p>
             {Object.entries(result.grouped_outputs || {}).map(([id, stats])=><p key={id}>{id}: {stats.rows} grouped states · {stats.conflicts} unresolved conflicts</p>)}
             <table className="w-full text-left"><caption className="text-left">Selected profiles only; totals are not population estimates</caption><thead><tr><th>Field</th><th>Paired profiles changed</th><th>Non-null after</th><th>Selected sum before → after</th></tr></thead><tbody>
-                {result.attributes.map(field => <tr key={field.attribute}><td>{field.attribute}</td><td>{field.changed_profiles ?? 'No comparable baseline'}</td><td>{field.after.non_null} / {field.after.profiles}</td><td>{field.after.sample_sum !== undefined ? `${field.before?.sample_sum ?? 'Unavailable'} → ${field.after.sample_sum ?? 'NULL'}` : 'Not numeric'}</td></tr>)}
+                {result.attributes.map(field => {
+                    const fmtNum = (v: unknown) => v == null ? 'NULL' : typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v)
+                    return <tr key={field.attribute}><td>{field.attribute}</td><td>{field.changed_profiles ?? 'No comparable baseline'}</td><td>{field.after.non_null} / {field.after.profiles}</td><td>{field.after.sample_sum !== undefined ? `${field.before?.sample_sum !== undefined ? fmtNum(field.before.sample_sum) : 'Unavailable'} → ${fmtNum(field.after.sample_sum)}` : 'Not numeric'}</td></tr>
+                })}
             </tbody></table>{result.limitations.map(text => <p key={text}>{text}</p>)}
         </div>}
     </details>

@@ -250,7 +250,11 @@ export default function Runs() {
                                                     {formatDate(run.started_at)}
                                                 </td>
                                                 <td className="table-td text-right font-mono text-xs tabular-nums text-ink">
-                                                    {run.duration_seconds != null ? `${run.duration_seconds}s` : '—'}
+                                                    {run.duration_seconds != null
+                                                        ? run.duration_seconds < 0.01
+                                                            ? '<0.01s'
+                                                            : `${Number(run.duration_seconds.toFixed(2))}s`
+                                                        : '—'}
                                                 </td>
                                                 <td className="table-td text-right font-mono text-xs tabular-nums text-ink">
                                                     {run.entities_processed.toLocaleString()}
@@ -358,7 +362,7 @@ export default function Runs() {
                                                                                                 {st.rows_out != null ? `${st.rows_out.toLocaleString()} rows` : '0 rows'}
                                                                                             </div>
                                                                                             <div className="col-span-2 text-right font-mono tabular-nums font-medium text-ink">
-                                                                                                {duration}s
+                                                                                                {duration < 0.01 ? '<0.01s' : `${Number(duration.toFixed(2))}s`}
                                                                                             </div>
                                                                                         </div>
                                                                                     )

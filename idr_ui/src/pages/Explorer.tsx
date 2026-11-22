@@ -34,6 +34,7 @@ export default function Explorer() {
     const debouncedSearchQuery = useDebounce(searchQuery, 250)
 
     const selectedCluster = searchParams.get('cluster')
+    const [resultsCollapsed, setResultsCollapsed] = useState<boolean>(Boolean(selectedCluster))
     const setSelectedCluster = (clusterId: string | null) => {
         if (clusterId) {
             setSearchParams({ cluster: clusterId })
@@ -326,12 +327,12 @@ export default function Explorer() {
             const k = rawKey.toLowerCase()
             if (/name|email|phone|gender|birth|dob|segment|tier|customer|account/.test(k)) {
                 categories['Identity & Contact'].push({ key: rawKey, label, value: rawVal })
-            } else if (/amount|spend|value|price|subtotal|discount|cost|points|payment|order|store|balance/.test(k)) {
-                categories['Commerce & Transactions'].push({ key: rawKey, label, value: rawVal })
-            } else if (/channel|visit|timestamp|date|event|device|browser|os|ip|session|fraud|score|verified/.test(k)) {
-                categories['Engagement & Activity'].push({ key: rawKey, label, value: rawVal })
             } else if (/address|street|city|state|zip|postal|country/.test(k)) {
                 categories['Location & Address'].push({ key: rawKey, label, value: rawVal })
+            } else if (/amount|spend|value|price|subtotal|discount|cost|points|payment|order|store|balance/.test(k)) {
+                categories['Commerce & Transactions'].push({ key: rawKey, label, value: rawVal })
+            } else if (/channel|visit|timestamp|date|event|device|browser|\bos\b|\bip\b|ip_address|session|fraud|score|verified/.test(k)) {
+                categories['Engagement & Activity'].push({ key: rawKey, label, value: rawVal })
             } else {
                 categories['Additional Attributes'].push({ key: rawKey, label, value: rawVal })
             }
@@ -547,9 +548,20 @@ export default function Explorer() {
                                     : `${searchResults?.length || 0} matching clusters`}
                         </span>
                         {searchResults && searchResults.length > 0 && (
-                            <span>Select a cluster to inspect</span>
+                            selectedCluster ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setResultsCollapsed((v) => !v)}
+                                    className="text-accent hover:underline font-medium"
+                                >
+                                    {resultsCollapsed ? `Show all ${searchResults.length} results` : 'Hide list'}
+                                </button>
+                            ) : (
+                                <span>Select a cluster to inspect</span>
+                            )
                         )}
                     </div>
+                    {(!resultsCollapsed || !selectedCluster) && (
                     <div className="max-h-52 overflow-y-auto divide-y divide-line">
                         {searchResults && searchResults.length === 0 && !searching ? (
                             <div className="px-3 py-5 text-center text-xs text-ink-muted">
@@ -564,6 +576,7 @@ export default function Explorer() {
                                         type="button"
                                         onClick={() => {
                                             setSelectedCluster(result.resolved_id)
+                                            setResultsCollapsed(true)
                                             setSelectedNode(null)
                                             setHiddenSources(new Set())
                                             setAiExplanation(null)
@@ -595,6 +608,7 @@ export default function Explorer() {
                             })
                         )}
                     </div>
+                    )}
                 </div>
             )}
 

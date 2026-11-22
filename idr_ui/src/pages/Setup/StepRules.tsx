@@ -3,7 +3,7 @@ import AIProposalReview from '../../components/AIProposalReview'
 import { defaultAIContext, localGoalObjectives } from '../../types'
 import { useEffect, useRef, useState } from 'react'
 import {
-    GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2,
+    GitGraph, ArrowUp, ArrowDown, Trash2, Wand2,
     ShieldAlert, Link2, AlertCircle, Bot, Loader2
 } from 'lucide-react'
 import { ExclusionRule, IDRConfig, LensRule, MatchingRule, OverrideRule } from '../../types'
@@ -810,16 +810,32 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                     </div>
 
                     <div className="pt-3 border-t border-line flex flex-wrap items-center gap-2">
-                        {availableTypes.map((type) => (
-                            <button
-                                key={type}
-                                type="button"
-                                onClick={() => addExactRule(type)}
-                                className="btn-secondary text-xs"
-                            >
-                                <Plus className="w-3.5 h-3.5" /> Exact: <span className="font-mono">{type}</span>
-                            </button>
-                        ))}
+                        {(() => {
+                            const existingKeys = new Set(
+                                rules
+                                    .filter((r) => r.type !== 'FUZZY')
+                                    .flatMap((r) => (r.match_keys || []).map((k) => k.toLowerCase()))
+                            )
+                            const unconfigured = availableTypes.filter((t) => !existingKeys.has(t.toLowerCase()))
+                            if (unconfigured.length === 0) return null
+                            return (
+                                <select
+                                    aria-label="Add exact matching rule"
+                                    value=""
+                                    onChange={(e) => {
+                                        if (e.target.value) addExactRule(e.target.value)
+                                    }}
+                                    className="btn-secondary text-xs pr-7 cursor-pointer"
+                                >
+                                    <option value="">+ Add Exact Rule ({unconfigured.length} available)…</option>
+                                    {unconfigured.map((type) => (
+                                        <option key={type} value={type}>
+                                            Exact: {type}
+                                        </option>
+                                    ))}
+                                </select>
+                            )
+                        })()}
                         <button type="button" onClick={addFuzzyRule} className="btn-secondary text-xs">
                             <Wand2 className="w-3.5 h-3.5 text-status-warning" /> Add Fuzzy Rule
                         </button>

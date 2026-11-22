@@ -66,6 +66,9 @@ export default function Dashboard() {
         enabled: isConfigured,
     })
 
+    const formatDuration = (sec: number) =>
+        sec < 0.05 ? '<0.1s' : sec < 10 ? `${Number(sec.toFixed(1))}s` : `${Math.round(sec)}s`
+
     const runTrendData = useMemo(
         () =>
             (recentRuns || [])
@@ -73,9 +76,14 @@ export default function Dashboard() {
                 .reverse()
                 .map((r, idx) => ({
                     label: r.started_at
-                        ? new Date(r.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                        ? new Date(r.started_at).toLocaleString(undefined, {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                          })
                         : `#${idx + 1}`,
-                    duration: r.duration_seconds ?? 0,
+                    duration: Number((r.duration_seconds ?? 0).toFixed(2)),
                     entities: r.entities_processed ?? 0,
                     mode: r.run_mode,
                 })),
@@ -151,14 +159,16 @@ export default function Dashboard() {
                         <Network className="w-3.5 h-3.5 text-ink-muted" />
                         Explore Clusters
                     </button>
-                    <button
-                        type="button"
-                        onClick={openRunDrawer}
-                        className="btn-primary"
-                    >
-                        <Play className="w-3.5 h-3.5" />
-                        {isConfigured ? 'Run Pipeline' : 'Configure Pipeline'}
-                    </button>
+                    {!isConfigured && (
+                        <button
+                            type="button"
+                            onClick={openRunDrawer}
+                            className="btn-primary"
+                        >
+                            <Play className="w-3.5 h-3.5" />
+                            Configure Pipeline
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -255,7 +265,7 @@ export default function Dashboard() {
                             }
                             sub={
                                 metrics?.last_run_duration != null
-                                    ? `Duration ${metrics.last_run_duration}s`
+                                    ? `Duration ${formatDuration(metrics.last_run_duration)}`
                                     : undefined
                             }
                             loading={metricsLoading}
@@ -400,11 +410,11 @@ export default function Dashboard() {
                                 <h2 className="text-[13px] font-semibold text-ink">Source System Coverage</h2>
                                 <p className="text-xs text-ink-muted">Entities contributed by each connected source table</p>
                             </div>
-                            <ResponsiveContainer width="100%" height={200}>
+                            <ResponsiveContainer width="100%" height={Math.max(200, sourceChartData.length * 26)}>
                                 <BarChart data={sourceChartData} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} horizontal={false} />
                                     <XAxis type="number" stroke={chartTokens.axis} fontSize={11} tickLine={false} tickFormatter={formatCompact} />
-                                    <YAxis type="category" dataKey="label" stroke={chartTokens.axis} fontSize={11} tickLine={false} axisLine={false} width={92} />
+                                    <YAxis type="category" dataKey="label" stroke={chartTokens.axis} fontSize={11} tickLine={false} axisLine={false} width={120} interval={0} />
                                     <Tooltip
                                         contentStyle={tooltipStyle}
                                         formatter={(value: number) => [value.toLocaleString(), 'Entities']}

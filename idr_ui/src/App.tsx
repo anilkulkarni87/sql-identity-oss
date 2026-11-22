@@ -270,19 +270,21 @@ function AppShell() {
                             </kbd>
                         </button>
 
-                        {connectionStatus?.configured ? (
-                            <button
-                                type="button"
-                                onClick={openRunDrawer}
-                                className="btn-primary text-xs"
-                            >
-                                <Play className="w-3.5 h-3.5" />
-                                Run Pipeline
-                            </button>
-                        ) : (
-                            <Link to="/setup" className="btn-primary text-xs">
-                                Configure Pipeline
-                            </Link>
+                        {location.pathname !== '/setup' && (
+                            connectionStatus?.configured ? (
+                                <button
+                                    type="button"
+                                    onClick={openRunDrawer}
+                                    className="btn-primary text-xs"
+                                >
+                                    <Play className="w-3.5 h-3.5" />
+                                    Run Pipeline
+                                </button>
+                            ) : (
+                                <Link to="/setup" className="btn-primary text-xs">
+                                    Configure Pipeline
+                                </Link>
+                            )
                         )}
                     </div>
                 </header>

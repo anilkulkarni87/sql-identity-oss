@@ -430,36 +430,10 @@ export default function StepReview({
 
     return (
         <div className="space-y-6 flex flex-col">
-                <div className="flex flex-wrap gap-2 items-center text-xs">
-                <label>Saved preview run ID <input value={savedReviewId} onChange={e => setSavedReviewId(e.target.value)} className="rounded bg-gray-800 p-2 ml-2 text-white" /></label>
-                <button type="button" disabled={!savedReviewId.trim() || critiqueLoading} className="rounded border border-purple-500 p-2"
-                    onClick={async () => {
-                        setCritiqueLoading(true);
-                        try {
-                            const saved = await api.getAiReview(savedReviewId.trim());
-                            const review = saved;
-                            setCritiqueReport(null); setPreviewBase(JSON.stringify(config));
-                            const opts = review.execution_options;
-                            const mode = opts?.run_mode === 'INCR' ? 'INCREMENTAL' : 'FULL';
-                            const exact = opts?.strict || false;
-                            const iterations = opts?.max_iters || 30;
-                            const cap = opts?.max_group_size || 100000;
-                            setRunMode(mode); setStrictMode(exact); setMaxIterations(iterations); setMaxGroupSize(cap);
-                            setPreviewOptions(JSON.stringify([mode, exact, iterations, cap]));
-                            setSelectedLens(review.lens === 'default' ? '' : review.lens);
-                            setDryRun(true);
-                            setRunResult({run_id: review.run_id, draft_hash: review.draft_hash, lens:review.lens, profile_validation:review.profile_validation, review, dry_run_summary: {total_entities: review.telemetry.total_entities}});
-                            setPhase('success');
-                        } catch (err) { toast('error', 'Unable to load review', err instanceof Error ? err.message : String(err)); }
-                        finally { setCritiqueLoading(false); }
-                    }}>Load saved review</button>
-
-            </div>
-            <EvaluationConfigEditor value={config.evaluation} onChange={onUpdateConfig ? next => onUpdateConfig({...config, evaluation:next}) : undefined} />
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-700 pb-4">
                 <div>
                     <h2 className="text-xl font-semibold text-white">Review & Run Pipeline</h2>
-                    <p className="text-sm text-gray-400">Save your configuration and trigger identity resolution.</p>
+                    <p className="text-sm text-gray-400">Preview changes with a Dry Run or execute the live pipeline.</p>
                 </div>
 
                 {/* Top Action Bar — No Scrolling Needed! */}
@@ -467,15 +441,17 @@ export default function StepReview({
                     <button className={btnOutlineClass} onClick={onBack} disabled={loading || saving}>
                         Back
                     </button>
-                    <button
-                        className={`${btnOutlineClass} ${configSaved ? 'border-green-500 text-green-400' : ''} ${readOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        onClick={handleSave}
-                        disabled={loading || saving || readOnly}
-                        title={readOnly ? "Read-only mode" : "Save configuration"}
-                    >
-                        {saving ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : <Save className="mr-2 w-4 h-4" />}
-                        {saving ? `Saving (${saveProgress?.percent ?? 0}%)` : configSaved ? 'Config Saved' : 'Save Config'}
-                    </button>
+                    {!onTriggerSave && (
+                        <button
+                            className={`${btnOutlineClass} ${configSaved ? 'border-green-500 text-green-400' : ''} ${readOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            onClick={handleSave}
+                            disabled={loading || saving || readOnly}
+                            title={readOnly ? "Read-only mode" : "Save configuration"}
+                        >
+                            {saving ? <Loader2 className="mr-2 w-4 h-4 animate-spin" /> : <Save className="mr-2 w-4 h-4" />}
+                            {saving ? `Saving (${saveProgress?.percent ?? 0}%)` : configSaved ? 'Config Saved' : 'Save Config'}
+                        </button>
+                    )}
                     <button
                         className={`${btnClass} ${dryRun ? 'bg-purple-600 hover:bg-purple-700' : ''}`}
                         onClick={() => handleRun()}
@@ -900,7 +876,7 @@ export default function StepReview({
                     <h3 className="text-base font-semibold text-white">Run Configuration</h3>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                         <label className="text-xs font-medium text-gray-300 block">Run Mode</label>
                         <CustomSelect
@@ -915,35 +891,6 @@ export default function StepReview({
                             className="w-full"
                             buttonClassName="text-sm py-2 bg-gray-900"
                             menuClassName="left-0 right-0"
-                        />
-                    </div>
-
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-gray-300">Max Graph Iterations</label>
-                        <input
-                            type="number"
-                            min="1"
-                            max="100"
-                            value={maxIterations}
-                            disabled={loading}
-                            onChange={(e) => setMaxIterations(parseInt(e.target.value) || 1)}
-                            className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
-                            <span>Max Group Size Guardrail</span>
-                            <span className="text-[10px] text-amber-400 font-mono">Anti-Megacluster</span>
-                        </label>
-                        <input
-                            type="number"
-                            min="2"
-                            value={maxGroupSize}
-                            disabled={loading}
-                            onChange={(e) => setMaxGroupSize(parseInt(e.target.value) || 10000)}
-                            className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="10000"
                         />
                     </div>
 
@@ -967,45 +914,92 @@ export default function StepReview({
                             />
                         </div>
                     )}
+                </div>
 
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
-                            <span>Max Moved Entities % (Optional)</span>
-                            <span className="text-[10px] text-rose-400 font-mono">Circuit Breaker</span>
-                        </label>
-                        <input
-                            type="number"
-                            min="0.1"
-                            max="100"
-                            step="0.5"
-                            value={maxMovedEntitiesPct}
-                            disabled={loading}
-                            onChange={(e) => setMaxMovedEntitiesPct(e.target.value)}
-                            className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Unbounded (e.g. 25)"
-                        />
+                <label className="flex items-center gap-2.5 cursor-pointer bg-purple-900/20 p-3 rounded-lg border border-purple-900/50 hover:border-purple-500/50 transition-colors">
+                    <input
+                        type="checkbox"
+                        checked={dryRun}
+                        disabled={loading}
+                        onChange={(e) => setDryRun(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-purple-500 focus:ring-0"
+                    />
+                    <div className="text-sm">
+                        <span className="font-medium text-purple-200 block">Dry Run Mode (Preview Only)</span>
+                        <span className="text-xs text-purple-300/70">Run in isolated scratch schemas without modifying production tables</span>
                     </div>
+                </label>
 
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
-                            <span>Max Cluster Delta % (Optional)</span>
-                            <span className="text-[10px] text-rose-400 font-mono">Circuit Breaker</span>
-                        </label>
-                        <input
-                            type="number"
-                            min="0.1"
-                            max="100"
-                            step="0.5"
-                            value={maxClusterDeltaPct}
-                            disabled={loading}
-                            onChange={(e) => setMaxClusterDeltaPct(e.target.value)}
-                            className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Unbounded (e.g. 25)"
-                        />
-                    </div>
+                <details className="rounded-lg border border-gray-700/80 bg-gray-950/40 p-3 text-xs">
+                    <summary className="cursor-pointer font-medium text-gray-300 select-none">
+                        Advanced runtime guardrails &amp; saved preview tools
+                    </summary>
+                    <div className="mt-3 space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-gray-300 block">Max Graph Iterations</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="100"
+                                    value={maxIterations}
+                                    disabled={loading}
+                                    onChange={(e) => setMaxIterations(parseInt(e.target.value) || 1)}
+                                    className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                                    <span>Max Group Size</span>
+                                    <span className="text-[10px] text-amber-400 font-mono">Guardrail</span>
+                                </label>
+                                <input
+                                    type="number"
+                                    min="2"
+                                    value={maxGroupSize}
+                                    disabled={loading}
+                                    onChange={(e) => setMaxGroupSize(parseInt(e.target.value) || 10000)}
+                                    className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="10000"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                                    <span>Max Moved Entities %</span>
+                                    <span className="text-[10px] text-rose-400 font-mono">Breaker</span>
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0.1"
+                                    max="100"
+                                    step="0.5"
+                                    value={maxMovedEntitiesPct}
+                                    disabled={loading}
+                                    onChange={(e) => setMaxMovedEntitiesPct(e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Unbounded"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                                    <span>Max Cluster Delta %</span>
+                                    <span className="text-[10px] text-rose-400 font-mono">Breaker</span>
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0.1"
+                                    max="100"
+                                    step="0.5"
+                                    value={maxClusterDeltaPct}
+                                    disabled={loading}
+                                    onChange={(e) => setMaxClusterDeltaPct(e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Unbounded"
+                                />
+                            </div>
+                        </div>
 
-                    <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                        <label className="flex items-center gap-2.5 cursor-pointer bg-gray-800/80 p-3 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors">
+                        <label className="flex items-center gap-2.5 cursor-pointer bg-gray-800/80 p-2.5 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors">
                             <input
                                 type="checkbox"
                                 checked={strictMode}
@@ -1013,27 +1007,40 @@ export default function StepReview({
                                 onChange={(e) => setStrictMode(e.target.checked)}
                                 className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-blue-600 focus:ring-0"
                             />
-                            <div className="text-sm">
+                            <div className="text-xs">
                                 <span className="font-medium text-gray-200 block">Strict Deterministic Mode</span>
-                                <span className="text-xs text-gray-400">Skip probabilistic fuzzy matching pass</span>
+                                <span className="text-gray-400">Skip probabilistic fuzzy matching pass</span>
                             </div>
                         </label>
 
-                        <label className="flex items-center gap-2.5 cursor-pointer bg-purple-900/20 p-3 rounded-lg border border-purple-900/50 hover:border-purple-500/50 transition-colors">
-                            <input
-                                type="checkbox"
-                                checked={dryRun}
-                                disabled={loading}
-                                onChange={(e) => setDryRun(e.target.checked)}
-                                className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-purple-500 focus:ring-0"
-                            />
-                            <div className="text-sm">
-                                <span className="font-medium text-purple-300 block">Dry Run Preview</span>
-                                <span className="text-xs text-purple-200/60">Preview cluster impact without writing to production tables</span>
-                            </div>
-                        </label>
+                        <EvaluationConfigEditor value={config.evaluation} onChange={onUpdateConfig ? next => onUpdateConfig({...config, evaluation:next}) : undefined} />
+
+                        <div className="flex flex-wrap gap-2 items-center pt-1">
+                            <label className="text-gray-300">Saved preview run ID <input value={savedReviewId} onChange={e => setSavedReviewId(e.target.value)} className="rounded bg-gray-800 p-1.5 ml-2 text-white border border-gray-700" /></label>
+                            <button type="button" disabled={!savedReviewId.trim() || critiqueLoading} className="rounded border border-purple-500 px-2.5 py-1.5 text-purple-200 disabled:opacity-40"
+                                onClick={async () => {
+                                    setCritiqueLoading(true);
+                                    try {
+                                        const saved = await api.getAiReview(savedReviewId.trim());
+                                        const review = saved;
+                                        setCritiqueReport(null); setPreviewBase(JSON.stringify(config));
+                                        const opts = review.execution_options;
+                                        const mode = opts?.run_mode === 'INCR' ? 'INCREMENTAL' : 'FULL';
+                                        const exact = opts?.strict || false;
+                                        const iterations = opts?.max_iters || 30;
+                                        const cap = opts?.max_group_size || 100000;
+                                        setRunMode(mode); setStrictMode(exact); setMaxIterations(iterations); setMaxGroupSize(cap);
+                                        setPreviewOptions(JSON.stringify([mode, exact, iterations, cap, review.lens || 'default']));
+                                        setSelectedLens(review.lens === 'default' ? '' : review.lens);
+                                        setDryRun(true);
+                                        setRunResult({run_id: review.run_id, draft_hash: review.draft_hash, lens:review.lens, profile_validation:review.profile_validation, review, dry_run_summary: {total_entities: review.telemetry.total_entities}});
+                                        setPhase('success');
+                                    } catch (err) { toast('error', 'Unable to load review', err instanceof Error ? err.message : String(err)); }
+                                    finally { setCritiqueLoading(false); }
+                                }}>Load saved review</button>
+                        </div>
                     </div>
-                </div>
+                </details>
             </div>
 
             {/* Compact Configuration Summary KPI Strip */}

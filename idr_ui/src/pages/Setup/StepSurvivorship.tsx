@@ -241,8 +241,7 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                     </p>
                 </div>
 
-                <GroupedOutputEditor config={config} onChange={next => onChange?.(next)} />
-            {attributes.length > 0 && (
+                {attributes.length > 0 && (
                     <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[11px] text-slate-500">Bulk apply:</span>
                         <button
@@ -276,15 +275,22 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                             className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
                         />
                     </div>
-                    <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-                        <input
-                            type="checkbox"
-                            checked={conflictsOnly}
-                            onChange={(e) => setConflictsOnly(e.target.checked)}
-                            className="rounded border-slate-600 bg-slate-950 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span>Multi-source conflicts only</span>
-                    </label>
+                    <div className="inline-flex rounded-lg bg-slate-950 border border-slate-700 p-0.5 text-xs">
+                        <button
+                            type="button"
+                            onClick={() => setConflictsOnly(false)}
+                            className={`px-2.5 py-1 rounded-md font-medium transition-colors ${!conflictsOnly ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                            All Attributes ({attributes.length})
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setConflictsOnly(true)}
+                            className={`px-2.5 py-1 rounded-md font-medium transition-colors ${conflictsOnly ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                            Multi-Source Conflicts ({attributes.filter(a => (sourcesByAttr[a]?.length || 0) > 1).length})
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -417,6 +423,8 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                     );
                 })}
             </div>
+
+            <GroupedOutputEditor config={config} onChange={next => onChange?.(next)} />
 
             <div className="flex justify-between pt-3 border-t border-slate-800/80">
                 {onBack ? (

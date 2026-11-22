@@ -382,27 +382,21 @@ export default function Settings() {
                             />
                         </div>
 
+                        {aiProvider !== 'ollama' && aiProvider !== 'disabled' && (
                         <div className="space-y-1">
                             <label htmlFor="ai-api-key-input" className="text-ink-secondary font-medium block">
-                                API Key{' '}
-                                {aiProvider === 'ollama' && (
-                                    <span className="text-ink-muted">(optional for Ollama)</span>
-                                )}
+                                API Key
                             </label>
                             <input
                                 id="ai-api-key-input"
                                 type="password"
                                 value={aiApiKey}
                                 onChange={(e) => setAiApiKey(e.target.value)}
-                                placeholder={
-                                    aiProvider === 'ollama'
-                                        ? 'Not required for local Ollama'
-                                        : 'sk-... (stored in memory only)'
-                                }
-                                disabled={aiProvider === 'disabled'}
+                                placeholder="sk-... (stored in memory only)"
                                 className="input-field font-mono text-xs"
                             />
                         </div>
+                        )}
                     </div>
 
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-line">

@@ -1075,6 +1075,7 @@ export default function StepMap({
                                     />
                                 </div>
 
+                                {Boolean(activeConfig.watermark_column) && (
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
                                         <Clock className="w-3.5 h-3.5 text-slate-400" /> Lookback Window (Minutes)
@@ -1087,6 +1088,7 @@ export default function StepMap({
                                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
                                     />
                                 </div>
+                                )}
 
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-2 text-xs font-medium text-slate-300 cursor-pointer pt-1">
