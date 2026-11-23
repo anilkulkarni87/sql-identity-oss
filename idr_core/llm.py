@@ -189,10 +189,38 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        provider = os.environ.get("IDR_LLM_PROVIDER", "disabled").strip().lower()
+        raw_provider = os.environ.get("IDR_LLM_PROVIDER", "").strip().lower()
         model = os.environ.get("IDR_LLM_MODEL", "").strip()
         base_url = os.environ.get("IDR_LLM_BASE_URL", "").strip() or None
         api_key = os.environ.get("IDR_LLM_API_KEY", "").strip() or None
+
+        openai_key = os.environ.get("OPENAI_API_KEY", "").strip() or None
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip() or None
+        gemini_key = (
+            os.environ.get("GEMINI_API_KEY", "").strip()
+            or os.environ.get("GOOGLE_API_KEY", "").strip()
+            or None
+        )
+
+        if raw_provider:
+            provider = raw_provider
+        elif openai_key:
+            provider = "openai"
+        elif anthropic_key:
+            provider = "anthropic"
+        elif gemini_key:
+            provider = "gemini"
+        else:
+            provider = "disabled"
+
+        if not api_key:
+            if provider == "openai":
+                api_key = openai_key
+            elif provider == "anthropic":
+                api_key = anthropic_key
+            elif provider == "gemini":
+                api_key = gemini_key
+
         raw_mask = os.environ.get("IDR_LLM_MASK_PII", "").strip().lower()
         mask_pii: Optional[bool] = None
         if raw_mask in ("1", "true", "yes"):

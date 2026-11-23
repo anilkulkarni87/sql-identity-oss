@@ -19,12 +19,12 @@ export default function Settings() {
     const [testing, setTesting] = useState(false)
     const [connectingId, setConnectingId] = useState<string | null>(null)
 
-    // AI Assistant (Local Ollama / BYOK) state
-    const [aiProvider, setAiProvider] = useState('ollama')
-    const [aiModel, setAiModel] = useState('llama3.2')
-    const [aiBaseUrl, setAiBaseUrl] = useState('http://localhost:11434/v1')
+    // AI Assistant (Local Ollama / Warehouse Native / BYOK) state
+    const [aiProvider, setAiProvider] = useState('disabled')
+    const [aiModel, setAiModel] = useState('')
+    const [aiBaseUrl, setAiBaseUrl] = useState('')
     const [aiApiKey, setAiApiKey] = useState('')
-    const [aiMaskPii, setAiMaskPii] = useState<boolean>(false)
+    const [aiMaskPii, setAiMaskPii] = useState<boolean>(true)
     const [aiStatusMsg, setAiStatusMsg] = useState<string | null>(null)
     const [aiTesting, setAiTesting] = useState(false)
     const [ollamaModels, setOllamaModels] = useState<string[]>([])
@@ -35,11 +35,17 @@ export default function Settings() {
     })
 
     useEffect(() => {
-        if (aiConfig && aiConfig.enabled) {
+        if (!aiConfig) return
+        if (aiConfig.enabled) {
             setAiProvider(aiConfig.provider || 'ollama')
-            setAiModel(aiConfig.model || 'llama3.2')
-            setAiBaseUrl(aiConfig.base_url || 'http://localhost:11434/v1')
+            setAiModel(aiConfig.model || '')
+            setAiBaseUrl(aiConfig.base_url || '')
             setAiMaskPii(Boolean(aiConfig.mask_pii))
+        } else {
+            setAiProvider('disabled')
+            setAiModel('')
+            setAiBaseUrl('')
+            setAiMaskPii(true)
         }
     }, [aiConfig])
 
@@ -399,15 +405,27 @@ export default function Settings() {
 
                         {aiProvider !== 'ollama' && aiProvider !== 'warehouse' && aiProvider !== 'disabled' && (
                         <div className="space-y-1">
-                            <label htmlFor="ai-api-key-input" className="text-ink-secondary font-medium block">
-                                API Key
-                            </label>
+                            <div className="flex items-center justify-between">
+                                <label htmlFor="ai-api-key-input" className="text-ink-secondary font-medium block">
+                                    API Key
+                                </label>
+                                {aiConfig?.has_api_key && aiConfig.provider === aiProvider && (
+                                    <span className="text-[11px] font-medium text-status-success">
+                                        Key configured
+                                    </span>
+                                )}
+                            </div>
                             <input
                                 id="ai-api-key-input"
                                 type="password"
+                                autoComplete="off"
                                 value={aiApiKey}
                                 onChange={(e) => setAiApiKey(e.target.value)}
-                                placeholder="sk-... (stored in memory only)"
+                                placeholder={
+                                    aiConfig?.has_api_key && aiConfig.provider === aiProvider
+                                        ? 'Configured (leave blank to keep existing key)'
+                                        : 'sk-... (stored in memory only)'
+                                }
                                 className="input-field font-mono text-xs"
                             />
                         </div>
@@ -418,14 +436,14 @@ export default function Settings() {
                         <label className="inline-flex items-center gap-2 text-xs text-ink-secondary cursor-pointer">
                             <input
                                 type="checkbox"
-                                checked={aiProvider !== 'ollama' && aiProvider !== 'disabled' ? true : aiMaskPii}
+                                checked={aiProvider !== 'ollama' && aiProvider !== 'warehouse' && aiProvider !== 'disabled' ? true : aiMaskPii}
                                 onChange={(e) => setAiMaskPii(e.target.checked)}
-                                disabled={aiProvider !== 'ollama'}
+                                disabled={aiProvider !== 'ollama' && aiProvider !== 'warehouse'}
                                 className="rounded border-line-strong text-accent focus:ring-accent"
                             />
                             <span>
                                 Mask PII before sending to AI
-                                {aiProvider !== 'ollama' && aiProvider !== 'disabled' && (
+                                {aiProvider !== 'ollama' && aiProvider !== 'warehouse' && aiProvider !== 'disabled' && (
                                     <span className="text-status-warning ml-1">
                                         (enforced for non-local models)
                                     </span>
@@ -433,49 +451,78 @@ export default function Settings() {
                             </span>
                         </label>
 
-                        <button
-                            type="button"
-                            disabled={aiTesting}
-                            onClick={async () => {
-                                setAiTesting(true)
-                                setAiStatusMsg(null)
-                                try {
-                                    await api.updateAiConfig({
-                                        provider: aiProvider,
-                                        model: aiModel.trim(),
-                                        base_url: aiBaseUrl.trim(),
-                                        api_key: aiApiKey.trim() || undefined,
-                                        mask_pii: aiProvider === 'ollama' ? aiMaskPii : true,
-                                    })
-                                    await queryClient.invalidateQueries({ queryKey: ['aiConfig'] })
-                                    if (aiProvider === 'disabled') {
-                                        setAiStatusMsg('AI Assistant disabled.')
-                                        toast('info', 'AI Assistant disabled')
-                                    } else {
-                                        const res = await api.testAiConnection()
-                                        const msg = `Connected to ${res.provider} (${res.model}) in ${res.latency_ms}ms — PII masking: ${
-                                            res.mask_pii ? 'ON' : 'OFF (local)'
-                                        }`
-                                        setAiStatusMsg(msg)
-                                        toast('success', 'AI Assistant ready', msg)
+                        <div className="flex items-center gap-2">
+                            {aiConfig?.enabled && (
+                                <button
+                                    type="button"
+                                    disabled={aiTesting}
+                                    onClick={async () => {
+                                        setAiTesting(true)
+                                        setAiStatusMsg(null)
+                                        try {
+                                            const res = await api.testAiConnection()
+                                            const msg = `Connected to ${res.provider} (${res.model}) in ${res.latency_ms}ms — PII masking: ${
+                                                res.mask_pii ? 'ON' : 'OFF (local)'
+                                            }`
+                                            setAiStatusMsg(msg)
+                                            toast('success', 'AI Assistant ready', msg)
+                                        } catch (err: any) {
+                                            const errMsg = `AI test failed: ${err.message || String(err)}`
+                                            setAiStatusMsg(errMsg)
+                                            toast('error', 'AI test failed', err.message || String(err))
+                                        } finally {
+                                            setAiTesting(false)
+                                        }
+                                    }}
+                                    className="btn-secondary text-xs"
+                                >
+                                    Test Current
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                disabled={aiTesting}
+                                onClick={async () => {
+                                    setAiTesting(true)
+                                    setAiStatusMsg(null)
+                                    try {
+                                        await api.updateAiConfig({
+                                            provider: aiProvider,
+                                            model: aiModel.trim(),
+                                            base_url: aiBaseUrl.trim(),
+                                            api_key: aiApiKey.trim() || undefined,
+                                            mask_pii: aiProvider === 'ollama' || aiProvider === 'warehouse' ? aiMaskPii : true,
+                                        })
+                                        await queryClient.invalidateQueries({ queryKey: ['aiConfig'] })
+                                        if (aiProvider === 'disabled') {
+                                            setAiStatusMsg('AI Assistant disabled.')
+                                            toast('info', 'AI Assistant disabled')
+                                        } else {
+                                            const res = await api.testAiConnection()
+                                            const msg = `Connected to ${res.provider} (${res.model}) in ${res.latency_ms}ms — PII masking: ${
+                                                res.mask_pii ? 'ON' : 'OFF (local)'
+                                            }`
+                                            setAiStatusMsg(msg)
+                                            toast('success', 'AI Assistant ready', msg)
+                                        }
+                                    } catch (err: any) {
+                                        const errMsg = `AI test failed: ${err.message || String(err)}`
+                                        setAiStatusMsg(errMsg)
+                                        toast('error', 'AI test failed', err.message || String(err))
+                                    } finally {
+                                        setAiTesting(false)
                                     }
-                                } catch (err: any) {
-                                    const errMsg = `AI test failed: ${err.message || String(err)}`
-                                    setAiStatusMsg(errMsg)
-                                    toast('error', 'AI test failed', err.message || String(err))
-                                } finally {
-                                    setAiTesting(false)
-                                }
-                            }}
-                            className="btn-primary text-xs"
-                        >
+                                }}
+                                className="btn-primary text-xs"
+                            >
                             {aiTesting ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
                                 <Bot className="w-3.5 h-3.5" />
                             )}
                             <span>Save &amp; Test AI</span>
-                        </button>
+                            </button>
+                        </div>
                     </div>
 
                     {aiStatusMsg && (

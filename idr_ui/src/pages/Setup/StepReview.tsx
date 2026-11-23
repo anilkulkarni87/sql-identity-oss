@@ -267,6 +267,7 @@ export default function StepReview({
         }
         setPhase('running');
         setError(null);
+        setRunResult(null);
         setCritiqueReport(null);
         setLiveProgress({
             status: 'RUNNING',

@@ -904,10 +904,13 @@ class IDRDataProfiler:
 
         # Deterministic pre-annotated hints (grounds small local models like llama3.2)
         name_l = sp.name.lower()
+        _non_watermark_date_tokens = (
+            "birth", "dob", "expir", "due_date", "anniversary", "hire_date", "graduation"
+        )
         if col_prof.is_entity_key:
             sp.hint_role = "entity_key"
             sp.hint_confidence = 0.95
-        elif col_prof.is_temporal:
+        elif col_prof.is_temporal and not any(tok in name_l for tok in _non_watermark_date_tokens):
             sp.hint_role = "watermark"
             sp.hint_confidence = 0.90
         elif col_prof.detected_identifier_type:
@@ -1202,6 +1205,14 @@ class IDRDataProfiler:
             entity_keys = [c.name for c in safe_cols if c.hint_role == "entity_key"]
             hint_ek = entity_keys[0] if entity_keys else (safe_cols[0].name if safe_cols else None)
             wm_candidates = [c.name for c in safe_cols if c.hint_role == "watermark" and c.name != hint_ek]
+            def _wm_priority(col_name: str) -> int:
+                nl = col_name.lower()
+                if any(k in nl for k in ("updated", "modified", "changed", "last_mod")):
+                    return 0
+                if any(k in nl for k in ("created", "inserted", "ingested", "event_time", "event_ts", "timestamp", "_ts")):
+                    return 1
+                return 2
+            wm_candidates.sort(key=_wm_priority)
             hint_wm = wm_candidates[0] if wm_candidates else None
 
             # Check duplicate/null keys on sample without retaining values

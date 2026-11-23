@@ -70,7 +70,7 @@ export default function AIReviewPanel({ report, config, stale, onUpdate, onPrevi
             <p className="font-semibold">{i + 1}. {finding.title}</p>
             <p><strong>Recommendation: </strong>{finding.recommendation || finding.patch?.label || 'Keep the current settings and inspect this evidence locally.'}</p>
             <p><strong>Evidence: </strong>{finding.detail} {finding.metric}</p>
-            {finding.patch && <p className="font-mono">{finding.patch.target}: {finding.patch.action.replace(/_/g, ' ')}{finding.current_value !== undefined ? ` ${finding.current_value} →` : ''} {JSON.stringify(finding.patch.value)}</p>}
+            {finding.patch && <p className="font-mono">{finding.patch.target}: {finding.patch.action.replace(/_/g, ' ')}{finding.current_value !== undefined ? ` ${finding.current_value} →` : ''}{finding.patch.value !== null && finding.patch.value !== undefined ? ` ${JSON.stringify(finding.patch.value)}` : ''}</p>}
             {finding.expected_effect && <p><strong>Expected effect: </strong>{finding.expected_effect}</p>}
             {finding.tradeoff && <p><strong>Tradeoff: </strong>{finding.tradeoff}</p>}
             {finding.patch && <div className="flex gap-2">

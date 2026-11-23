@@ -39,11 +39,13 @@ export default function Explorer() {
     const [triageMaxConf, setTriageMaxConf] = useState('0.75')
     const [triageEscalateModel, setTriageEscalateModel] = useState('')
     const [triageResult, setTriageResult] = useState<Awaited<ReturnType<typeof api.runAiTriage>> | null>(null)
+    const [triageError, setTriageError] = useState<string | null>(null)
     const [applyingOverrideKey, setApplyingOverrideKey] = useState<string | null>(null)
     const [appliedOverrides, setAppliedOverrides] = useState<Record<string, boolean>>({})
 
     const handleRunTriage = async () => {
         setTriageLoading(true)
+        setTriageError(null)
         try {
             const parsedMax = Number(triageMaxConf)
             const res = await api.runAiTriage(
@@ -55,7 +57,9 @@ export default function Explorer() {
             )
             setTriageResult(res)
         } catch (err: any) {
-            toast('error', 'AI Triage failed', String(err?.message || err))
+            const msg = String(err?.message || err)
+            setTriageError(msg)
+            toast('error', 'AI Triage failed', msg)
         } finally {
             setTriageLoading(false)
         }
@@ -670,6 +674,12 @@ export default function Explorer() {
                         </button>
                     </div>
 
+                    {triageError && (
+                        <div className="rounded-md border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-status-danger text-xs">
+                            {triageError}
+                        </div>
+                    )}
+
                     {triageResult?.cascade_summary && (
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                             <div className="rounded-md border border-line bg-subtle px-3 py-2">
@@ -1256,7 +1266,10 @@ export default function Explorer() {
 
                                 <div className="flex items-center gap-2 shrink-0">
                                     <span className="text-xs font-mono tabular-nums text-ink-muted">
-                                        {visibleEntities.length}/{clusterDetail.entities.length} entities · {graphEdges.length} edges
+                                        {visibleEntities.length}/{clusterDetail.entities.length} entities ·{' '}
+                                        {graphEdges.length === (clusterDetail.edges?.length ?? 0)
+                                            ? `${graphEdges.length} edges`
+                                            : `${graphEdges.length} visible / ${clusterDetail.edges?.length ?? 0} total edges`}
                                     </span>
                                     <button
                                         type="button"

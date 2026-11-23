@@ -10,6 +10,12 @@ const queryClient = new QueryClient()
 import { IDRAuthProvider } from './auth/IDRAuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 
+// Auto-recover cleanly if a stale tab requests a hashed JS chunk from a previous build
+window.addEventListener('vite:preloadError', (event) => {
+    event.preventDefault()
+    window.location.reload()
+})
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
         <QueryClientProvider client={queryClient}>

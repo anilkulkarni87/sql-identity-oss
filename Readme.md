@@ -118,8 +118,8 @@ idr run --platform [platform] --db demo.duckdb --mode FULL
 idr config history --platform [platform] --db demo.duckdb
 idr config rollback --platform [platform] --db demo.duckdb
 
-# 4. Launch Interactive Web UI + API
-idr ui --db demo.duckdb
+# 5. Launch Interactive Web UI + API (connect to demo.duckdb in Step 1)
+idr ui
 ```
 
 ### Option 2: AI Agent (MCP) & Local Ollama / BYOK AI Assistant
