@@ -622,13 +622,13 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                             <ArrowUp className="w-3.5 h-3.5" />
                                         </button>
                                         <span className="text-[11px] font-mono tabular-nums font-semibold text-ink-muted">
-                                            #{rule.priority}
+                                            #{idx + 1}
                                         </span>
                                         <button
                                             type="button"
                                             onClick={() => moveRule(idx, 'down')}
                                             disabled={idx === rules.length - 1}
-                                            aria-label={`Move rule ${rule.priority} down`}
+                                            aria-label={`Move rule ${idx + 1} down`}
                                             className="p-1 hover:bg-hover rounded text-ink-muted hover:text-ink disabled:opacity-30"
                                         >
                                             <ArrowDown className="w-3.5 h-3.5" />
@@ -666,7 +666,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                             <button
                                                 type="button"
                                                 onClick={() => deleteRule(idx)}
-                                                aria-label={`Delete rule ${rule.priority}`}
+                                                aria-label={`Delete rule ${idx + 1}`}
                                                 className="p-1.5 hover:bg-status-danger-soft text-ink-muted hover:text-status-danger rounded transition-colors"
                                             >
                                                 <Trash2 className="w-3.5 h-3.5" />

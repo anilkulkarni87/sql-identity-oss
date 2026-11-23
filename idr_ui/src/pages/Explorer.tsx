@@ -118,6 +118,12 @@ export default function Explorer() {
     const [aiExplaining, setAiExplaining] = useState(false)
     const [aiCustomPrompt, setAiCustomPrompt] = useState('')
 
+    useEffect(() => {
+        setAiExplanation(null)
+        setAiCustomPrompt('')
+        setSelectedNode(null)
+    }, [selectedCluster])
+
     const [selectedNode, setSelectedNode] = useState<GraphNodeData | null>(null)
     const [activeTab, setActiveTab] = useState<InspectorTab>('golden')
     const [layoutName, setLayoutName] = useState<GraphLayoutName>('concentric')
@@ -1266,10 +1272,10 @@ export default function Explorer() {
 
                                 <div className="flex items-center gap-2 shrink-0">
                                     <span className="text-xs font-mono tabular-nums text-ink-muted">
-                                        {visibleEntities.length}/{clusterDetail.entities.length} entities ·{' '}
+                                        {visibleEntities.length}/{clusterDetail.entities.length} {clusterDetail.entities.length === 1 ? 'entity' : 'entities'} ·{' '}
                                         {graphEdges.length === (clusterDetail.edges?.length ?? 0)
-                                            ? `${graphEdges.length} edges`
-                                            : `${graphEdges.length} visible / ${clusterDetail.edges?.length ?? 0} total edges`}
+                                            ? `${graphEdges.length} ${graphEdges.length === 1 ? 'edge' : 'edges'}`
+                                            : `${graphEdges.length} visible / ${clusterDetail.edges?.length ?? 0} total ${(clusterDetail.edges?.length ?? 0) === 1 ? 'edge' : 'edges'}`}
                                     </span>
                                     <button
                                         type="button"
