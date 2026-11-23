@@ -84,25 +84,39 @@ class ProfileBuilder:
         staging_cte = self._rank_row_groups(staging_cte, survivorship_rules, source_id_lookup)
 
         # 4. Execute final generation: Upsert in INCR mode, CTAS in FULL mode
+        # Always drive from idr_out.identity_clusters_current (LEFT JOIN aggregated staging)
+        # so golden_profiles maintains strict 1:1 cardinality with identity_clusters_current
+        # without scanning unmapped source tables.
         select_clause = ",\n    ".join(selection_columns)
+        attr_select_clause = ",\n    ".join([f"a.{col}" for col in attr_names])
         all_cols = ["resolved_id", "run_id", "updated_at"] + attr_names
         update_cols = ["run_id", "updated_at"] + attr_names
 
         if is_incremental:
             print("Incrementally updating Golden Profiles for impacted clusters...")
-            # Step A: Materialize delta profiles for impacted clusters only
+            # Step A: Materialize delta profiles for impacted clusters only (1:1 with live impacted clusters)
             self.adapter.execute(f"""
                 CREATE OR REPLACE TABLE idr_work.golden_profiles_delta AS
                 WITH staging AS (
                     {staging_cte}
+                ),
+                aggregated AS (
+                    SELECT
+                        resolved_id,
+                        {select_clause}
+                    FROM staging
+                    GROUP BY resolved_id
                 )
                 SELECT
-                    resolved_id,
+                    c.resolved_id,
                     '{run_id}' as run_id,
                     {self.dialect["current_timestamp"]} as updated_at,
-                    {select_clause}
-                FROM staging
-                GROUP BY resolved_id
+                    {attr_select_clause}
+                FROM idr_out.identity_clusters_current c
+                INNER JOIN (SELECT DISTINCT resolved_id FROM idr_work.impacted_resolved_ids) imp
+                    ON c.resolved_id = imp.resolved_id
+                LEFT JOIN aggregated a
+                    ON c.resolved_id = a.resolved_id
             """)
 
             # Step B: Upsert delta profiles into production table
@@ -163,14 +177,22 @@ class ProfileBuilder:
                 CREATE OR REPLACE TABLE idr_out.golden_profiles{tblproperties_clause} AS
                 WITH staging AS (
                     {staging_cte}
+                ),
+                aggregated AS (
+                    SELECT
+                        resolved_id,
+                        {select_clause}
+                    FROM staging
+                    GROUP BY resolved_id
                 )
                 SELECT
-                    resolved_id,
+                    c.resolved_id,
                     '{run_id}' as run_id,
                     {self.dialect["current_timestamp"]} as updated_at,
-                    {select_clause}
-                FROM staging
-                GROUP BY resolved_id
+                    {attr_select_clause}
+                FROM idr_out.identity_clusters_current c
+                LEFT JOIN aggregated a
+                    ON c.resolved_id = a.resolved_id
             """
 
             print("Generating Golden Profiles...")

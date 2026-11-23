@@ -378,7 +378,8 @@ def test_confidence_scoring_fidelity_and_corroboration_sql(dialect):
     assert "max_fidelity" in executed_sqls
     assert "connectivity_ratio" in executed_sqls
     assert "SINGLETON_NO_MATCH_REQUIRED" in executed_sqls
-    assert "High Confidence Corroboration" in executed_sqls
+    assert "corroborated by " in executed_sqls
+    assert "subject_fanout" in executed_sqls
 
 
 @pytest.mark.parametrize(
@@ -792,3 +793,88 @@ class TestIncrementalProfileBuilder:
         assert expected_keyword in executed_sqls
         assert "golden_profiles_delta" in executed_sqls
         assert "DELETE FROM idr_out.golden_profiles" in executed_sqls
+
+
+def test_golden_profiles_match_cluster_cardinality_full_and_incr():
+    """Golden profiles must maintain 1:1 cardinality with identity_clusters_current in FULL and INCR modes."""
+    from idr_core.adapters.duckdb import DuckDBAdapter
+    from idr_core.profile_builder import ProfileBuilder
+    from idr_core.schema_manager import SchemaManager
+
+    adapter = DuckDBAdapter(":memory:")
+    SchemaManager(adapter).initialize(reset=True)
+
+    # Create two source tables: orders (mapped to total_amount) and customers (unmapped)
+    adapter.execute("CREATE TABLE raw_orders (order_id VARCHAR, amount DOUBLE, updated_at TIMESTAMP)")
+    adapter.execute("CREATE TABLE raw_customers (cust_id VARCHAR, name VARCHAR, updated_at TIMESTAMP)")
+    adapter.execute("""
+        INSERT INTO raw_orders VALUES
+            ('o1', 100.0, TIMESTAMP '2026-01-01 00:00:00'),
+            ('o2', 50.0,  TIMESTAMP '2026-01-02 00:00:00')
+    """)
+    adapter.execute("""
+        INSERT INTO raw_customers VALUES
+            ('c1', 'Alice', TIMESTAMP '2026-01-01 00:00:00'),
+            ('c2', 'Bob',   TIMESTAMP '2026-01-01 00:00:00')
+    """)
+
+    adapter.execute("""
+        INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, is_active)
+        VALUES
+            ('orders', 'raw_orders', 'EVENT', 'order_id', 'updated_at', TRUE),
+            ('customers', 'raw_customers', 'PERSON', 'cust_id', 'updated_at', TRUE)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_meta.survivorship_rule (attribute_name, strategy, is_active)
+        VALUES ('total_amount', 'AGG_SUM', TRUE)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_meta.entity_attribute_mapping (table_id, attribute_name, attribute_expr)
+        VALUES ('orders', 'total_amount', 'amount')
+    """)
+
+    # Cluster C1 has both customer + orders; Cluster C2 has only customer (no orders)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_clusters_current (resolved_id, cluster_size, confidence_score)
+        VALUES ('C1', 3, 0.95), ('C2', 1, 1.0)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id)
+        VALUES
+            ('customers:c1', 'C1'),
+            ('orders:o1', 'C1'),
+            ('orders:o2', 'C1'),
+            ('customers:c2', 'C2')
+    """)
+
+    builder = ProfileBuilder(adapter)
+    builder.build_profiles("run_full_1", run_mode="FULL")
+
+    rows = {
+        r["resolved_id"]: r["total_amount"]
+        for r in adapter.query("SELECT resolved_id, total_amount FROM idr_out.golden_profiles")
+    }
+    assert set(rows.keys()) == {"C1", "C2"}
+    assert rows["C1"] == 150.0
+    assert rows["C2"] is None
+
+    # INCR mode: add a new unmapped cluster C3 and mark it impacted
+    adapter.execute("""
+        INSERT INTO idr_out.identity_clusters_current (resolved_id, cluster_size, confidence_score)
+        VALUES ('C3', 1, 1.0)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id)
+        VALUES ('customers:c3', 'C3')
+    """)
+    adapter.execute("CREATE OR REPLACE TABLE idr_work.impacted_resolved_ids AS SELECT 'C3' AS resolved_id")
+
+    builder.build_profiles("run_incr_2", run_mode="INCR")
+    rows_incr = {
+        r["resolved_id"]: r["total_amount"]
+        for r in adapter.query("SELECT resolved_id, total_amount FROM idr_out.golden_profiles")
+    }
+    assert set(rows_incr.keys()) == {"C1", "C2", "C3"}
+    assert rows_incr["C1"] == 150.0
+    assert rows_incr["C2"] is None
+    assert rows_incr["C3"] is None
