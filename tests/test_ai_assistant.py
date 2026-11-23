@@ -587,3 +587,137 @@ def test_validate_unified_profile_against_source_data(tmp_path):
         assert clean_res["metrics"]["resolved_id"] == chat_res["metrics"]["resolved_id"]
     finally:
         adapter.close()
+
+
+def test_warehouse_native_llm_provider_dialects():
+    from idr_core.llm import LLMClient, LLMConfig
+
+    cfg = LLMConfig(provider="warehouse", model="")
+    assert cfg.is_local is True
+    assert cfg.effective_mask_pii is False
+    assert cfg.resolved_model("snowflake") == "llama3.1-8b"
+    assert cfg.resolved_model("databricks") == "databricks-meta-llama-3-1-8b-instruct"
+    assert cfg.resolved_model("duckdb") == "llama3.2"
+
+    class _StubAdapter:
+        def __init__(self, dialect: str):
+            self.dialect = dialect
+            self.last_sql = ""
+
+        def query(self, sql: str):
+            self.last_sql = sql
+            return [{"response": '{"ok": true}'}]
+
+    sf = _StubAdapter("snowflake")
+    out_sf = LLMClient(LLMConfig(provider="warehouse"), adapter=sf).chat(
+        [{"role": "user", "content": "Hello's test"}], json_mode=True
+    )
+    assert out_sf == '{"ok": true}'
+    assert "SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b'" in sf.last_sql
+    assert "Hello''s test" in sf.last_sql
+
+    dbx = _StubAdapter("databricks")
+    out_dbx = LLMClient(LLMConfig(provider="warehouse"), adapter=dbx).chat(
+        [{"role": "user", "content": "Check cluster"}]
+    )
+    assert out_dbx == '{"ok": true}'
+    assert "ai_query('databricks-meta-llama-3-1-8b-instruct'" in dbx.last_sql
+
+    bq = _StubAdapter("bigquery")
+    out_bq = LLMClient(
+        LLMConfig(provider="warehouse", model="my_proj.my_ds.gemini_flash"), adapter=bq
+    ).chat([{"role": "user", "content": "Judge pair"}])
+    assert out_bq == '{"ok": true}'
+    assert "ML.GENERATE_TEXT(MODEL `my_proj.my_ds.gemini_flash`" in bq.last_sql
+
+
+def test_tiered_cascade_triage_funnel_and_escalation():
+    from idr_core.ai_assistant import triage_with_ai
+
+    adapter = DuckDBAdapter(":memory:")
+    SchemaManager(adapter).initialize(reset=True)
+
+    # Seed 4 multi-entity clusters: 2 healthy (auto-pass SQL Tier 0) + 2 borderline
+    adapter.execute("""
+        INSERT INTO idr_out.identity_clusters_current
+            (resolved_id, cluster_size, confidence_score, edge_diversity, edge_count,
+             subject_count, child_count, subject_fanout)
+        VALUES
+            ('C_HEALTHY_1', 3, 0.95, 2, 3, 1, 2, 1),
+            ('C_HEALTHY_2', 2, 0.92, 2, 2, 1, 1, 1),
+            ('C_BORDER_1',  4, 0.55, 1, 3, 2, 2, 2),
+            ('C_BORDER_2',  3, 0.60, 1, 2, 2, 1, 2)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id)
+        VALUES
+            ('crm:1', 'C_BORDER_1'), ('crm:2', 'C_BORDER_1'),
+            ('crm:3', 'C_BORDER_2'), ('crm:4', 'C_BORDER_2')
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_edges_current
+            (left_entity_key, right_entity_key, identifier_type, identifier_value_norm)
+        VALUES
+            ('crm:1', 'crm:2', 'EMAIL', 'shared@example.com'),
+            ('crm:3', 'crm:4', 'PHONE', '5551234567')
+    """)
+
+    tier1_reply = json.dumps({
+        "proposals": [
+            {
+                "resolved_id": "C_BORDER_1",
+                "action": "DO_NOT_LINK",
+                "judge_confidence": 0.91,
+                "entity_key_a": "crm:1",
+                "entity_key_b": "crm:2",
+                "reason": "Two distinct subjects linked only by a shared generic email.",
+            },
+            {
+                "resolved_id": "C_BORDER_2",
+                "action": "KEEP",
+                "judge_confidence": 0.55,
+                "reason": "Uncertain whether shared phone is household or work desk.",
+            },
+        ]
+    })
+    tier2_reply = json.dumps({
+        "proposals": [
+            {
+                "resolved_id": "C_BORDER_2",
+                "action": "DO_NOT_LINK",
+                "judge_confidence": 0.94,
+                "entity_key_a": "crm:3",
+                "entity_key_b": "crm:4",
+                "reason": "Confirmed office switchboard phone; split distinct subjects.",
+            }
+        ]
+    })
+
+    tier1_client = LLMClient(LLMConfig(provider="openai", model="gpt-4o-mini", api_key="sk-test"), adapter=adapter)
+    with patch("idr_core.llm.LLMClient.chat", side_effect=[tier1_reply, tier2_reply]) as mock_chat:
+        res = triage_with_ai(
+            adapter,
+            client=tier1_client,
+            max_confidence=0.75,
+            limit=8,
+            escalate_model="gpt-4o",
+            escalation_threshold=0.80,
+        )
+
+    assert res["status"] == "OK"
+    assert mock_chat.call_count == 2  # Tier 1 batch + Tier 2 escalation for C_BORDER_2 only
+    funnel = res["cascade_summary"]
+    assert funnel["total_multi_entity_clusters"] == 4
+    assert funnel["tier0_auto_passed"] == 2
+    assert funnel["tier0_flagged"] == 2
+    assert funnel["tier1_reviewed"] == 2
+    assert funnel["tier2_escalated"] == 1
+    assert funnel["sql_filter_savings_pct"] == 50.0
+
+    by_id = {p["resolved_id"]: p for p in res["proposals"]}
+    assert by_id["C_BORDER_1"]["judge_tier"] == "tier1"
+    assert by_id["C_BORDER_1"]["escalated"] is False
+    assert by_id["C_BORDER_1"]["subject_fanout"] == 2
+    assert by_id["C_BORDER_2"]["judge_tier"] == "tier2"
+    assert by_id["C_BORDER_2"]["escalated"] is True
+    assert by_id["C_BORDER_2"]["action"] == "DO_NOT_LINK"

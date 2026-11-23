@@ -80,6 +80,23 @@ graph LR
     API --> UI
 ```
 
+### 🤖 3-Tier Zero-PII Agentic Architecture
+
+Go from raw warehouse tables to a configured, measured identity graph—and audit borderline clusters without shipping raw PII outside your warehouse:
+
+```mermaid
+flowchart LR
+    T["Raw Warehouse Tables<br/>(DuckDB · Snowflake · BigQuery · Databricks)"] --> CFG["Zero-PII AI Config<br/>Schema & overlap profiling"]
+    CFG --> DR["Isolated Dry Run<br/>Counterfactual diff & circuit breakers"]
+    DR --> T0["Tier 0: SQL Structural Filter<br/>$0 · Zero PII<br/>(confidence_score & subject_fanout)"]
+    T0 -->|"90–98% healthy"| OK["Trusted Identity Graph"]
+    T0 -->|"2–10% borderline"| T1["Tier 1: Fast / Local / Warehouse AI<br/>(Cortex · ai_query · BQ ML · Ollama · BYOK)"]
+    T1 -->|"Uncertain verdict"| T2["Tier 2: Optional Frontier Escalation"]
+    T1 --> H["Human / Agent Approval<br/>(UI 1-Click · CLI · MCP Token)"]
+    T2 --> H
+    H --> OVR["idr_meta.manual_override"]
+```
+
 ## 🚀 Getting Started
 
 ### Option 1: CLI (Standard)

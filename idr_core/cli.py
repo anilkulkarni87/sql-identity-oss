@@ -551,15 +551,20 @@ Examples:
     explain_parser.add_argument("--prompt", help="Optional custom question/prompt about this cluster")
 
     # === idr triage ===
-    triage_parser = subparsers.add_parser("triage", help="AI-assisted triage of low-confidence clusters")
+    triage_parser = subparsers.add_parser("triage", help="3-Tier AI-assisted triage of borderline clusters")
     triage_parser.add_argument("--platform", "-p", choices=["duckdb", "bigquery", "snowflake", "databricks"])
     triage_parser.add_argument("--db", help="DuckDB database path")
     triage_parser.add_argument("--project", help="GCP project ID (BigQuery)")
-    triage_parser.add_argument("--max-confidence", type=float, default=0.65, help="Max confidence threshold")
-    triage_parser.add_argument("--limit", type=int, default=8, help="Max clusters to review")
-    triage_parser.add_argument("--provider", help="LLM provider (default: IDR_LLM_PROVIDER or ollama)")
-    triage_parser.add_argument("--model", help="Model name")
+    triage_parser.add_argument("--max-confidence", type=float, default=0.75, help="Tier-0 SQL max confidence threshold (default: 0.75)")
+    triage_parser.add_argument("--min-subject-fanout", type=int, default=2, help="Tier-0 SQL min subject fanout to flag (default: 2)")
+    triage_parser.add_argument("--limit", type=int, default=8, help="Max flagged clusters to judge")
+    triage_parser.add_argument("--provider", help="Tier-1 LLM provider (ollama, warehouse, openai, anthropic, gemini)")
+    triage_parser.add_argument("--model", help="Tier-1 model name")
     triage_parser.add_argument("--base-url", help="Custom base URL")
+    triage_parser.add_argument("--escalate-provider", help="Optional Tier-2 escalation LLM provider")
+    triage_parser.add_argument("--escalate-model", help="Optional Tier-2 escalation model name")
+    triage_parser.add_argument("--escalation-threshold", type=float, default=0.80, help="Escalate Tier-1 verdicts below this confidence (default: 0.80)")
+    triage_parser.add_argument("--json", action="store_true", dest="json_output", help="Emit JSON output")
 
     # === idr lenses ===
     lenses_parser = subparsers.add_parser("lenses", help="Multi-lens identity graph utilities")
@@ -1468,7 +1473,7 @@ def handle_plugins_list() -> int:
     return 0
 
 
-def _build_llm_client_from_args(args) -> "LLMClient":
+def _build_llm_client_from_args(args, adapter=None) -> "LLMClient":
     from idr_core.llm import LLMClient, LLMConfig
 
     cfg = LLMConfig.from_env()
@@ -1486,7 +1491,7 @@ def _build_llm_client_from_args(args) -> "LLMClient":
         cfg.mask_pii = True
     elif getattr(args, "no_mask_pii", False):
         cfg.mask_pii = False
-    return LLMClient(cfg)
+    return LLMClient(cfg, adapter=adapter)
 
 
 def handle_ai(args) -> int:
@@ -1678,24 +1683,60 @@ def handle_explain(args) -> int:
 
 def handle_triage(args) -> int:
     """Handle `idr triage`."""
+    import json
+
     from idr_core.ai_assistant import triage_with_ai
 
     adapter = get_adapter(args)
-    client = _build_llm_client_from_args(args)
+    client = _build_llm_client_from_args(args, adapter=adapter)
     res = triage_with_ai(
         adapter,
         client=client,
-        max_confidence=getattr(args, "max_confidence", 0.65),
+        max_confidence=getattr(args, "max_confidence", 0.75),
         limit=getattr(args, "limit", 8),
+        escalate_provider=getattr(args, "escalate_provider", None),
+        escalate_model=getattr(args, "escalate_model", None),
+        escalation_threshold=getattr(args, "escalation_threshold", 0.80),
+        min_subject_fanout=getattr(args, "min_subject_fanout", 2),
     )
-    print(f"AI Triage ({res.get('provider', 'n/a')}:{res.get('model', 'n/a')} | pii_masked={res['pii_masked']})")
-    print("-" * 60)
+    if getattr(args, "json_output", False):
+        print(json.dumps(res, default=str, indent=2))
+        return 0
+
+    tier2_info = (
+        f" -> Tier-2 {res.get('escalate_provider')}:{res.get('escalate_model')}"
+        if res.get("escalate_model")
+        else ""
+    )
+    print(
+        f"3-Tier AI Triage ({res.get('provider', 'n/a')}:{res.get('model', 'n/a')}"
+        f"{tier2_info} | pii_masked={res['pii_masked']})"
+    )
+    funnel = res.get("cascade_summary") or {}
+    if funnel:
+        print(
+            f"  Tier 0 (SQL, $0) : {funnel.get('total_multi_entity_clusters', 0):,} multi-entity clusters -> "
+            f"{funnel.get('tier0_auto_passed', 0):,} auto-passed ({funnel.get('sql_filter_savings_pct', 0)}%) | "
+            f"{funnel.get('tier0_flagged', 0):,} flagged"
+        )
+        print(
+            f"  Tier 1 (LLM)     : {funnel.get('tier1_reviewed', 0):,} judged | "
+            f"Tier 2 escalated: {funnel.get('tier2_escalated', 0):,}"
+        )
+    print("-" * 72)
     proposals = res.get("proposals", [])
     if not proposals:
         print(res.get("message", "No proposals."))
         return 0
     for p in proposals:
-        print(f"- {p.get('resolved_id')}: [{p.get('action')}] {p.get('reason')}")
+        tier = str(p.get("judge_tier") or "tier1").upper()
+        jconf = p.get("judge_confidence")
+        conf_str = f" conf={jconf:.2f}" if isinstance(jconf, (int, float)) else ""
+        fanout = p.get("subject_fanout")
+        fanout_str = f" fanout={fanout}" if fanout is not None else ""
+        print(
+            f"- {p.get('resolved_id')}: [{p.get('action')}] ({tier}{conf_str}{fanout_str}) {p.get('reason')}"
+        )
     return 0
 
 

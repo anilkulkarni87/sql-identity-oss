@@ -257,7 +257,7 @@ export default function Settings() {
                     </div>
                     <span
                         className={
-                            aiProvider === 'ollama'
+                            aiProvider === 'ollama' || aiProvider === 'warehouse'
                                 ? 'badge-success'
                                 : aiProvider === 'disabled'
                                 ? 'badge-neutral'
@@ -265,7 +265,11 @@ export default function Settings() {
                         }
                     >
                         <Shield className="w-3 h-3" />
-                        {aiProvider === 'ollama'
+                        {aiProvider === 'warehouse'
+                            ? aiMaskPii
+                                ? 'Warehouse Native + PII Masked'
+                                : 'Warehouse Native (Zero Egress)'
+                            : aiProvider === 'ollama'
                             ? aiMaskPii
                                 ? 'Local + PII Masked'
                                 : 'Local Mode (Zero Egress)'
@@ -283,7 +287,11 @@ export default function Settings() {
                                 value={aiProvider}
                                 onChange={(val) => {
                                     setAiProvider(val)
-                                    if (val === 'ollama') {
+                                    if (val === 'warehouse') {
+                                        setAiBaseUrl('')
+                                        setAiModel('')
+                                        setAiMaskPii(false)
+                                    } else if (val === 'ollama') {
                                         setAiBaseUrl('http://localhost:11434/v1')
                                         setAiModel('llama3.2')
                                         setAiMaskPii(false)
@@ -305,6 +313,7 @@ export default function Settings() {
                                     }
                                 }}
                                 options={[
+                                    { value: 'warehouse', label: 'Warehouse Native (Cortex / BigQuery ML / Databricks ai_query / Local Ollama)' },
                                     { value: 'ollama', label: 'Ollama (Local / MacBook)' },
                                     { value: 'openai', label: 'OpenAI' },
                                     { value: 'anthropic', label: 'Anthropic Claude' },
@@ -360,29 +369,35 @@ export default function Settings() {
                                     type="text"
                                     value={aiModel}
                                     onChange={(e) => setAiModel(e.target.value)}
-                                    placeholder="e.g. llama3.2, gpt-4o-mini"
+                                    placeholder={
+                                        aiProvider === 'warehouse'
+                                            ? 'Auto (or Cortex / ai_query / BQ model FQN)'
+                                            : 'e.g. llama3.2, gpt-4o-mini'
+                                    }
                                     disabled={aiProvider === 'disabled'}
                                     className="input-field font-mono text-xs"
                                 />
                             )}
                         </div>
 
-                        <div className="space-y-1">
-                            <label htmlFor="ai-base-url-input" className="text-ink-secondary font-medium block">
-                                Base URL
-                            </label>
-                            <input
-                                id="ai-base-url-input"
-                                type="text"
-                                value={aiBaseUrl}
-                                onChange={(e) => setAiBaseUrl(e.target.value)}
-                                placeholder="http://localhost:11434/v1"
-                                disabled={aiProvider === 'disabled'}
-                                className="input-field font-mono text-xs"
-                            />
-                        </div>
+                        {aiProvider !== 'warehouse' && (
+                            <div className="space-y-1">
+                                <label htmlFor="ai-base-url-input" className="text-ink-secondary font-medium block">
+                                    Base URL
+                                </label>
+                                <input
+                                    id="ai-base-url-input"
+                                    type="text"
+                                    value={aiBaseUrl}
+                                    onChange={(e) => setAiBaseUrl(e.target.value)}
+                                    placeholder="http://localhost:11434/v1"
+                                    disabled={aiProvider === 'disabled'}
+                                    className="input-field font-mono text-xs"
+                                />
+                            </div>
+                        )}
 
-                        {aiProvider !== 'ollama' && aiProvider !== 'disabled' && (
+                        {aiProvider !== 'ollama' && aiProvider !== 'warehouse' && aiProvider !== 'disabled' && (
                         <div className="space-y-1">
                             <label htmlFor="ai-api-key-input" className="text-ink-secondary font-medium block">
                                 API Key

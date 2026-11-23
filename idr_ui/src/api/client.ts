@@ -518,19 +518,58 @@ export const api = {
         })
     }),
 
-    runAiTriage: (maxConfidence = 0.65, limit = 8) => fetchJson<{
+    runAiTriage: (
+        maxConfidence = 0.75,
+        limit = 8,
+        options?: {
+            escalateProvider?: string
+            escalateModel?: string
+            escalationThreshold?: number
+            minSubjectFanout?: number
+        }
+    ) => fetchJson<{
         status: string
         pii_masked: boolean
+        provider?: string
+        model?: string
+        escalate_provider?: string | null
+        escalate_model?: string | null
+        candidates_reviewed?: number
+        message?: string
+        cascade_summary?: {
+            total_multi_entity_clusters: number
+            tier0_auto_passed: number
+            tier0_flagged: number
+            tier1_reviewed: number
+            tier2_escalated: number
+            sql_filter_savings_pct: number
+            escalation_threshold: number
+        }
         proposals: Array<{
             resolved_id: string
             action: string
+            judge_confidence?: number
+            judge_tier?: 'tier1' | 'tier2'
+            escalated?: boolean
+            cluster_size?: number
+            confidence_score?: number | null
+            subject_count?: number | null
+            child_count?: number | null
+            subject_fanout?: number | null
             entity_key_a?: string
             entity_key_b?: string
             reason: string
         }>
     }>('/ai/triage', {
         method: 'POST',
-        body: JSON.stringify({ max_confidence: maxConfidence, limit })
+        body: JSON.stringify({
+            max_confidence: maxConfidence,
+            limit,
+            ...(options?.escalateProvider ? { escalate_provider: options.escalateProvider } : {}),
+            ...(options?.escalateModel ? { escalate_model: options.escalateModel } : {}),
+            ...(options?.escalationThreshold !== undefined ? { escalation_threshold: options.escalationThreshold } : {}),
+            ...(options?.minSubjectFanout !== undefined ? { min_subject_fanout: options.minSubjectFanout } : {}),
+        }),
     }),
 
     askAi: (question: string) => fetchJson<{

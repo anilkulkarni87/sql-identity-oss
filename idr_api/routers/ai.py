@@ -66,8 +66,12 @@ class AIExplainRequest(BaseModel):
 
 
 class AITriageRequest(BaseModel):
-    max_confidence: float = 0.65
+    max_confidence: float = 0.75
     limit: int = 8
+    escalate_provider: Optional[str] = None
+    escalate_model: Optional[str] = None
+    escalation_threshold: float = 0.80
+    min_subject_fanout: int = 2
 
 
 class AIAskRequest(BaseModel):
@@ -134,7 +138,13 @@ def test_ai_connection(
 ):
     try:
         cfg = store.get(get_user_key(current_user))
-        return test_llm_connection(LLMClient(cfg))
+        adapter = None
+        if cfg.provider.strip().lower() == "warehouse":
+            try:
+                adapter = get_adapter()
+            except Exception:
+                adapter = None
+        return test_llm_connection(LLMClient(cfg, adapter=adapter))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -151,7 +161,7 @@ def explain_cluster(
         return explain_cluster_with_ai(
             adapter,
             payload.resolved_id,
-            client=LLMClient(cfg),
+            client=LLMClient(cfg, adapter=adapter),
             custom_prompt=payload.prompt,
         )
     except ValueError as exc:
@@ -171,9 +181,13 @@ def run_ai_triage(
         cfg = store.get(get_user_key(current_user))
         return triage_with_ai(
             adapter,
-            client=LLMClient(cfg),
+            client=LLMClient(cfg, adapter=adapter),
             max_confidence=payload.max_confidence,
             limit=payload.limit,
+            escalate_provider=payload.escalate_provider,
+            escalate_model=payload.escalate_model,
+            escalation_threshold=payload.escalation_threshold,
+            min_subject_fanout=payload.min_subject_fanout,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -191,7 +205,7 @@ def ask_ai(
         return ask_identity_graph(
             adapter,
             payload.question,
-            client=LLMClient(cfg),
+            client=LLMClient(cfg, adapter=adapter),
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -215,7 +229,7 @@ def copilot(
             adapter,
             payload.message,
             history=payload.history,
-            client=LLMClient(cfg),
+            client=LLMClient(cfg, adapter=adapter),
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -263,7 +277,7 @@ def suggest_config(
             return suggest_config_with_ai(
                 {},
                 goal_text,
-                client=LLMClient(cfg),
+                client=LLMClient(cfg, adapter=adapter),
                 adapter=adapter,
                 tables=tables,
                 sample_size=payload.sample_size,
@@ -311,7 +325,7 @@ def suggest_config_stream(
                 res = suggest_config_with_ai(
                     {},
                     goal_text,
-                    client=LLMClient(cfg),
+                    client=LLMClient(cfg, adapter=adapter),
                     adapter=adapter,
                     tables=tables,
                     sample_size=payload.sample_size,
@@ -373,7 +387,7 @@ def critique_dry_run(
         if payload.draft_hash != draft_hash(payload.config):
             raise StaleReview("Draft changed; run a fresh preview")
         return AIReviewService(adapter, get_user_key(current_user)).explain(
-            payload.run_id, payload.draft_hash, payload.lens, LLMClient(cfg), payload.config
+            payload.run_id, payload.draft_hash, payload.lens, LLMClient(cfg, adapter=adapter), payload.config
         )
     except StaleReview as exc:
         raise HTTPException(409, str(exc)) from exc

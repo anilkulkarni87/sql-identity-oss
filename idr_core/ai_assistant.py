@@ -202,63 +202,238 @@ def explain_cluster_with_ai(
     }
 
 
+def _cluster_table_has_structural_cols(adapter: Any) -> bool:
+    try:
+        cols = {
+            str(c.get("name", "")).lower()
+            for c in adapter.get_table_columns("idr_out.identity_clusters_current")
+        }
+        return {"subject_count", "child_count", "subject_fanout"}.issubset(cols)
+    except Exception:
+        return False
+
+
+def _build_escalation_client(
+    base_client: LLMClient,
+    adapter: Any,
+    escalate_provider: Optional[str],
+    escalate_model: Optional[str],
+) -> Optional[LLMClient]:
+    if not escalate_provider and not escalate_model:
+        return None
+    from .llm import LLMConfig
+
+    prov = (escalate_provider or base_client.config.provider).strip().lower()
+    same_provider = prov == base_client.config.provider.strip().lower()
+    env_cfg = LLMConfig.from_env()
+    cfg = LLMConfig(
+        provider=prov,
+        model=(escalate_model or "").strip(),
+        base_url=base_client.config.base_url if same_provider else None,
+        api_key=base_client.config.api_key if same_provider else env_cfg.api_key,
+        mask_pii=base_client.config.mask_pii,
+        timeout=base_client.config.timeout,
+    )
+    return LLMClient(cfg, adapter=adapter)
+
+
 def triage_with_ai(
     adapter: Any,
     client: Optional[LLMClient] = None,
-    max_confidence: float = 0.65,
+    max_confidence: float = 0.75,
     limit: int = 8,
+    escalate_provider: Optional[str] = None,
+    escalate_model: Optional[str] = None,
+    escalation_threshold: float = 0.80,
+    min_subject_fanout: int = 2,
 ) -> Dict[str, Any]:
-    """Review low-confidence or large clusters and propose stewardship overrides."""
-    client = client or LLMClient()
-    candidates = adapter.query(
+    """
+    3-Tier Confidence-Routed Cascade Judge for borderline identity clusters.
+
+    Tier 0 (Warehouse SQL, $0, Zero PII):
+        Filters out healthy multi-entity clusters; flags only low-confidence,
+        oversized, or multi-subject (subject_fanout >= min_subject_fanout) clusters.
+    Tier 1 (Configured fast/local/warehouse LLM):
+        Judges flagged clusters and returns calibrated verdicts with judge_confidence.
+    Tier 2 (Optional escalation model):
+        Escalates only uncertain Tier-1 verdicts (judge_confidence < escalation_threshold).
+    """
+    client = client or LLMClient(adapter=adapter)
+    if getattr(client, "adapter", None) is None:
+        client.adapter = adapter
+
+    safe_max_conf = float(max_confidence)
+    safe_limit = max(1, min(int(limit), 100))
+    safe_fanout = max(2, int(min_subject_fanout))
+    has_struct = _cluster_table_has_structural_cols(adapter)
+
+    flag_predicate = (
+        f"(confidence_score <= {safe_max_conf} OR cluster_size >= 10 OR subject_fanout >= {safe_fanout})"
+        if has_struct
+        else f"(confidence_score <= {safe_max_conf} OR cluster_size >= 10)"
+    )
+
+    funnel_rows = adapter.query(
         f"""
-        SELECT resolved_id, cluster_size, confidence_score, edge_diversity, edge_count
+        SELECT
+            COUNT(*) AS total_multi_entity_clusters,
+            COALESCE(SUM(CASE WHEN {flag_predicate} THEN 1 ELSE 0 END), 0) AS tier0_flagged
         FROM idr_out.identity_clusters_current
         WHERE cluster_size > 1
-          AND (confidence_score <= {float(max_confidence)} OR cluster_size >= 10)
-        ORDER BY confidence_score ASC, cluster_size DESC
-        LIMIT {int(limit)}
         """
     )
+    total_multi = int((funnel_rows[0].get("total_multi_entity_clusters") or 0) if funnel_rows else 0)
+    tier0_flagged = int((funnel_rows[0].get("tier0_flagged") or 0) if funnel_rows else 0)
+    tier0_auto_passed = max(0, total_multi - tier0_flagged)
+    sql_savings_pct = round((tier0_auto_passed / total_multi) * 100.0, 1) if total_multi > 0 else 100.0
+
+    struct_select = (
+        ", subject_count, child_count, subject_fanout"
+        if has_struct
+        else ""
+    )
+    order_clause = (
+        "ORDER BY subject_fanout DESC, confidence_score ASC, cluster_size DESC"
+        if has_struct
+        else "ORDER BY confidence_score ASC, cluster_size DESC"
+    )
+    candidates = adapter.query(
+        f"""
+        SELECT resolved_id, cluster_size, confidence_score, edge_diversity, edge_count{struct_select}
+        FROM idr_out.identity_clusters_current
+        WHERE cluster_size > 1
+          AND {flag_predicate}
+        {order_clause}
+        LIMIT {safe_limit}
+        """
+    )
+
+    dialect = getattr(adapter, "dialect", "duckdb")
+    tier1_model = client.config.resolved_model(dialect=dialect)
+
+    cascade_summary = {
+        "total_multi_entity_clusters": total_multi,
+        "tier0_auto_passed": tier0_auto_passed,
+        "tier0_flagged": tier0_flagged,
+        "tier1_reviewed": len(candidates),
+        "tier2_escalated": 0,
+        "sql_filter_savings_pct": sql_savings_pct,
+        "escalation_threshold": float(escalation_threshold),
+    }
+
     if not candidates:
         return {
             "status": "CLEAN",
             "pii_masked": client.config.effective_mask_pii,
+            "provider": client.config.provider,
+            "model": tier1_model,
+            "escalate_provider": escalate_provider,
+            "escalate_model": escalate_model,
+            "candidates_reviewed": 0,
+            "cascade_summary": cascade_summary,
             "proposals": [],
-            "message": "No low-confidence or oversized clusters found.",
+            "message": (
+                f"All {total_multi:,} multi-entity clusters auto-passed SQL Tier 0 ($0, zero PII sent)."
+                if total_multi > 0
+                else "No multi-entity clusters found."
+            ),
         }
 
+    meta_by_id: Dict[str, Dict[str, Any]] = {}
+    enriched_by_id: Dict[str, Dict[str, Any]] = {}
     enriched = []
     for c in candidates:
-        ctx = _fetch_cluster_context(adapter, c["resolved_id"], max_members=15, max_edges=25)
+        rid = str(c["resolved_id"])
+        meta_by_id[rid] = {
+            "cluster_size": int(c.get("cluster_size") or 0),
+            "confidence_score": float(c["confidence_score"]) if c.get("confidence_score") is not None else None,
+            "subject_count": int(c["subject_count"]) if c.get("subject_count") is not None else None,
+            "child_count": int(c["child_count"]) if c.get("child_count") is not None else None,
+            "subject_fanout": int(c["subject_fanout"]) if c.get("subject_fanout") is not None else None,
+        }
+        ctx = _fetch_cluster_context(adapter, rid, max_members=15, max_edges=25)
+        ctx["structural_signals"] = meta_by_id[rid]
         enriched.append(ctx)
+        enriched_by_id[rid] = ctx
 
-    payload = _apply_pii_mask(adapter, enriched, client)
-    prompt = (
-        "Review these flagged identity clusters and return JSON with a 'proposals' array.\n"
-        "Each proposal must have: resolved_id, action ('KEEP' | 'DO_NOT_LINK' | 'ISOLATE' | 'ADD_EXCLUSION'), "
-        "entity_key_a (optional), entity_key_b (optional), reason (1 sentence).\n\n"
-        f"Flagged Clusters:\n{json.dumps(payload, default=str)}"
-    )
-    raw = client.chat(
-        [
-            {"role": "system", "content": "Return valid JSON only with top-level key 'proposals'."},
-            {"role": "user", "content": prompt},
-        ],
-        json_mode=True,
-    )
-    try:
-        parsed = json.loads(raw)
-        proposals = parsed.get("proposals", [])
-    except Exception:
-        proposals = [{"resolved_id": "parse_error", "action": "REVIEW", "reason": raw[:500]}]
+    def _run_judge_batch(judge_client: LLMClient, batch: List[Dict[str, Any]], tier_label: str) -> List[Dict[str, Any]]:
+        payload = _apply_pii_mask(adapter, batch, judge_client)
+        prompt = (
+            "You are an Identity Resolution quality judge auditing flagged clusters for over-merging.\n"
+            "Return valid JSON with a top-level 'proposals' array. For each cluster, include:\n"
+            "- resolved_id (string)\n"
+            "- action: one of 'KEEP' | 'DO_NOT_LINK' | 'ISOLATE' | 'ADD_EXCLUSION'\n"
+            "- judge_confidence: calibrated float between 0.0 and 1.0 (use < 0.80 if uncertain)\n"
+            "- entity_key_a (optional string, required for DO_NOT_LINK or ISOLATE)\n"
+            "- entity_key_b (optional string, required for DO_NOT_LINK)\n"
+            "- reason (1 concise sentence explaining the structural/identifier evidence)\n\n"
+            f"Flagged Clusters:\n{json.dumps(payload, default=str)}"
+        )
+        raw = judge_client.chat(
+            [
+                {"role": "system", "content": "Return valid JSON only with top-level key 'proposals'."},
+                {"role": "user", "content": prompt},
+            ],
+            json_mode=True,
+        )
+        try:
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            parsed = json.loads(cleaned)
+            items = parsed.get("proposals", [])
+            if not isinstance(items, list):
+                items = []
+        except Exception:
+            items = [{"resolved_id": "parse_error", "action": "REVIEW", "judge_confidence": 0.0, "reason": raw[:500]}]
+
+        out = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            rid = str(item.get("resolved_id") or "")
+            try:
+                jconf = max(0.0, min(1.0, float(item.get("judge_confidence", 0.75))))
+            except (TypeError, ValueError):
+                jconf = 0.5
+            row = {
+                **meta_by_id.get(rid, {}),
+                **item,
+                "resolved_id": rid,
+                "judge_confidence": round(jconf, 3),
+                "judge_tier": tier_label,
+                "escalated": tier_label == "tier2",
+            }
+            out.append(row)
+        return out
+
+    proposals = _run_judge_batch(client, enriched, "tier1")
+
+    # Optional Tier-2 Escalation for uncertain Tier-1 verdicts
+    tier2_client = _build_escalation_client(client, adapter, escalate_provider, escalate_model)
+    if tier2_client is not None:
+        uncertain_ids = [
+            p["resolved_id"]
+            for p in proposals
+            if p.get("resolved_id") in enriched_by_id
+            and (float(p.get("judge_confidence", 0.0)) < float(escalation_threshold) or p.get("action") == "REVIEW")
+        ]
+        if uncertain_ids:
+            esc_batch = [enriched_by_id[rid] for rid in uncertain_ids]
+            esc_proposals = _run_judge_batch(tier2_client, esc_batch, "tier2")
+            esc_by_id = {p["resolved_id"]: p for p in esc_proposals if p.get("resolved_id")}
+            proposals = [esc_by_id.get(p["resolved_id"], p) for p in proposals]
+            cascade_summary["tier2_escalated"] = len(esc_by_id)
 
     return {
         "status": "OK",
         "pii_masked": client.config.effective_mask_pii,
         "provider": client.config.provider,
-        "model": client.config.resolved_model(),
+        "model": tier1_model,
+        "escalate_provider": tier2_client.config.provider if tier2_client else None,
+        "escalate_model": tier2_client.config.resolved_model(dialect=dialect) if tier2_client else None,
         "candidates_reviewed": len(candidates),
+        "cascade_summary": cascade_summary,
         "proposals": proposals,
     }
 
@@ -287,20 +462,19 @@ def ask_identity_graph(
         summary["cluster_stats"] = []
 
     try:
-        summary["edges_by_rule"] = adapter.query(
+        summary["edges_by_identifier_type"] = adapter.query(
             """
             SELECT
-                rule_id,
                 identifier_type,
                 COUNT(*) AS edge_count
             FROM idr_out.identity_edges_current
-            GROUP BY rule_id, identifier_type
+            GROUP BY identifier_type
             ORDER BY edge_count DESC
             LIMIT 25
             """
         )
     except Exception:
-        summary["edges_by_rule"] = []
+        summary["edges_by_identifier_type"] = []
 
     try:
         summary["recent_runs"] = adapter.query(

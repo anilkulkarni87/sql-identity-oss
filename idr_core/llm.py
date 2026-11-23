@@ -48,8 +48,10 @@ _SENSITIVE_KEY_TOKENS = (
 
 
 def is_local_endpoint(provider: str, base_url: Optional[str] = None) -> bool:
-    """Return True if the configured LLM endpoint runs locally (e.g. Ollama on localhost)."""
+    """Return True if the configured LLM endpoint runs locally or inside the warehouse perimeter."""
     prov = (provider or "").strip().lower()
+    if prov == "warehouse":
+        return True
     url = (base_url or "").strip()
     if not url:
         return prov == "ollama"
@@ -164,10 +166,19 @@ class LLMConfig:
             return "https://generativelanguage.googleapis.com/v1beta"
         return ""
 
-    def resolved_model(self) -> str:
+    def resolved_model(self, dialect: Optional[str] = None) -> str:
         if self.model and self.model.strip():
             return self.model.strip()
         prov = self.provider.strip().lower()
+        if prov == "warehouse":
+            d = (dialect or "duckdb").strip().lower()
+            wh_defaults = {
+                "snowflake": "llama3.1-8b",
+                "databricks": "databricks-meta-llama-3-1-8b-instruct",
+                "bigquery": "",
+                "duckdb": "llama3.2",
+            }
+            return wh_defaults.get(d, "llama3.2")
         defaults = {
             "ollama": "llama3.2",
             "openai": "gpt-4o-mini",
@@ -210,10 +221,11 @@ class LLMConfig:
 
 
 class LLMClient:
-    """Thin multi-provider chat client with automatic PII masking."""
+    """Thin multi-provider chat client with automatic PII masking and warehouse-native AI."""
 
-    def __init__(self, config: Optional[LLMConfig] = None):
+    def __init__(self, config: Optional[LLMConfig] = None, adapter: Any = None):
         self.config = config or LLMConfig.from_env()
+        self.adapter = adapter
 
     def chat(
         self,
@@ -223,11 +235,12 @@ class LLMClient:
     ) -> str:
         if not self.config.is_enabled:
             raise RuntimeError(
-                "AI assistant is disabled. Set IDR_LLM_PROVIDER (e.g. 'ollama') or configure in UI Settings."
+                "AI assistant is disabled. Set IDR_LLM_PROVIDER (e.g. 'ollama', 'warehouse', or 'openai') or configure in UI Settings."
             )
 
         prov = self.config.provider.strip().lower()
-        model = self.config.resolved_model()
+        dialect = getattr(self.adapter, "dialect", "duckdb") if self.adapter is not None else "duckdb"
+        model = self.config.resolved_model(dialect=dialect)
         base_url = self.config.resolved_base_url()
 
         safe_messages = messages
@@ -236,6 +249,8 @@ class LLMClient:
                 {"role": m["role"], "content": mask_pii_text(m["content"])} for m in messages
             ]
 
+        if prov == "warehouse":
+            return self._call_warehouse(model, safe_messages, temperature, json_mode)
         if prov in ("ollama", "openai", "openai_compatible"):
             return self._call_openai_compatible(base_url, model, safe_messages, temperature, json_mode)
         if prov == "anthropic":
@@ -243,6 +258,63 @@ class LLMClient:
         if prov == "gemini":
             return self._call_gemini(base_url, model, safe_messages, temperature, json_mode)
         raise ValueError(f"Unsupported LLM provider: '{self.config.provider}'")
+
+    def _call_warehouse(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        json_mode: bool,
+    ) -> str:
+        """Invoke warehouse-native SQL AI functions (Snowflake Cortex, Databricks ai_query, BigQuery ML, or DuckDB -> local Ollama)."""
+        if self.adapter is None:
+            raise RuntimeError(
+                "Warehouse-native AI provider requires an active warehouse connection."
+            )
+        dialect = str(getattr(self.adapter, "dialect", "duckdb") or "duckdb").strip().lower()
+        if dialect == "duckdb":
+            ollama_url = self.config.base_url or "http://localhost:11434/v1"
+            return self._call_openai_compatible(
+                ollama_url.rstrip("/"), model or "llama3.2", messages, temperature, json_mode
+            )
+
+        prompt_parts = []
+        for msg in messages:
+            role = str(msg.get("role", "user")).upper()
+            content = str(msg.get("content", ""))
+            prompt_parts.append(f"{role}:\n{content}")
+        if json_mode:
+            prompt_parts.append("SYSTEM:\nReturn valid JSON only with no markdown fences.")
+        full_prompt = "\n\n".join(prompt_parts)
+        escaped_prompt = full_prompt.replace("'", "''")
+        escaped_model = (model or "").strip().replace("'", "''")
+
+        if dialect == "snowflake":
+            sql = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{escaped_model}', '{escaped_prompt}') AS response"
+        elif dialect == "databricks":
+            sql = f"SELECT ai_query('{escaped_model}', '{escaped_prompt}') AS response"
+        elif dialect == "bigquery":
+            if not escaped_model:
+                raise RuntimeError(
+                    "BigQuery warehouse-native AI requires a remote model FQN in 'model' "
+                    "(e.g. `my_project.my_dataset.gemini_flash`)."
+                )
+            safe_bq_model = escaped_model.strip("`")
+            sql = (
+                f"SELECT ml_generate_text_llm_result AS response "
+                f"FROM ML.GENERATE_TEXT(MODEL `{safe_bq_model}`, "
+                f"(SELECT '{escaped_prompt}' AS prompt), "
+                f"STRUCT({float(temperature)} AS temperature, TRUE AS flatten_json_output))"
+            )
+        else:
+            raise RuntimeError(f"Warehouse-native AI is not supported for dialect '{dialect}'.")
+
+        rows = self.adapter.query(sql)
+        if not rows:
+            return ""
+        first = rows[0]
+        val = first.get("response") if isinstance(first, dict) else first[0]
+        return str(val or "").strip()
 
     def _post_json(self, url: str, body: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
         payload = json.dumps(body).encode("utf-8")

@@ -1133,27 +1133,72 @@ def manage_identity_override(
 
 
 @mcp.tool()
-def get_triage_queue(max_confidence: float = 0.45, limit: int = 20) -> Dict[str, Any]:
+def get_triage_queue(
+    max_confidence: float = 0.75,
+    min_subject_fanout: int = 2,
+    limit: int = 20,
+) -> Dict[str, Any]:
     """
-    Return the highest-risk, lowest-confidence resolved clusters (and any unlabeled
-    evaluation pairs) for agent-driven quality triage and LLM-as-a-judge review.
+    Tier-0 SQL structural triage ($0, zero PII).
+    Returns the highest-risk borderline clusters (low confidence or multi-subject fanout)
+    plus cascade funnel stats and any pending evaluation_sample pairs.
     """
     adapter = get_adapter()
     safe_limit = max(1, min(int(limit), 100))
     threshold = float(max_confidence)
+    safe_fanout = max(2, int(min_subject_fanout))
     try:
         clusters = []
+        cascade_summary = None
         if adapter.table_exists("idr_out.identity_clusters_current"):
+            try:
+                cols = {
+                    str(c.get("name", "")).lower()
+                    for c in adapter.get_table_columns("idr_out.identity_clusters_current")
+                }
+            except Exception:
+                cols = set()
+            has_struct = {"subject_count", "child_count", "subject_fanout"}.issubset(cols)
+            predicate = (
+                f"(confidence_score <= {threshold} OR subject_fanout >= {safe_fanout} OR cluster_size >= 10)"
+                if has_struct
+                else f"(confidence_score <= {threshold} OR cluster_size >= 10)"
+            )
+            funnel_rows = adapter.query(
+                f"""
+                SELECT
+                    COUNT(*) AS total_multi_entity_clusters,
+                    COALESCE(SUM(CASE WHEN {predicate} THEN 1 ELSE 0 END), 0) AS tier0_flagged
+                FROM idr_out.identity_clusters_current
+                WHERE cluster_size > 1
+                """
+            )
+            total_multi = int((funnel_rows[0].get("total_multi_entity_clusters") or 0) if funnel_rows else 0)
+            tier0_flagged = int((funnel_rows[0].get("tier0_flagged") or 0) if funnel_rows else 0)
+            tier0_auto_passed = max(0, total_multi - tier0_flagged)
+            cascade_summary = {
+                "total_multi_entity_clusters": total_multi,
+                "tier0_auto_passed": tier0_auto_passed,
+                "tier0_flagged": tier0_flagged,
+                "sql_filter_savings_pct": round((tier0_auto_passed / total_multi) * 100.0, 1)
+                if total_multi > 0
+                else 100.0,
+            }
+            struct_select = ", subject_count, child_count, subject_fanout" if has_struct else ""
+            order_clause = (
+                "ORDER BY subject_fanout DESC, confidence_score ASC, cluster_size DESC"
+                if has_struct
+                else "ORDER BY confidence_score ASC, cluster_size DESC"
+            )
             clusters = adapter.query(
                 f"""
                 SELECT resolved_id, cluster_size, confidence_score, edge_diversity,
-                       max_fanout, primary_reason, updated_at
+                       max_fanout, primary_reason, updated_at{struct_select}
                 FROM idr_out.identity_clusters_current
-                WHERE confidence_score <= ?
-                ORDER BY confidence_score ASC, cluster_size DESC
+                WHERE cluster_size > 1 AND {predicate}
+                {order_clause}
                 LIMIT {safe_limit}
-                """,
-                params=[threshold],
+                """
             )
 
         samples = []
@@ -1177,12 +1222,52 @@ def get_triage_queue(max_confidence: float = 0.45, limit: int = 20) -> Dict[str,
         return {
             "status": "SUCCESS",
             "max_confidence": threshold,
+            "min_subject_fanout": safe_fanout,
+            "cascade_summary": cascade_summary,
             "low_confidence_clusters": clusters,
             "pending_evaluation_samples": samples,
             "pii_access_level": "masked" if should_mask_pii() else "full",
         }
     except Exception as e:
         return {"status": "ERROR", "error": f"Failed to fetch triage queue: {str(e)}"}
+
+
+@mcp.tool()
+def run_tiered_triage(
+    max_confidence: float = 0.75,
+    limit: int = 8,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    escalate_provider: Optional[str] = None,
+    escalate_model: Optional[str] = None,
+    escalation_threshold: float = 0.80,
+) -> Dict[str, Any]:
+    """
+    Execute the 3-Tier Cascade Judge (SQL Tier 0 -> Tier-1 LLM -> optional Tier-2 escalation).
+    Returns cascade funnel savings and structured override proposals ready for
+    human-confirmed execution via manage_identity_override.
+    """
+    from idr_core.ai_assistant import triage_with_ai
+    from idr_core.llm import LLMClient, LLMConfig
+
+    adapter = get_adapter()
+    cfg = LLMConfig.from_env()
+    if provider:
+        cfg.provider = provider
+    if model:
+        cfg.model = model
+    try:
+        return triage_with_ai(
+            adapter,
+            client=LLMClient(cfg, adapter=adapter),
+            max_confidence=max_confidence,
+            limit=limit,
+            escalate_provider=escalate_provider,
+            escalate_model=escalate_model,
+            escalation_threshold=escalation_threshold,
+        )
+    except Exception as e:
+        return {"status": "ERROR", "error": f"Tiered triage failed: {str(e)}"}
 
 
 @mcp.tool()
