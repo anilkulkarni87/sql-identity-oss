@@ -77,7 +77,7 @@ class OutputStage(BaseStage):
         )
 
         # Structural child roles (engine cardinality contract; zero domain-specific names)
-        child_roles = "('CHILD', 'EVENT_FACT', 'SUB_ENTITY', 'REFERENCE_LOOKUP')"
+        child_roles = "('CHILD', 'EVENT', 'BRIDGE', 'EVENT_FACT', 'SUB_ENTITY', 'REFERENCE_LOOKUP')"
         left_src = source_prefix_expr.replace("entity_key", "e.left_entity_key")
         right_src = source_prefix_expr.replace("entity_key", "e.right_entity_key")
 
