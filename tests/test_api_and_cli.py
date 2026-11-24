@@ -551,14 +551,8 @@ from unittest.mock import MagicMock
 import duckdb
 import pytest
 import yaml
-from fastapi.testclient import TestClient
 
-import idr_api.dependencies as deps
-from idr_api.dependencies import get_manager
-from idr_api.main import app
 from idr_core.cli import main as cli_main
-
-
 
 
 class TestConnectedDashboardAndDiscoveryAPI:

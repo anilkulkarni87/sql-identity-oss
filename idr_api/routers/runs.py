@@ -158,6 +158,14 @@ def get_run_detail(run_id: str, adapter=Depends(get_adapter)):
     except Exception:
         pass
 
+    activation_delta_summary = {}
+    try:
+        from idr_core.activation_delta import summarize_activation_delta
+
+        activation_delta_summary = summarize_activation_delta(adapter, run_id=run_id)
+    except Exception:
+        activation_delta_summary = {}
+
     return RunDetail(
         run_id=row["run_id"],
         run_mode=row["run_mode"],
@@ -174,4 +182,28 @@ def get_run_detail(run_id: str, adapter=Depends(get_adapter)):
         error_message=row.get("error_message"),
         warnings=warnings_list,
         stages=stages,
+        activation_delta_summary=activation_delta_summary or None,
     )
+
+
+@router.get("/api/runs/{run_id}/activation-delta")
+def get_run_activation_delta(
+    run_id: str,
+    change_type: str = Query("ALL"),
+    lens_id: str = Query("default"),
+    limit: int = Query(50, ge=1, le=500),
+    adapter=Depends(get_adapter),
+):
+    """Get activation changelog summary and sample rows for a specific run_id."""
+    from idr_core.activation_delta import query_activation_delta
+
+    try:
+        return query_activation_delta(
+            adapter,
+            run_id=run_id,
+            change_type=change_type,
+            lens_id=lens_id,
+            limit=limit,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e

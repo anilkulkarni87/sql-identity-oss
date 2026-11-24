@@ -1,4 +1,5 @@
 import GroupedOutputEditor from '../../components/GroupedOutputEditor'
+import ActivationDeltaEditor from '../../components/ActivationDeltaEditor'
 import { useState, useEffect, useRef } from 'react';
 import { Layers, ArrowUp, ArrowDown, Zap, Clock, Hash, Search } from "lucide-react";
 import { IDRConfig, SurvivorshipRule, TableColumn } from '../../types';
@@ -226,29 +227,29 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
     ];
 
     return (
-        <div className="space-y-6 flex flex-col">
+        <div className="space-y-4 flex flex-col">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                    <h2 className="text-xl font-bold tracking-tight text-white">Golden Record Survivorship</h2>
-                    <p className="text-sm text-slate-400">
+                    <h2 className="text-[15px] font-semibold text-ink">Golden Record Survivorship</h2>
+                    <p className="text-xs text-ink-muted mt-0.5">
                         Choose conflict resolution strategies per unified profile attribute across competing sources.
                     </p>
                 </div>
 
                 {attributes.length > 0 && (
                     <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[11px] text-slate-500">Bulk apply:</span>
+                        <span className="text-[11px] text-ink-muted">Bulk apply:</span>
                         <button
                             type="button"
                             onClick={() => applyBulkStrategy('RECENCY')}
-                            className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md text-xs text-slate-300 transition-colors"
+                            className="btn-secondary text-xs py-1 px-2.5 min-h-[28px]"
                         >
                             All Recency
                         </button>
                         <button
                             type="button"
                             onClick={() => applyBulkStrategy('PRIORITY')}
-                            className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md text-xs text-slate-300 transition-colors"
+                            className="btn-secondary text-xs py-1 px-2.5 min-h-[28px]"
                         >
                             All Priority
                         </button>
@@ -257,30 +258,30 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
             </div>
 
             {attributes.length > 0 && (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/50 border border-slate-800 rounded-xl px-3.5 py-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 surface-subtle px-3.5 py-2.5">
                     <div className="relative flex-1 max-w-sm">
-                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <Search className="w-3.5 h-3.5 text-ink-subtle absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                         <input
                             type="text"
                             value={attrSearch}
                             onChange={(e) => setAttrSearch(e.target.value)}
                             placeholder="Filter attributes..."
                             aria-label="Filter survivorship attributes"
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                            className="input-field pl-8 pr-3 py-1 text-xs"
                         />
                     </div>
-                    <div className="inline-flex rounded-lg bg-slate-950 border border-slate-700 p-0.5 text-xs">
+                    <div className="inline-flex rounded-md bg-surface border border-line-strong p-0.5 text-xs tabular-nums">
                         <button
                             type="button"
                             onClick={() => setConflictsOnly(false)}
-                            className={`px-2.5 py-1 rounded-md font-medium transition-colors ${!conflictsOnly ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                            className={`px-2.5 py-1 rounded font-medium transition-colors ${!conflictsOnly ? 'bg-accent text-accent-fg' : 'text-ink-muted hover:text-ink'}`}
                         >
                             All Attributes ({attributes.length})
                         </button>
                         <button
                             type="button"
                             onClick={() => setConflictsOnly(true)}
-                            className={`px-2.5 py-1 rounded-md font-medium transition-colors ${conflictsOnly ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                            className={`px-2.5 py-1 rounded font-medium transition-colors ${conflictsOnly ? 'bg-accent text-accent-fg' : 'text-ink-muted hover:text-ink'}`}
                         >
                             Multi-Source Conflicts ({attributes.filter(a => (sourcesByAttr[a]?.length || 0) > 1).length})
                         </button>
@@ -288,9 +289,9 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                 </div>
             )}
 
-            <div className="space-y-3">
+            <div className="space-y-2.5">
                 {attributes.length === 0 && (
-                    <div className="text-center p-10 text-xs text-slate-500 border border-dashed border-slate-700 rounded-xl">
+                    <div className="text-center p-10 text-xs text-ink-muted border border-dashed border-line-strong rounded-md">
                         No mapped profile attributes found. Map attribute columns in <strong>Sources &amp; Mappings</strong> to configure survivorship rules, or proceed directly to Run &amp; Verify.
                     </div>
                 )}
@@ -324,22 +325,22 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                     });
 
                     return (
-                        <div key={attr} className="border border-slate-800 rounded-xl bg-slate-900/75 p-4 space-y-3.5">
+                        <div key={attr} className="surface-panel p-3.5 space-y-3">
                             <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-slate-800 border border-slate-700 rounded-lg">
-                                        <Hash className="w-4 h-4 text-blue-400" />
+                                <div className="flex items-center gap-2.5">
+                                    <div className="p-1.5 bg-subtle border border-line rounded-md">
+                                        <Hash className="w-4 h-4 text-accent" />
                                     </div>
                                     <div>
                                         <div className="flex items-center gap-2">
-                                            <span className="font-semibold text-sm font-mono text-slate-100">{attr}</span>
+                                            <span className="font-semibold text-[13px] font-mono text-ink">{attr}</span>
                                             {sqlType && (
-                                                <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] font-mono text-slate-300 uppercase">
+                                                <span className="badge-neutral font-mono uppercase">
                                                     {sqlType}
                                                 </span>
                                             )}
                                         </div>
-                                        <span className="text-xs text-slate-500">
+                                        <span className="text-xs text-ink-muted tabular-nums">
                                             Present in {validSources.length} {validSources.length === 1 ? 'source' : 'sources'}
                                         </span>
                                     </div>
@@ -349,31 +350,31 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                                     onChange={(val) => updateRule(attr, 'strategy', val)}
                                     options={applicableStrategies.map(s => ({ value: s.id, label: s.label }))}
                                     ariaLabel={`Survivorship strategy for ${attr}`}
-                                    buttonClassName="text-xs py-1.5 min-w-[240px] bg-slate-950"
+                                    buttonClassName="text-xs py-1.5 min-w-[240px]"
                                 />
                             </div>
 
                             {(currentStrategy === 'PRIORITY' || currentStrategy === 'PRIORITY_RECENCY' || currentStrategy === 'LATEST_FROM_SOURCE') && (
-                                <div className="space-y-2 bg-slate-950/70 p-3 rounded-lg border border-slate-800 text-xs">
+                                <div className="space-y-2 surface-subtle p-3 text-xs">
                                     {validSources.length <= 1 ? (
-                                        <div className="text-slate-400">
-                                            Only present in 1 source (<span className="font-mono text-slate-200">{validSources[0] || 'none'}</span>).
+                                        <div className="text-ink-muted">
+                                            Only present in 1 source (<span className="font-mono text-ink">{validSources[0] || 'none'}</span>).
                                         </div>
                                     ) : (
                                         <>
-                                            <label className="text-slate-400 text-[11px] uppercase tracking-wider font-semibold block">
+                                            <label className="text-ink-muted text-[11px] uppercase tracking-[0.04em] font-semibold block">
                                                 Source Priority Order (Highest to Lowest)
                                             </label>
                                             <div className="flex flex-col gap-1.5">
                                                 {(rule.source_priority || validSources).map((src, idx, list) => (
-                                                    <div key={src} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
-                                                        <span className="text-slate-200 font-mono">{idx + 1}. {src}</span>
+                                                    <div key={src} className="flex items-center justify-between bg-surface px-3 py-1.5 rounded border border-line">
+                                                        <span className="text-ink font-mono tabular-nums">{idx + 1}. {src}</span>
                                                         <div className="flex gap-1">
                                                             <button
                                                                 type="button"
                                                                 disabled={idx === 0}
                                                                 onClick={() => movePriority(attr, idx, 'up')}
-                                                                className="p-1 hover:bg-slate-800 rounded disabled:opacity-20 text-slate-300"
+                                                                className="p-1 hover:bg-hover rounded disabled:opacity-25 text-ink-secondary"
                                                             >
                                                                 <ArrowUp className="w-3.5 h-3.5" />
                                                             </button>
@@ -381,7 +382,7 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                                                                 type="button"
                                                                 disabled={idx === list.length - 1}
                                                                 onClick={() => movePriority(attr, idx, 'down')}
-                                                                className="p-1 hover:bg-slate-800 rounded disabled:opacity-20 text-slate-300"
+                                                                className="p-1 hover:bg-hover rounded disabled:opacity-25 text-ink-secondary"
                                                             >
                                                                 <ArrowDown className="w-3.5 h-3.5" />
                                                             </button>
@@ -395,8 +396,8 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                             )}
 
                             {currentStrategy === 'RECENCY' && validSources.length > 1 && (
-                                <div className="text-xs text-slate-400">
-                                    Resolves conflicting values using each source table&apos;s configured <strong>Watermark Column</strong>.
+                                <div className="text-xs text-ink-muted">
+                                    Resolves conflicting values using each source table&apos;s configured <strong className="text-ink-secondary">Watermark Column</strong>.
                                 </div>
                             )}
                         </div>
@@ -405,13 +406,14 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
             </div>
 
             <GroupedOutputEditor config={config} onChange={next => onChange?.(next)} />
+            <ActivationDeltaEditor config={config} onChange={next => onChange?.(next)} />
 
-            <div className="flex justify-between pt-3 border-t border-slate-800/80">
+            <div className="flex justify-between pt-3 border-t border-line">
                 {onBack ? (
                     <button
                         type="button"
                         onClick={onBack}
-                        className="px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-xs font-medium hover:bg-slate-800"
+                        className="btn-secondary text-xs"
                     >
                         ← Back to Rules
                     </button>
@@ -419,7 +421,7 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                 <button
                     type="button"
                     onClick={handleNext}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors"
+                    className="btn-primary text-xs"
                 >
                     Continue to Run &amp; Verify →
                 </button>

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS idr_meta.source_table (
   table_id STRING,
   table_fqn STRING,
   entity_type STRING,
+  entity_kind STRING,
   entity_key_expr STRING,
   watermark_column STRING,
   watermark_lookback_minutes INT,
@@ -59,7 +60,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.identifier_mapping (
   identifier_type STRING,
   identifier_value_expr STRING,
   is_hashed BOOLEAN,
-  source_is_hashed BOOLEAN);
+  source_is_hashed BOOLEAN,
+  issuer_expr STRING);
 
 CREATE TABLE IF NOT EXISTS idr_meta.entity_attribute_mapping (
   table_id STRING,
@@ -325,3 +327,19 @@ CREATE TABLE IF NOT EXISTS idr_out.ai_review_report (
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.config_extension (extension_key STRING, value_json STRING);
+
+CREATE TABLE IF NOT EXISTS idr_out.identity_activation_delta (
+  run_id STRING,
+  lens_id STRING,
+  resolved_id STRING,
+  activation_status STRING,
+  change_type STRING,
+  previous_resolved_ids_json STRING,
+  superseded_by_resolved_id STRING,
+  cluster_size INT,
+  entities_added INT,
+  entities_removed INT,
+  profile_changed BOOLEAN,
+  confidence_score DOUBLE,
+  emitted_at TIMESTAMP
+);

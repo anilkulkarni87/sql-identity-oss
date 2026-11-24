@@ -94,7 +94,7 @@ flowchart LR
     T1 -->|"Uncertain verdict"| T2["Tier 2: Optional Frontier Escalation"]
     T1 --> H["Human / Agent Approval<br/>(UI 1-Click · CLI · MCP Token)"]
     T2 --> H
-    H --> OVR["idr_meta.manual_override"]
+    H --> OVR["idr_meta.identity_override"]
 ```
 
 ## 🚀 Getting Started

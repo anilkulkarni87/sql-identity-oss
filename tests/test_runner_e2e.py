@@ -172,9 +172,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import duckdb
 import pytest
 
-from idr_core import IDRRunner
-from idr_core.adapters.duckdb import DuckDBAdapter
-from idr_core.runner import RunConfig
 from idr_core.schema_manager import SchemaManager
 
 
@@ -450,10 +447,6 @@ Deep E2E scenario tests for SQL Identity Resolution pipeline:
 
 import pytest
 
-from idr_core.adapters.duckdb import DuckDBAdapter
-from idr_core.runner import IDRRunner, RunConfig
-from idr_core.schema_manager import SchemaManager
-
 
 @pytest.fixture
 def duck_env(tmp_path):
@@ -476,7 +469,7 @@ def test_dry_run_mode_computes_diffs_without_mutating_production_tables(duck_env
 
         INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES
             ('crm', 'raw_crm', 'PERSON', 'id', 'updated_at', 0, TRUE);
-        INSERT INTO idr_meta.rule VALUES
+        INSERT INTO idr_meta.rule (rule_id, identifier_type, canonicalize, max_group_size, priority, is_active) VALUES
             ('r_email', 'email', 'LOWERCASE', 1000, 1, TRUE),
             ('r_phone', 'phone', 'NONE', 1000, 2, TRUE);
         INSERT INTO idr_meta.identifier_mapping (table_id, identifier_type, identifier_value_expr, is_hashed) VALUES
@@ -541,14 +534,14 @@ def test_strict_mode_bypasses_fuzzy_matching(duck_env):
 
         INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES
             ('users', 'raw_users', 'PERSON', 'id', 'updated_at', 0, TRUE);
-        INSERT INTO idr_meta.rule VALUES
+        INSERT INTO idr_meta.rule (rule_id, identifier_type, canonicalize, max_group_size, priority, is_active) VALUES
             ('r_email', 'email', 'LOWERCASE', 1000, 1, TRUE);
         INSERT INTO idr_meta.identifier_mapping (table_id, identifier_type, identifier_value_expr, is_hashed) VALUES
             ('users', 'email', 'email', FALSE);
-        INSERT INTO idr_meta.entity_attribute_mapping VALUES
+        INSERT INTO idr_meta.entity_attribute_mapping (table_id, attribute_name, attribute_expr) VALUES
             ('users', 'last_name', 'last_name'),
             ('users', 'first_name', 'first_name');
-        INSERT INTO idr_meta.fuzzy_rule VALUES
+        INSERT INTO idr_meta.fuzzy_rule (rule_id, rule_name, blocking_key_expr, score_expr, threshold, priority, is_active) VALUES
             ('f_name', 'Name Sim', 'last_name', 'jaro_winkler_similarity(<a>.first_name, <b>.first_name)', 0.80, 1, TRUE);
     """)
 
@@ -597,7 +590,7 @@ def test_four_hop_transitive_chain_across_three_sources(duck_env):
             ('web', 'src_web', 'PERSON', 'id', NULL, 0, TRUE),
             ('pos', 'src_pos', 'PERSON', 'id', NULL, 0, TRUE);
 
-        INSERT INTO idr_meta.rule VALUES
+        INSERT INTO idr_meta.rule (rule_id, identifier_type, canonicalize, max_group_size, priority, is_active) VALUES
             ('r_email', 'email', 'LOWERCASE', 1000, 1, TRUE),
             ('r_phone', 'phone', 'NONE', 1000, 2, TRUE),
             ('r_loyalty', 'loyalty', 'UPPERCASE', 1000, 3, TRUE),
@@ -638,7 +631,7 @@ def test_identifier_exclusions_exact_and_like_patterns(duck_env):
 
         INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES
             ('leads', 'raw_leads', 'PERSON', 'id', NULL, 0, TRUE);
-        INSERT INTO idr_meta.rule VALUES
+        INSERT INTO idr_meta.rule (rule_id, identifier_type, canonicalize, max_group_size, priority, is_active) VALUES
             ('r_email', 'email', 'LOWERCASE', 1000, 1, TRUE),
             ('r_phone', 'phone', 'NONE', 1000, 2, TRUE);
         INSERT INTO idr_meta.identifier_mapping (table_id, identifier_type, identifier_value_expr, is_hashed) VALUES
@@ -672,7 +665,7 @@ def test_preflight_blocks_concurrent_run_and_recovers_stale_run(duck_env):
         CREATE TABLE raw_c (id VARCHAR, email VARCHAR);
         INSERT INTO raw_c VALUES ('1', 'a@b.com');
         INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES ('c', 'raw_c', 'PERSON', 'id', NULL, 0, TRUE);
-        INSERT INTO idr_meta.rule VALUES ('r_email', 'email', 'LOWERCASE', 100, 1, TRUE);
+        INSERT INTO idr_meta.rule (rule_id, identifier_type, canonicalize, max_group_size, priority, is_active) VALUES ('r_email', 'email', 'LOWERCASE', 100, 1, TRUE);
         INSERT INTO idr_meta.identifier_mapping (table_id, identifier_type, identifier_value_expr, is_hashed) VALUES ('c', 'email', 'email', FALSE);
     """)
 

@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS idr_meta.source_table (
   table_id VARCHAR,
   table_fqn VARCHAR,
   entity_type VARCHAR,
+  entity_kind VARCHAR,
   entity_key_expr VARCHAR,
   watermark_column VARCHAR,
   watermark_lookback_minutes INTEGER,
@@ -51,7 +52,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.identifier_mapping (
   identifier_type VARCHAR,
   identifier_value_expr VARCHAR,
   is_hashed BOOLEAN,
-  source_is_hashed BOOLEAN DEFAULT FALSE);
+  source_is_hashed BOOLEAN DEFAULT FALSE,
+  issuer_expr VARCHAR);
 
 CREATE TABLE IF NOT EXISTS idr_meta.entity_attribute_mapping (
   table_id VARCHAR,
@@ -342,3 +344,20 @@ CREATE TABLE IF NOT EXISTS idr_out.ai_review_report (
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.config_extension (extension_key VARCHAR, value_json VARCHAR);
+
+CREATE TABLE IF NOT EXISTS idr_out.identity_activation_delta (
+  run_id VARCHAR,
+  lens_id VARCHAR,
+  resolved_id VARCHAR,
+  activation_status VARCHAR,
+  change_type VARCHAR,
+  previous_resolved_ids_json VARCHAR,
+  superseded_by_resolved_id VARCHAR,
+  cluster_size INTEGER,
+  entities_added INTEGER,
+  entities_removed INTEGER,
+  profile_changed BOOLEAN DEFAULT FALSE,
+  confidence_score FLOAT,
+  emitted_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (run_id, lens_id, resolved_id)
+);

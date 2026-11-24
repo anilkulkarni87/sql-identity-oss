@@ -399,13 +399,13 @@ def test_ask_identity_graph_includes_active_config_summary(tmp_path):
 
 
 def test_forensics_bridge_anomalies_draft_lens_and_mcp(tmp_path):
+    import idr_mcp.server as mcp_srv
     from idr_core.ai_assistant import (
         diagnose_run_anomalies,
         draft_lens_from_goal,
         find_cluster_bridge,
     )
     from idr_core.config import apply_config_to_warehouse
-    import idr_mcp.server as mcp_srv
 
     db_file = str(tmp_path / "forensics.duckdb")
     adapter = DuckDBAdapter(db_file)
@@ -721,3 +721,268 @@ def test_tiered_cascade_triage_funnel_and_escalation():
     assert by_id["C_BORDER_2"]["judge_tier"] == "tier2"
     assert by_id["C_BORDER_2"]["escalated"] is True
     assert by_id["C_BORDER_2"]["action"] == "DO_NOT_LINK"
+
+
+def test_warehouse_native_chat_structured_supports_cloud_and_duckdb_dialects():
+    from idr_core.llm import LLMClient, LLMConfig
+
+    schema = {
+        "type": "object",
+        "properties": {"recommendation_ids": {"type": "array", "items": {"type": "string"}}},
+        "required": ["recommendation_ids"],
+    }
+
+    class _StubWarehouseAdapter:
+        def __init__(self, dialect: str):
+            self.dialect = dialect
+            self.last_sql = ""
+
+        def query(self, sql: str):
+            self.last_sql = sql
+            return [{"response": '```json\n{"recommendation_ids": ["finding_1"]}\n```'}]
+
+    for dialect, expected_frag, model_override in [
+        ("snowflake", "SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b'", ""),
+        ("databricks", "ai_query('databricks-meta-llama-3-1-8b-instruct'", ""),
+        ("bigquery", "ML.GENERATE_TEXT(MODEL `proj.ds.gemini_flash`", "proj.ds.gemini_flash"),
+    ]:
+        stub = _StubWarehouseAdapter(dialect)
+        client = LLMClient(LLMConfig(provider="warehouse", model=model_override), adapter=stub)
+        parsed = client.chat_structured(
+            [{"role": "user", "content": "Prioritize findings"}],
+            json_schema=schema,
+            schema_name="review_priorities",
+        )
+        assert parsed == {"recommendation_ids": ["finding_1"]}
+        assert expected_frag in stub.last_sql
+
+
+def test_cross_provider_escalation_key_resolution_and_structural_disagreement(monkeypatch):
+    from idr_core.ai_assistant import _build_escalation_client, triage_with_ai
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "gem-key")
+
+    adapter = DuckDBAdapter(":memory:")
+    SchemaManager(adapter).initialize(reset=True)
+
+    ollama_base = LLMClient(LLMConfig(provider="ollama", model="llama3.2"), adapter=adapter)
+
+    # 1. Infer provider & provider-specific API key when only model (or provider:model) is supplied
+    ant_esc = _build_escalation_client(ollama_base, adapter, None, "claude-3-5-sonnet-latest")
+    assert ant_esc is not None
+    assert ant_esc.config.provider == "anthropic"
+    assert ant_esc.config.api_key == "sk-ant-key"
+    assert ant_esc.config.effective_mask_pii is True
+
+    oa_esc = _build_escalation_client(ollama_base, adapter, None, "gpt-4o")
+    assert oa_esc is not None
+    assert oa_esc.config.provider == "openai"
+    assert oa_esc.config.api_key == "sk-openai-key"
+
+    gem_esc = _build_escalation_client(ollama_base, adapter, "gemini", "gemini-2.0-flash")
+    assert gem_esc is not None
+    assert gem_esc.config.provider == "gemini"
+    assert gem_esc.config.api_key == "gem-key"
+
+    # 2. Structural-disagreement escalation: overconfident Tier-1 KEEP on multi-email transitive chain
+    adapter.execute("""
+        INSERT INTO idr_out.identity_clusters_current
+            (resolved_id, cluster_size, confidence_score, edge_diversity, edge_count,
+             subject_count, child_count, subject_fanout)
+        VALUES ('C_OVERCONF', 4, 0.52, 1, 3, 3, 1, 3)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id)
+        VALUES ('crm:1', 'C_OVERCONF'), ('crm:2', 'C_OVERCONF'), ('crm:3', 'C_OVERCONF'), ('pos:9', 'C_OVERCONF')
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_edges_current
+            (left_entity_key, right_entity_key, identifier_type, identifier_value_norm)
+        VALUES
+            ('crm:1', 'pos:9', 'EMAIL', 'alice@example.com'),
+            ('crm:2', 'pos:9', 'EMAIL', 'bob@example.com'),
+            ('crm:3', 'pos:9', 'EMAIL', 'carol@example.com')
+    """)
+
+    overconfident_tier1 = json.dumps({
+        "proposals": [
+            {
+                "resolved_id": "C_OVERCONF",
+                "action": "KEEP",
+                "judge_confidence": 0.93,
+                "reason": "Looks fine.",
+            }
+        ]
+    })
+    calibrated_tier2 = json.dumps({
+        "proposals": [
+            {
+                "resolved_id": "C_OVERCONF",
+                "action": "ISOLATE",
+                "judge_confidence": 0.96,
+                "entity_key_a": "pos:9",
+                "reason": "pos:9 bridges 3 distinct personal emails across 3 subjects.",
+            }
+        ]
+    })
+
+    with patch("idr_core.llm.LLMClient.chat", side_effect=[overconfident_tier1, calibrated_tier2]) as mock_chat:
+        res = triage_with_ai(
+            adapter,
+            client=ollama_base,
+            max_confidence=0.75,
+            escalate_model="claude-3-5-sonnet-latest",
+            escalation_threshold=0.80,
+        )
+
+    assert mock_chat.call_count == 2
+    assert res["escalate_provider"] == "anthropic"
+    assert res["cascade_summary"]["tier2_escalated"] == 1
+    assert res["proposals"][0]["action"] == "ISOLATE"
+    assert res["proposals"][0]["escalated"] is True
+
+
+def test_override_requires_entity_key_b_for_pairwise_actions(tmp_path, monkeypatch):
+    import idr_api.dependencies as deps
+    import idr_mcp.server as mcp_srv
+
+    db_file = str(tmp_path / "ov_guard.duckdb")
+    adapter = DuckDBAdapter(db_file)
+    SchemaManager(adapter).initialize(reset=True)
+    adapter.close()
+
+    monkeypatch.setattr(deps, "OIDC_ISSUER", "")
+    monkeypatch.setattr(deps, "ALLOW_INSECURE_DEV_AUTH", True)
+    tc = TestClient(app)
+    assert tc.post("/api/connect", json={"platform": "duckdb", "database": db_file}).status_code == 200
+
+    bad_resp = tc.post(
+        "/api/overrides",
+        json={"action": "add", "override_type": "DO_NOT_LINK", "entity_key_a": "crm:1"},
+    )
+    assert bad_resp.status_code == 400
+    assert "entity_key_b" in bad_resp.text
+
+    ok_iso = tc.post(
+        "/api/overrides",
+        json={"action": "add", "override_type": "ISOLATE", "entity_key_a": "crm:1"},
+    )
+    assert ok_iso.status_code == 200
+
+    adapter2 = DuckDBAdapter(db_file)
+    try:
+        with patch.object(mcp_srv, "get_adapter", return_value=adapter2):
+            mcp_bad = mcp_srv.manage_identity_override(
+                action="add", override_type="FORCE_LINK", entity_key_a="crm:1"
+            )
+            assert mcp_bad["status"] == "ERROR"
+            assert "entity_key_b" in mcp_bad["error"]
+    finally:
+        adapter2.close()
+        tc.post("/api/disconnect")
+
+
+def test_mask_pii_preserves_uuids_and_hex_entity_keys():
+    from idr_core.llm import mask_pii_payload, mask_pii_text
+
+    uuid_hex_tail = "customers:6b579789-4bb4-4889-b900-5224851031c0"
+    uuid_num_tail = "orders:6b579789-4bb4-4889-b900-522485103199"
+    sample = f"Cluster {uuid_hex_tail} linked to {uuid_num_tail} via phone 555-234-5678"
+    masked = mask_pii_text(sample)
+    assert uuid_hex_tail in masked
+    assert uuid_num_tail in masked
+    assert "***-***-5678" in masked
+    assert "555-234-5678" not in masked
+
+    payload = {
+        "resolved_id": uuid_hex_tail,
+        "entity_key_a": uuid_num_tail,
+        "phone": "5552345678",
+    }
+    masked_payload = mask_pii_payload(payload)
+    assert masked_payload["resolved_id"] == uuid_hex_tail
+    assert masked_payload["entity_key_a"] == uuid_num_tail
+    assert masked_payload["phone"] == "***-***-5678"
+
+
+def test_tier0_auto_passes_healthy_three_source_subject_clusters():
+    from idr_core.ai_assistant import triage_with_ai
+
+    adapter = DuckDBAdapter(":memory:")
+    SchemaManager(adapter).initialize(reset=True)
+    # 3-source healthy PERSON cluster (subject_fanout=3, confidence=0.91) should auto-pass Tier 0!
+    adapter.execute("""
+        INSERT INTO idr_out.identity_clusters_current
+            (resolved_id, cluster_size, confidence_score, edge_diversity, edge_count,
+             subject_count, child_count, subject_fanout)
+        VALUES
+            ('C_3SRC_OK', 3, 0.91, 2, 3, 3, 0, 3),
+            ('C_FANOUT_5', 5, 0.85, 2, 5, 5, 0, 5)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id)
+        VALUES ('crm:1', 'C_FANOUT_5'), ('crm:2', 'C_FANOUT_5')
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_edges_current
+            (left_entity_key, right_entity_key, identifier_type, identifier_value_norm)
+        VALUES ('crm:1', 'crm:2', 'EMAIL', 'team@acme.io')
+    """)
+    reply = json.dumps(
+        {
+            "proposals": [
+                {
+                    "resolved_id": "C_FANOUT_5",
+                    "action": "DO_NOT_LINK",
+                    "judge_confidence": 0.92,
+                    "entity_key_a": "crm:1",
+                    "entity_key_b": "crm:2",
+                    "reason": "Shared team inbox across 5 subjects.",
+                }
+            ]
+        }
+    )
+    client = LLMClient(LLMConfig(provider="openai", model="gpt-4o-mini", api_key="sk-test"), adapter=adapter)
+    with patch("idr_core.llm.LLMClient.chat", return_value=reply):
+        res = triage_with_ai(adapter, client=client, max_confidence=0.75, limit=8)
+
+    assert res["cascade_summary"]["total_multi_entity_clusters"] == 2
+    assert res["cascade_summary"]["tier0_auto_passed"] == 1
+    assert res["cascade_summary"]["sql_filter_savings_pct"] == 50.0
+
+
+def test_ai_rule_generator_lifts_degenerate_unit_max_group_size():
+    from idr_core.config_schema import PassBRuleOutput, SourceSpec
+    from idr_core.profiler import SafeSchemaProfile
+    from idr_core.rule_generator import AIRuleGenerator
+
+    adapter = DuckDBAdapter(":memory:")
+    gen = AIRuleGenerator(adapter)
+    sources = [
+        SourceSpec(id="customers", table="main.customers", identifiers=[{"type": "email", "expr": "email"}]),
+        SourceSpec(id="loyalty", table="main.loyalty", identifiers=[{"type": "email", "expr": "email"}]),
+        SourceSpec(id="instore", table="main.instore", identifiers=[{"type": "email", "expr": "email"}]),
+    ]
+    pass_b = PassBRuleOutput.model_validate(
+        {
+            "rules": [
+                {
+                    "rule": {
+                        "id": "exact_email",
+                        "match_keys": ["email"],
+                        "canonicalize": "EMAIL_STANDARD",
+                        "priority": 1,
+                        "max_group_size": 1,
+                    },
+                    "reasoning": "Uniqueness",
+                }
+            ]
+        }
+    )
+    spec, _ = gen._assemble_plan(sources, [], pass_b, SafeSchemaProfile(dialect="duckdb"))
+    assert spec.rules[0].max_group_size >= 50
+    adapter.close()
+
+

@@ -7,6 +7,7 @@ and outputs a production-ready declarative YAML manifest.
 """
 
 from typing import Any, Dict, List, Optional
+
 import yaml
 
 from idr_core.profiler import IDRDataProfiler, is_system_table

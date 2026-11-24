@@ -33,6 +33,7 @@ class StageContext:
     logger: logging.Logger
     warnings: List[str]
     generate_evidence: bool = False
+    has_multiple_entity_kinds: bool = False
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     dry_run: bool = False
 

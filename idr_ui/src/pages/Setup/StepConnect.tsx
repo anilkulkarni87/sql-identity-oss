@@ -122,27 +122,27 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
     const snowflakeAuthMode = params.auth_method || ((params.private_key_path || params.private_key) ? 'keypair' : 'password');
     const databricksAuthMode = params.dbx_auth_method || ((params.client_id && !params.access_token) ? 'oauth_m2m' : 'pat');
 
-    const inputClass = "w-full bg-slate-950/90 border border-slate-700/90 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-colors";
-    const labelClass = "block text-xs font-medium text-slate-400 mb-1.5";
-    const subCardClass = "bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-4";
+    const inputClass = "input-field";
+    const labelClass = "block text-xs font-medium text-ink-secondary mb-1.5";
+    const subCardClass = "surface-subtle p-4 space-y-4";
 
     const hasDiscovered = discoveredConnections.length > 0;
 
     return (
-        <div className="space-y-6 max-w-5xl mx-auto">
+        <div className="space-y-5 max-w-5xl mx-auto">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-line">
                 <div>
                     <div className="flex items-center gap-2.5">
-                        <h2 className="text-xl font-bold tracking-tight text-white">Connect Data Warehouse</h2>
+                        <h2 className="text-[15px] font-semibold text-ink">Connect Data Warehouse</h2>
                         {isConnected && (
-                            <span className="bg-emerald-950/70 text-emerald-400 border border-emerald-700/50 text-[11px] font-medium py-0.5 px-2.5 rounded-full inline-flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span className="badge-success">
+                                <span className="w-1.5 h-1.5 rounded-full bg-status-success" />
                                 Active Session
                             </span>
                         )}
                     </div>
-                    <p className="text-sm text-slate-400 mt-1">
+                    <p className="text-xs text-ink-muted mt-0.5">
                         Choose an auto-detected profile or configure target endpoint and authentication credentials.
                     </p>
                 </div>
@@ -151,7 +151,7 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors self-start sm:self-auto"
+                        className="btn-secondary text-xs self-start sm:self-auto"
                     >
                         <ArrowLeft className="w-3.5 h-3.5" />
                         Back to Studio
@@ -159,19 +159,19 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                 )}
             </div>
 
-            <div className={`grid grid-cols-1 ${hasDiscovered ? 'lg:grid-cols-12 gap-6 items-start' : 'max-w-2xl mx-auto'}`}>
+            <div className={`grid grid-cols-1 ${hasDiscovered ? 'lg:grid-cols-12 gap-5 items-start' : 'max-w-2xl mx-auto'}`}>
                 {/* Left Column: Auto-Discovered Profiles */}
                 {hasDiscovered && (
-                    <div className="lg:col-span-5 bg-surface border border-line-default rounded-md p-4 space-y-3.5">
+                    <div className="lg:col-span-5 surface-subtle p-4 space-y-3">
                         <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-accent uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="text-[11px] font-semibold text-ink-muted uppercase tracking-[0.04em] flex items-center gap-1.5">
                                 <Database className="w-3.5 h-3.5 text-accent" />
                                 Auto-Detected Profiles ({discoveredConnections.length})
                             </span>
                             <span className="text-[11px] text-ink-muted font-mono">CLI &amp; dbt</span>
                         </div>
 
-                        <div className="space-y-2.5">
+                        <div className="space-y-2">
                             {discoveredConnections.map(conn => {
                                 const isConnectingThis = loading && connectingId === conn.id;
                                 const isActiveSelection =
@@ -183,33 +183,33 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                                 return (
                                     <div
                                         key={conn.id}
-                                        className={`p-3 rounded-xl border transition-all space-y-2.5 ${
+                                        className={`p-3 rounded-md border transition-colors space-y-2 ${
                                             isActiveSelection
-                                                ? 'bg-slate-900/95 border-blue-500/60 shadow-md shadow-blue-950/30'
-                                                : 'bg-slate-900/75 hover:bg-slate-900 border-slate-700/80 hover:border-blue-500/40'
+                                                ? 'bg-selected border-accent-border'
+                                                : 'bg-surface border-line hover:border-line-strong'
                                         }`}
                                     >
                                         <div className="space-y-1">
                                             <div className="flex items-center justify-between gap-2">
-                                                <span className="text-xs font-semibold text-white truncate">{conn.name}</span>
-                                                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-blue-300 border border-slate-700 shrink-0">
+                                                <span className="text-xs font-semibold text-ink truncate">{conn.name}</span>
+                                                <span className="badge-accent uppercase font-mono shrink-0">
                                                     {conn.platform}
                                                 </span>
                                             </div>
-                                            <p className="text-[11px] text-slate-400 font-mono leading-relaxed break-all">
+                                            <p className="text-[11px] text-ink-muted font-mono leading-relaxed break-all">
                                                 {conn.description}
                                             </p>
                                         </div>
 
-                                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
-                                            <span className="text-[10px] text-slate-500 font-mono truncate">
+                                        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-line">
+                                            <span className="text-[10px] text-ink-muted font-mono truncate">
                                                 via {conn.source}
                                             </span>
                                             <div className="flex items-center gap-1.5 shrink-0">
                                                 <button
                                                     type="button"
                                                     onClick={() => handleSelectDiscovered(conn, false)}
-                                                    className="px-2.5 py-1 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs rounded-md border border-slate-700 transition-colors"
+                                                    className="btn-secondary text-xs py-1 px-2.5 min-h-[28px]"
                                                     title="Inspect or modify credentials in form"
                                                 >
                                                     Review
@@ -218,7 +218,7 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                                                     type="button"
                                                     disabled={loading}
                                                     onClick={() => handleSelectDiscovered(conn, true)}
-                                                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-md shadow-sm transition-all flex items-center gap-1.5"
+                                                    className="btn-primary text-xs py-1 px-3 min-h-[28px]"
                                                 >
                                                     {isConnectingThis ? (
                                                         <>
@@ -242,11 +242,11 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                 )}
 
                 {/* Right Column: Platform Cards & Connection Form */}
-                <form onSubmit={onSubmit} className={`${hasDiscovered ? 'lg:col-span-7' : ''} space-y-5`}>
+                <form onSubmit={onSubmit} className={`${hasDiscovered ? 'lg:col-span-7' : ''} space-y-4`}>
                     {/* Platform Selector Tiles */}
                     <div>
                         <label className={labelClass}>Target Warehouse Platform</label>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                             {PLATFORMS.map(p => {
                                 const isDiscovered = discoveredConnections.some(c => c.platform === p.id);
                                 const selected = platform === p.id;
@@ -255,22 +255,22 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                                         key={p.id}
                                         type="button"
                                         onClick={() => handlePlatformChange(p.id)}
-                                        className={`relative p-3 rounded-xl border text-left transition-all ${
+                                        className={`relative p-3 rounded-md border text-left transition-colors ${
                                             selected
-                                                ? 'bg-blue-600/15 border-blue-500 ring-1 ring-blue-500/70 shadow-sm'
-                                                : 'bg-slate-900/70 border-slate-700/80 hover:border-slate-600'
+                                                ? 'bg-selected border-accent ring-1 ring-accent'
+                                                : 'bg-surface border-line hover:border-line-strong'
                                         }`}
                                     >
                                         {isDiscovered && (
                                             <span
-                                                className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-400"
+                                                className="absolute top-2 right-2 w-2 h-2 rounded-full bg-status-success"
                                                 title="Local credentials detected"
                                             />
                                         )}
-                                        <div className={`font-semibold text-sm ${selected ? 'text-blue-300' : 'text-slate-200'}`}>
+                                        <div className={`font-semibold text-[13px] ${selected ? 'text-accent' : 'text-ink'}`}>
                                             {p.name}
                                         </div>
-                                        <div className="text-[11px] text-slate-400 mt-0.5 truncate">{p.subtitle}</div>
+                                        <div className="text-[11px] text-ink-muted mt-0.5 truncate">{p.subtitle}</div>
                                     </button>
                                 );
                             })}
@@ -280,8 +280,8 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                     {/* Platform-Specific Structured Sections */}
                     {platform === 'duckdb' && (
                         <div className={subCardClass}>
-                            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                                <Database className="w-3.5 h-3.5 text-blue-400" />
+                            <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+                                <Database className="w-3.5 h-3.5 text-accent" />
                                 Local DuckDB Engine
                             </div>
                             <div>
@@ -289,12 +289,12 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                                 <input
                                     type="text"
                                     value={params.path || ''}
-                                    placeholder="data/identity_graph.db"
-                                    className={inputClass}
+                                    placeholder="data/identity_graph.duckdb or /tmp/live.duckdb"
+                                    className={`${inputClass} font-mono`}
                                     onChange={e => updateParam('path', e.target.value)}
                                 />
-                                <p className="text-[11px] text-slate-500 mt-1.5">
-                                    Leave blank to run in-memory (<code>:memory:</code>), or point to a persistent <code>.duckdb</code> file.
+                                <p className="text-[11px] text-ink-muted mt-1.5">
+                                    Relative paths (e.g. <code className="font-mono">data/idr.duckdb</code>) resolve from the server working directory; use an absolute path like <code className="font-mono">/tmp/live2.duckdb</code> for system temp files, or leave blank for <code className="font-mono">:memory:</code>.
                                 </p>
                             </div>
                         </div>
@@ -304,8 +304,8 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                         <div className="space-y-4">
                             {/* Section 1: Endpoint & Scope */}
                             <div className={subCardClass}>
-                                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                                    <Server className="w-3.5 h-3.5 text-blue-400" />
+                                <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+                                    <Server className="w-3.5 h-3.5 text-accent" />
                                     Target Endpoint &amp; Scope
                                 </div>
 
@@ -319,8 +319,8 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                                         className={inputClass}
                                         onChange={e => updateParam('account', e.target.value)}
                                     />
-                                    <p className="text-[11px] text-slate-500 mt-1">
-                                        Use account locator (<code>xy12345.us-east-1</code>) or <code>ORGNAME-ACCOUNTNAME</code>.
+                                    <p className="text-[11px] text-ink-muted mt-1">
+                                        Use account locator (<code className="font-mono">xy12345.us-east-1</code>) or <code className="font-mono">ORGNAME-ACCOUNTNAME</code>.
                                     </p>
                                 </div>
 
@@ -371,12 +371,11 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                             {/* Section 2: Authentication */}
                             <div className={subCardClass}>
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                                        <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+                                        <KeyRound className="w-3.5 h-3.5 text-status-success" />
                                         Authentication
                                     </div>
-                                    {/* Dark-mode segmented toggle */}
-                                    <div className="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800">
+                                    <div className="inline-flex rounded-md bg-surface p-0.5 border border-line-strong">
                                         {[
                                             { id: 'password', label: 'Password' },
                                             { id: 'keypair', label: 'RSA Key-Pair (JWT)' },
@@ -395,10 +394,10 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                                                             updateParam('authenticator', '');
                                                         }
                                                     }}
-                                                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                                                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                                                         active
-                                                            ? 'bg-blue-600 text-white shadow-sm'
-                                                            : 'text-slate-400 hover:text-slate-200'
+                                                            ? 'bg-accent text-accent-fg'
+                                                            : 'text-ink-muted hover:text-ink'
                                                     }`}
                                                 >
                                                     {opt.label}
@@ -469,8 +468,8 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
 
                     {platform === 'bigquery' && (
                         <div className={subCardClass}>
-                            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                                <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                            <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+                                <ShieldCheck className="w-3.5 h-3.5 text-accent" />
                                 Google BigQuery Project &amp; Credentials
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -512,8 +511,8 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                     {platform === 'databricks' && (
                         <div className="space-y-4">
                             <div className={subCardClass}>
-                                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                                    <Server className="w-3.5 h-3.5 text-blue-400" />
+                                <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+                                    <Server className="w-3.5 h-3.5 text-accent" />
                                     SQL Warehouse &amp; Unity Catalog
                                 </div>
                                 <div>
@@ -571,11 +570,11 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
 
                             <div className={subCardClass}>
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                                        <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+                                        <KeyRound className="w-3.5 h-3.5 text-status-success" />
                                         Authentication
                                     </div>
-                                    <div className="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800">
+                                    <div className="inline-flex rounded-md bg-surface p-0.5 border border-line-strong">
                                         {[
                                             { id: 'pat', label: 'Personal Token (PAT)' },
                                             { id: 'oauth_m2m', label: 'OAuth M2M (SP)' },
@@ -591,10 +590,10 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                                                             updateParam('access_token', '');
                                                         }
                                                     }}
-                                                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                                                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                                                         active
-                                                            ? 'bg-blue-600 text-white shadow-sm'
-                                                            : 'text-slate-400 hover:text-slate-200'
+                                                            ? 'bg-accent text-accent-fg'
+                                                            : 'text-ink-muted hover:text-ink'
                                                     }`}
                                                 >
                                                     {opt.label}
@@ -647,23 +646,23 @@ export default function StepConnect({ onNext, isConnected = false, onCancel }: S
                     )}
 
                     {error && (
-                        <div className="bg-rose-950/50 border border-rose-500/40 rounded-xl p-3.5 text-sm text-rose-300">
+                        <div className="bg-status-danger-soft border border-status-danger-border rounded-md p-3.5 text-xs text-status-danger">
                             {error}
                         </div>
                     )}
 
                     {warning && (
-                        <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-3.5 text-sm text-amber-300">
+                        <div className="bg-status-warning-soft border border-status-warning-border rounded-md p-3.5 text-xs text-status-warning">
                             <p className="font-semibold mb-1">Permissions Warning</p>
-                            <p className="text-xs text-amber-200/90">{warning}</p>
-                            <p className="text-[11px] mt-2 text-amber-400/80">Click Confirm &amp; Proceed to continue in read-only review mode.</p>
+                            <p className="text-ink-secondary">{warning}</p>
+                            <p className="text-[11px] mt-1.5 text-ink-muted">Click Confirm &amp; Proceed to continue in read-only review mode.</p>
                         </div>
                     )}
 
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm shadow-lg shadow-blue-950/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="btn-primary w-full py-2 text-sm"
                     >
                         {loading ? (
                             <>

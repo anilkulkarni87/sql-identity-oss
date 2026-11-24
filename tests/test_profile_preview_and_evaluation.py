@@ -428,6 +428,7 @@ def test_cli_metadata_profile_validation_never_builds_model_client(
 
 def test_bigquery_query_budget_cancels_job_and_sets_max_bytes_billed():
     from types import SimpleNamespace
+
     from idr_core.adapters.bigquery import BigQueryAdapter
 
     captured = {}

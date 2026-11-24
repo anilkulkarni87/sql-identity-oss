@@ -221,20 +221,46 @@ def _build_escalation_client(
 ) -> Optional[LLMClient]:
     if not escalate_provider and not escalate_model:
         return None
-    from .llm import LLMConfig
+    from .llm import LLMConfig, api_key_for_provider, infer_provider_from_model
 
-    prov = (escalate_provider or base_client.config.provider).strip().lower()
+    inferred_prov, clean_model = infer_provider_from_model(escalate_model, escalate_provider)
+    prov = (inferred_prov or base_client.config.provider).strip().lower()
     same_provider = prov == base_client.config.provider.strip().lower()
-    env_cfg = LLMConfig.from_env()
     cfg = LLMConfig(
         provider=prov,
-        model=(escalate_model or "").strip(),
+        model=clean_model,
         base_url=base_client.config.base_url if same_provider else None,
-        api_key=base_client.config.api_key if same_provider else env_cfg.api_key,
-        mask_pii=base_client.config.mask_pii,
+        api_key=base_client.config.api_key if same_provider else api_key_for_provider(prov),
+        mask_pii=base_client.config.mask_pii if same_provider else None,
         timeout=base_client.config.timeout,
     )
     return LLMClient(cfg, adapter=adapter)
+
+
+_PERSONAL_CONTACT_TYPES = ("email", "phone", "mobile", "ssn", "tax_id")
+
+
+def _has_structural_disagreement(proposal: Dict[str, Any], ctx: Dict[str, Any]) -> bool:
+    """
+    Detect overconfident Tier-1 'KEEP' verdicts that contradict hard SQL graph signals
+    (e.g., multiple distinct personal emails/phones stitched across multiple subjects).
+    """
+    if str(proposal.get("action") or "").upper() != "KEEP":
+        return False
+    signals = ctx.get("structural_signals") or {}
+    subj_fanout = int(signals.get("subject_fanout") or 1)
+    if subj_fanout < 2:
+        return False
+    id_summary = ctx.get("identifier_summary") or {}
+    for itype, stats in id_summary.items():
+        it_low = str(itype).lower()
+        if any(tok in it_low for tok in _PERSONAL_CONTACT_TYPES):
+            if int((stats or {}).get("distinct_values") or 0) >= 2:
+                return True
+    conf_score = signals.get("confidence_score")
+    if subj_fanout >= 4 and conf_score is not None and float(conf_score) <= 0.50:
+        return True
+    return False
 
 
 def triage_with_ai(
@@ -245,7 +271,7 @@ def triage_with_ai(
     escalate_provider: Optional[str] = None,
     escalate_model: Optional[str] = None,
     escalation_threshold: float = 0.80,
-    min_subject_fanout: int = 2,
+    min_subject_fanout: int = 4,
 ) -> Dict[str, Any]:
     """
     3-Tier Confidence-Routed Cascade Judge for borderline identity clusters.
@@ -429,18 +455,28 @@ def triage_with_ai(
 
     proposals = _run_judge_batch(client, enriched, "tier1")
 
-    # Optional Tier-2 Escalation for uncertain Tier-1 verdicts
+    # Optional Tier-2 Escalation for uncertain or structurally contradicted Tier-1 verdicts
     tier2_client = _build_escalation_client(client, adapter, escalate_provider, escalate_model)
     if tier2_client is not None:
-        uncertain_ids = [
-            p["resolved_id"]
-            for p in proposals
-            if p.get("resolved_id") in enriched_by_id
-            and (float(p.get("judge_confidence", 0.0)) < float(escalation_threshold) or p.get("action") == "REVIEW")
-        ]
+        escalation_reasons: Dict[str, str] = {}
+        for p in proposals:
+            rid = p.get("resolved_id")
+            if rid not in enriched_by_id:
+                continue
+            if p.get("action") == "REVIEW":
+                escalation_reasons[rid] = "review_requested"
+            elif float(p.get("judge_confidence", 0.0)) < float(escalation_threshold):
+                escalation_reasons[rid] = "low_confidence"
+            elif _has_structural_disagreement(p, enriched_by_id[rid]):
+                escalation_reasons[rid] = "structural_disagreement"
+        uncertain_ids = list(escalation_reasons.keys())
         if uncertain_ids:
             esc_batch = [enriched_by_id[rid] for rid in uncertain_ids]
             esc_proposals = _run_judge_batch(tier2_client, esc_batch, "tier2")
+            for ep in esc_proposals:
+                erid = ep.get("resolved_id")
+                if erid in escalation_reasons:
+                    ep["escalation_reason"] = escalation_reasons[erid]
             esc_by_id = {p["resolved_id"]: p for p in esc_proposals if p.get("resolved_id")}
             proposals = [esc_by_id.get(p["resolved_id"], p) for p in proposals]
             cascade_summary["tier2_escalated"] = len(esc_by_id)

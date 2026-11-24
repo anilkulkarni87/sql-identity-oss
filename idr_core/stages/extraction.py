@@ -31,7 +31,7 @@ class ExtractionStage(BaseStage):
         try:
             sources = self.adapter.query("""
                 SELECT
-                    st.table_id, st.table_fqn, st.entity_type,
+                    st.table_id, st.table_fqn, st.entity_type, st.entity_kind,
                     st.entity_key_expr, st.watermark_column,
                     COALESCE(st.watermark_lookback_minutes, 0) as lookback,
                     COALESCE(st.deduplicate, FALSE) as deduplicate,
@@ -42,16 +42,37 @@ class ExtractionStage(BaseStage):
                 WHERE st.is_active = TRUE
             """)
         except Exception:
-            sources = self.adapter.query("""
-                SELECT
-                    st.table_id, st.table_fqn, st.entity_type,
-                    st.entity_key_expr, st.watermark_column,
-                    COALESCE(st.watermark_lookback_minutes, 0) as lookback,
-                    rs.last_watermark_value
-                FROM idr_meta.source_table st
-                LEFT JOIN idr_meta.run_state rs ON st.table_id = rs.table_id
-                WHERE st.is_active = TRUE
-            """)
+            try:
+                sources = self.adapter.query("""
+                    SELECT
+                        st.table_id, st.table_fqn, st.entity_type,
+                        st.entity_key_expr, st.watermark_column,
+                        COALESCE(st.watermark_lookback_minutes, 0) as lookback,
+                        COALESCE(st.deduplicate, FALSE) as deduplicate,
+                        st.dedup_order_by,
+                        rs.last_watermark_value
+                    FROM idr_meta.source_table st
+                    LEFT JOIN idr_meta.run_state rs ON st.table_id = rs.table_id
+                    WHERE st.is_active = TRUE
+                """)
+            except Exception:
+                sources = self.adapter.query("""
+                    SELECT
+                        st.table_id, st.table_fqn, st.entity_type,
+                        st.entity_key_expr, st.watermark_column,
+                        COALESCE(st.watermark_lookback_minutes, 0) as lookback,
+                        rs.last_watermark_value
+                    FROM idr_meta.source_table st
+                    LEFT JOIN idr_meta.run_state rs ON st.table_id = rs.table_id
+                    WHERE st.is_active = TRUE
+                """)
+
+        kinds = {
+            str(s.get("entity_kind") or "person").strip().lower() or "person"
+            for s in (sources or [])
+            if isinstance(s, dict)
+        }
+        self.ctx.has_multiple_entity_kinds = len(kinds) > 1
 
         if not sources:
             # Create empty table to ensure downstream steps don't fail
@@ -414,16 +435,30 @@ class ExtractionStage(BaseStage):
     def extract_identifiers(self, run_mode: str = "FULL") -> int:
         """Extract and canonicalize identifiers from entities."""
         # Get identifier mappings (joined with source_table to avoid N+1 lookup queries)
-        mappings = self.adapter.query("""
-            SELECT
-                im.table_id, im.identifier_type, im.identifier_value_expr, im.is_hashed, im.source_is_hashed,
-                r.canonicalize, r.max_group_size,
-                st.table_fqn, st.entity_key_expr
-            FROM idr_meta.identifier_mapping im
-            JOIN idr_meta.rule r ON im.identifier_type = r.identifier_type
-            LEFT JOIN idr_meta.source_table st ON im.table_id = st.table_id
-            WHERE r.is_active = TRUE
-        """)
+        try:
+            mappings = self.adapter.query("""
+                SELECT
+                    im.table_id, im.identifier_type, im.identifier_value_expr,
+                    im.is_hashed, im.source_is_hashed, im.issuer_expr,
+                    r.canonicalize, r.max_group_size,
+                    st.table_fqn, st.entity_key_expr
+                FROM idr_meta.identifier_mapping im
+                JOIN idr_meta.rule r ON im.identifier_type = r.identifier_type
+                LEFT JOIN idr_meta.source_table st ON im.table_id = st.table_id
+                WHERE r.is_active = TRUE
+            """)
+        except Exception:
+            mappings = self.adapter.query("""
+                SELECT
+                    im.table_id, im.identifier_type, im.identifier_value_expr,
+                    im.is_hashed, im.source_is_hashed,
+                    r.canonicalize, r.max_group_size,
+                    st.table_fqn, st.entity_key_expr
+                FROM idr_meta.identifier_mapping im
+                JOIN idr_meta.rule r ON im.identifier_type = r.identifier_type
+                LEFT JOIN idr_meta.source_table st ON im.table_id = st.table_id
+                WHERE r.is_active = TRUE
+            """)
 
         str_type = self._dialect["string_type"]
 
@@ -468,7 +503,27 @@ class ExtractionStage(BaseStage):
             pre_hash_norm_expr = build_canonicalize_expr(
                 raw_expr, canonicalize, self.adapter.dialect
             )
-            norm_expr = pre_hash_norm_expr
+
+            # Optional issuer/namespace scoping (e.g., facility_id|mrn, vendor_id|sku)
+            raw_issuer = m.get("issuer_expr")
+            issuer_sql = (
+                self._validate_metadata_value(
+                    str(raw_issuer).strip(), "expr", "identifier_mapping.issuer_expr"
+                )
+                if raw_issuer is not None and str(raw_issuer).strip()
+                else ""
+            )
+            if issuer_sql:
+                issuer_clean = f"UPPER(TRIM(CAST(({issuer_sql}) AS {str_type})))"
+                norm_expr = f"CONCAT({issuer_clean}, '|', {pre_hash_norm_expr})"
+                issuer_where_sql = f"""
+                    AND ({issuer_sql}) IS NOT NULL
+                    AND LENGTH({issuer_clean}) > 0
+                    AND LOWER({issuer_clean}) NOT IN ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', '')
+                """
+            else:
+                norm_expr = pre_hash_norm_expr
+                issuer_where_sql = ""
 
             # Apply PII hashing if enabled
             is_hashed = bool(m.get("is_hashed", False))
@@ -493,6 +548,7 @@ class ExtractionStage(BaseStage):
                 AND LOWER({raw_expr}) NOT IN ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', 'redacted', '0', 'default', '')
                 AND ({pre_hash_norm_expr}) IS NOT NULL
                 AND LENGTH(TRIM({pre_hash_norm_expr})) > 0
+                {issuer_where_sql}
             """
 
             dedup_meta = getattr(self, "_source_dedup_meta", {}).get(table_id)

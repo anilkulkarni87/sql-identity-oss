@@ -2,7 +2,7 @@
 
 import json
 
-EXTENSION_KEYS = ("evaluation", "grouped_outputs")
+EXTENSION_KEYS = ("evaluation", "grouped_outputs", "activation_delta", "generate_evidence")
 
 
 def read_extensions(adapter):

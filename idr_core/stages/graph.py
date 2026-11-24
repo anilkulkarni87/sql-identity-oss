@@ -149,6 +149,10 @@ class GraphStage(BaseStage):
         except Exception as e:
             self.logger.warning(f"Failed to apply post-edge overrides: {e}")
 
+    def _has_multiple_entity_kinds(self) -> bool:
+        """Return True when >= 2 distinct semantic entity_kinds were detected on active sources."""
+        return bool(getattr(self.ctx, "has_multiple_entity_kinds", False))
+
     def build_edges(self) -> int:
         """Build identity edges using anchor-based approach."""
         self._apply_pre_edge_overrides()
@@ -167,49 +171,105 @@ class GraphStage(BaseStage):
             if self.adapter.dialect == "bigquery"
             else ""
         )
-        self.adapter.execute(f"""
-            CREATE OR REPLACE TABLE idr_work.edges_new {edges_cluster}AS
-            WITH dedup_identifiers AS (
-                SELECT
-                    entity_key,
-                    identifier_type,
-                    identifier_value_norm,
-                    MAX(max_group_size) AS max_group_size
-                FROM idr_work.identifiers_all
-                WHERE identifier_value_norm IS NOT NULL
-                  AND LENGTH(TRIM(identifier_value_norm)) > 0
-                GROUP BY entity_key, identifier_type, identifier_value_norm
-            ),
-            identifier_groups AS (
-                SELECT
-                    identifier_type,
-                    identifier_value_norm,
-                    COUNT(*) as group_size,
-                    MIN(entity_key) as anchor_key,
-                    {max_allowed_expr} as max_allowed
-                FROM dedup_identifiers
-                GROUP BY identifier_type, identifier_value_norm
-                HAVING COUNT(*) > 1
-            ),
-            valid_groups AS (
-                SELECT * FROM identifier_groups
-                WHERE group_size <= max_allowed
-            ),
-            skipped_groups AS (
-                SELECT * FROM identifier_groups
-                WHERE group_size > max_allowed
+        multi_kind = self._has_multiple_entity_kinds()
+        if multi_kind:
+            src_prefix_expr = (
+                "SPLIT(i.entity_key, ':')[SAFE_OFFSET(0)]"
+                if self.adapter.dialect == "bigquery"
+                else "SPLIT_PART(i.entity_key, ':', 1)"
             )
-            SELECT
-                i.entity_key AS left_entity_key,
-                g.anchor_key AS right_entity_key,
-                i.identifier_type,
-                i.identifier_value_norm
-            FROM dedup_identifiers i
-            JOIN valid_groups g
-                ON i.identifier_type = g.identifier_type
-                AND i.identifier_value_norm = g.identifier_value_norm
-            WHERE i.entity_key != g.anchor_key
-        """)
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.edges_new {edges_cluster}AS
+                WITH dedup_identifiers AS (
+                    SELECT
+                        i.entity_key,
+                        LOWER(COALESCE(NULLIF(TRIM(st.entity_kind), ''), 'person')) AS entity_kind,
+                        i.identifier_type,
+                        i.identifier_value_norm,
+                        MAX(i.max_group_size) AS max_group_size
+                    FROM idr_work.identifiers_all i
+                    LEFT JOIN idr_meta.source_table st
+                        ON st.table_id = {src_prefix_expr}
+                    WHERE i.identifier_value_norm IS NOT NULL
+                      AND LENGTH(TRIM(i.identifier_value_norm)) > 0
+                    GROUP BY
+                        i.entity_key,
+                        LOWER(COALESCE(NULLIF(TRIM(st.entity_kind), ''), 'person')),
+                        i.identifier_type,
+                        i.identifier_value_norm
+                ),
+                identifier_groups AS (
+                    SELECT
+                        entity_kind,
+                        identifier_type,
+                        identifier_value_norm,
+                        COUNT(*) as group_size,
+                        MIN(entity_key) as anchor_key,
+                        {max_allowed_expr} as max_allowed
+                    FROM dedup_identifiers
+                    GROUP BY entity_kind, identifier_type, identifier_value_norm
+                    HAVING COUNT(*) > 1
+                ),
+                valid_groups AS (
+                    SELECT * FROM identifier_groups
+                    WHERE group_size <= max_allowed
+                )
+                SELECT
+                    i.entity_key AS left_entity_key,
+                    g.anchor_key AS right_entity_key,
+                    i.identifier_type,
+                    i.identifier_value_norm
+                FROM dedup_identifiers i
+                JOIN valid_groups g
+                    ON i.entity_kind = g.entity_kind
+                    AND i.identifier_type = g.identifier_type
+                    AND i.identifier_value_norm = g.identifier_value_norm
+                WHERE i.entity_key != g.anchor_key
+            """)
+        else:
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.edges_new {edges_cluster}AS
+                WITH dedup_identifiers AS (
+                    SELECT
+                        entity_key,
+                        identifier_type,
+                        identifier_value_norm,
+                        MAX(max_group_size) AS max_group_size
+                    FROM idr_work.identifiers_all
+                    WHERE identifier_value_norm IS NOT NULL
+                      AND LENGTH(TRIM(identifier_value_norm)) > 0
+                    GROUP BY entity_key, identifier_type, identifier_value_norm
+                ),
+                identifier_groups AS (
+                    SELECT
+                        identifier_type,
+                        identifier_value_norm,
+                        COUNT(*) as group_size,
+                        MIN(entity_key) as anchor_key,
+                        {max_allowed_expr} as max_allowed
+                    FROM dedup_identifiers
+                    GROUP BY identifier_type, identifier_value_norm
+                    HAVING COUNT(*) > 1
+                ),
+                valid_groups AS (
+                    SELECT * FROM identifier_groups
+                    WHERE group_size <= max_allowed
+                ),
+                skipped_groups AS (
+                    SELECT * FROM identifier_groups
+                    WHERE group_size > max_allowed
+                )
+                SELECT
+                    i.entity_key AS left_entity_key,
+                    g.anchor_key AS right_entity_key,
+                    i.identifier_type,
+                    i.identifier_value_norm
+                FROM dedup_identifiers i
+                JOIN valid_groups g
+                    ON i.identifier_type = g.identifier_type
+                    AND i.identifier_value_norm = g.identifier_value_norm
+                WHERE i.entity_key != g.anchor_key
+            """)
 
         self._apply_post_edge_overrides()
 
@@ -890,6 +950,24 @@ class GraphStage(BaseStage):
             f"CREATE OR REPLACE TABLE idr_work.fuzzy_edges (left_id {string_type}, right_id {string_type}, score {float_type})"
         )
 
+        multi_kind_fuzzy = self._has_multiple_entity_kinds()
+        if multi_kind_fuzzy:
+            lbl_prefix_expr = (
+                "SPLIT(l.entity_key, ':')[SAFE_OFFSET(0)]"
+                if self.adapter.dialect == "bigquery"
+                else "SPLIT_PART(l.entity_key, ':', 1)"
+            )
+            self.adapter.execute(f"""
+                CREATE OR REPLACE TABLE idr_work.cluster_entity_kinds AS
+                SELECT
+                    l.label AS resolved_id,
+                    MIN(LOWER(COALESCE(NULLIF(TRIM(st.entity_kind), ''), 'person'))) AS entity_kind
+                FROM idr_work.lp_labels l
+                LEFT JOIN idr_meta.source_table st
+                    ON st.table_id = {lbl_prefix_expr}
+                GROUP BY l.label
+            """)
+
         for rule in rules:
             rule_id = rule.get("rule_id", "unknown")
             blocking_expr = rule["blocking_key_expr"]
@@ -983,8 +1061,17 @@ class GraphStage(BaseStage):
                 extra={"run_id": self.run_id, "stage": "fuzzy_matching", "rule_id": rule_id},
             )
 
+            kind_join_sql = (
+                """
+                JOIN idr_work.cluster_entity_kinds ka ON ka.resolved_id = a.resolved_id
+                JOIN idr_work.cluster_entity_kinds kb ON kb.resolved_id = b.resolved_id AND ka.entity_kind = kb.entity_kind
+                """
+                if multi_kind_fuzzy
+                else ""
+            )
+
             self.adapter.execute(f"""
-                INSERT INTO idr_work.fuzzy_edges
+                INSERT INTO idr_work.fuzzy_edges (left_id, right_id, score)
                 WITH profile_with_bk AS (
                     SELECT
                         {select_cols},
@@ -1008,6 +1095,7 @@ class GraphStage(BaseStage):
                     FROM profile_with_bk a
                     JOIN profile_with_bk b ON a.bk = b.bk AND {id_compare}
                     JOIN valid_blocks vb ON a.bk = vb.bk
+                    {kind_join_sql}
                 )
                 SELECT left_id, right_id, score
                 FROM scored_pairs

@@ -298,19 +298,15 @@ class TestErrorMessages:
 Tests for idr_core.stages.output.OutputStage and multi-dialect stage SQL generation.
 """
 
-import logging
 import os
 import sys
-from unittest.mock import MagicMock
 
 import pytest
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from idr_core.adapters.base import get_dialect_config
 from idr_core.runner import RunConfig
-from idr_core.stages.base import StageContext
 from idr_core.stages.graph import GraphStage
 from idr_core.stages.output import OutputStage
 from idr_core.stages.preflight import PreflightStage

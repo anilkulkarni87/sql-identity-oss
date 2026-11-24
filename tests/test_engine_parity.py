@@ -18,7 +18,8 @@ import duckdb
 import pytest
 
 from idr_core.adapters.duckdb import DuckDBAdapter
-from idr_core.cli import _resolve_platform, main as cli_main
+from idr_core.cli import _resolve_platform
+from idr_core.cli import main as cli_main
 from idr_core.config import config_to_dbt_seeds, config_to_sql, sql_to_config
 from idr_core.runner import IDRRunner, RunConfig
 from idr_core.schema_manager import SchemaManager

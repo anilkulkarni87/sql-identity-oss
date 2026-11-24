@@ -354,6 +354,7 @@ def test_profiles_use_the_same_deduplicated_source_as_extraction(engine):
 
 def test_bigquery_preview_adapter_qualifies_project_and_dataset_mapping():
     from types import SimpleNamespace
+
     from idr_core.ai_review import PreviewAdapter, _physical
 
     bq = SimpleNamespace(

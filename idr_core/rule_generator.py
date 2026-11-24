@@ -201,11 +201,12 @@ class AIRuleGenerator:
             }
         )
         goal = model_goal(self.context)
+        dialect = getattr(self.adapter, "dialect", None)
         if not tables:
             return GeneratedIDRPlan(
                 generation_mode="deterministic_fallback",
                 provider=self.client.config.provider,
-                model=self.client.config.resolved_model()
+                model=self.client.config.resolved_model(dialect=dialect)
                 if self.client.config.is_enabled
                 else "profiler",
                 pii_masked=True,
@@ -233,7 +234,7 @@ class AIRuleGenerator:
             return GeneratedIDRPlan(
                 generation_mode="deterministic_fallback",
                 provider=self.client.config.provider,
-                model=self.client.config.resolved_model()
+                model=self.client.config.resolved_model(dialect=dialect)
                 if self.client.config.is_enabled
                 else "profiler",
                 pii_masked=True,
@@ -281,7 +282,7 @@ class AIRuleGenerator:
                     GeneratedIDRPlan(
                         generation_mode="ai_validated",
                         provider=self.client.config.provider,
-                        model=self.client.config.resolved_model(),
+                        model=self.client.config.resolved_model(dialect=dialect),
                         suggested_config={"sources": [], "rules": []},
                         validation_report=ValidationReport(
                             valid=False, errors=["No active identity sources proposed."]
@@ -342,7 +343,7 @@ class AIRuleGenerator:
                 GeneratedIDRPlan(
                     generation_mode=mode,
                     provider=self.client.config.provider,
-                    model=self.client.config.resolved_model(),
+                    model=self.client.config.resolved_model(dialect=dialect),
                     pii_masked=True,  # Zero-PII by construction
                     suggested_config=config_spec.to_idr_config_dict(),
                     explanations=explanations,
@@ -971,7 +972,7 @@ class AIRuleGenerator:
             "1. Only create exact rules for identifier types present in `identifier_type_stats`.\n"
             "2. Use ONLY canonicalizers from `allowed_canonicalizers` (e.g., EMAIL_STRIP_PLUS if plus_tag_rate >= 0.02 else EMAIL_STANDARD; PHONE_US_10 for US 10-digit phones; ALPHANUMERIC_UPPER for loyalty IDs).\n"
             "3. Set priority=1 for highest-precision personal identifiers (email, customer_id), lower priority (higher number) for shared ones (phone, device_id).\n"
-            "4. Propose a justified max_group_size from fanout evidence and policy. Respect explicit limits; smaller limits can be intentional.\n"
+            "4. `max_group_size` is an anti-supernode circuit breaker (maximum records across ALL mapped sources allowed to share one identifier value before skipping that hub), NOT row uniqueness! Never set `max_group_size` <= 5; use 25-200 for personal identifiers (email, customer_id, phone) and 200-5000 for broader identifiers.\n"
             "5. Use ONLY strategies from `allowed_survivorship_strategies` and ONLY real attribute names from `mapped_attributes_and_sources`.\n"
             "6. For `lenses`, `include_types` and `exclude_types` MUST be UPPERCASE identifier types from `identifier_type_stats` (e.g., EMAIL, PHONE, CUSTOMER_ID, LOYALTY) — NEVER table `entity_type`s (like CUSTOMER, ORDER, ADDRESS).\n"
             "7. Only propose `fuzzy_templates` if name/email attributes exist across sources and the user goal benefits from probabilistic matching; leave empty if strict/deterministic.\n"
@@ -1205,11 +1206,24 @@ class AIRuleGenerator:
         final_rules: List[ExactRuleSpec] = []
         covered_id_types: Set[str] = set()
 
+        existing_rule_caps: Dict[str, int] = {}
+        for existing_r in (getattr(self, "current_config", None) or {}).get("rules") or []:
+            if isinstance(existing_r, dict) and existing_r.get("max_group_size") is not None:
+                for mk in existing_r.get("match_keys") or []:
+                    existing_rule_caps[str(mk).strip().lower()] = int(existing_r["max_group_size"])
+
+        min_viable_cap = max(3, len(sources))
         for item in pass_b.rules:
             item.rule.id = _sanitize_source_id(item.rule.id, "exact_rule")
             # Normalize match_keys to lowercase so they always match sources[].identifiers[].type
             # in SQL JOIN idr_meta.identifier_mapping ON im.identifier_type = r.identifier_type
             item.rule.match_keys = [mk.strip().lower() for mk in item.rule.match_keys if mk.strip()]
+            primary_mk = item.rule.match_keys[0] if item.rule.match_keys else ""
+            if (
+                item.rule.max_group_size <= min_viable_cap
+                and existing_rule_caps.get(primary_mk) != item.rule.max_group_size
+            ):
+                item.rule.max_group_size = max(50, len(sources) * 10)
             final_rules.append(item.rule)
             for mk in item.rule.match_keys:
                 covered_id_types.add(mk.lower())

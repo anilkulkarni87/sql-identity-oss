@@ -1044,7 +1044,9 @@ class AIReviewService:
                 }
                 report["findings"].sort(key=lambda f: rank.get(f["id"], len(rank)))
                 report["provider"] = client.config.provider
-                report["model"] = client.config.resolved_model()
+                report["model"] = client.config.resolved_model(
+                    dialect=getattr(self.adapter, "dialect", None)
+                )
                 # Preserve severity ordering and authoritative summary wording.
                 self._decorate_recommendations(report)
             except Exception:

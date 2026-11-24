@@ -21,6 +21,36 @@ from ..models import (
 router = APIRouter(tags=["explorer"])
 
 
+@router.get("/api/clusters", response_model=List[ClusterSummary])
+def list_top_clusters(
+    limit: int = Query(8, ge=1, le=50),
+    adapter=Depends(get_adapter),
+):
+    """Return top resolved clusters (prioritizing multi-entity clusters) for Explorer cold-start."""
+    safe_limit = max(1, min(int(limit), 50))
+    try:
+        if not adapter.table_exists("idr_out.identity_clusters_current"):
+            return []
+        rows = adapter.query(
+            f"""
+            SELECT
+                resolved_id,
+                cluster_size,
+                confidence_score
+            FROM idr_out.identity_clusters_current
+            ORDER BY
+                CASE WHEN cluster_size > 1 THEN 0 ELSE 1 END,
+                cluster_size DESC,
+                COALESCE(confidence_score, 1.0) ASC,
+                resolved_id ASC
+            LIMIT {safe_limit}
+            """
+        )
+        return [ClusterSummary(**row) for row in rows]
+    except Exception:
+        return []
+
+
 @router.get("/api/entities/search", response_model=List[ClusterSummary])
 def search_entities(q: str = Query(..., min_length=3), adapter=Depends(get_adapter)):
     """Search for entities by identifier value, entity_key, resolved_id, or retired crosswalk ID."""
@@ -313,6 +343,10 @@ def manage_override(
     otype = req.override_type.strip().upper()
     if otype not in ("FORCE_LINK", "DO_NOT_LINK", "ISOLATE"):
         raise HTTPException(400, f"Invalid override_type '{otype}'")
+    if otype in ("FORCE_LINK", "DO_NOT_LINK") and not (
+        req.entity_key_b and req.entity_key_b.strip() and req.entity_key_b.strip() != "__ISOLATE__"
+    ):
+        raise HTTPException(400, f"entity_key_b is required for {otype} overrides")
 
     ek_a = req.entity_key_a.strip().replace("'", "''")
     ek_b = (req.entity_key_b.strip() if req.entity_key_b else "__ISOLATE__").replace("'", "''")

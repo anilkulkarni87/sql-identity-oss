@@ -179,14 +179,17 @@ def test_p0_p1_p2_end_to_end_pipeline(ecommerce_audit_db):
     for stmt in config_to_sql(cfg, dialect="duckdb"):
         adapter.execute(stmt)
 
-    # 1. Run Pipeline
+    # 1. Run Pipeline (default: edge_evidence is opt-in -> 0 rows)
     runner = IDRRunner(adapter)
     res = runner.run(RunConfig(run_mode="FULL", strict=True))
     assert res.status == "SUCCESS"
+    assert adapter.query_one("SELECT COUNT(*) FROM idr_out.edge_evidence") == 0
 
-    # 2. [P0] Verify edge_evidence was populated!
+    # 2. [P0] Verify opt-in edge_evidence populates when generate_evidence=True!
+    res = runner.run(RunConfig(run_mode="FULL", strict=True, generate_evidence=True))
+    assert res.status == "SUCCESS"
     ev_cnt = adapter.query_one("SELECT COUNT(*) FROM idr_out.edge_evidence")
-    assert ev_cnt > 0, "idr_out.edge_evidence should never be empty when table exists!"
+    assert ev_cnt > 0, "idr_out.edge_evidence should populate when generate_evidence=True!"
 
     # 3. [P0] Verify un-watermarked 'city' attribute survived into golden_profiles under RECENCY!
     cities = adapter.query("SELECT resolved_id, city FROM idr_out.golden_profiles WHERE city IS NOT NULL")
@@ -484,16 +487,12 @@ Phase 10 tests for:
 3. API dry_run_summary accurate breakdown (proposed_changes = new_entities + moved_entities)
 """
 
-import duckdb
 from fastapi.testclient import TestClient
 
 import idr_api.dependencies as deps
 from idr_api.main import app
-from idr_core.adapters.duckdb import DuckDBAdapter
 from idr_core.connection_manager import ConnectionManager
 from idr_core.quickstart import configure_metadata, generate_demo_data
-from idr_core.runner import IDRRunner, RunConfig
-from idr_core.schema_manager import SchemaManager
 from idr_mcp.server import explain_cluster
 
 
@@ -583,6 +582,7 @@ def test_50k_scale_benchmark_with_incr_and_mcp(tmp_path):
     - Exercises the full MCP server tool suite against the 52,000-entity graph
     """
     import time
+
     from idr_mcp import server as mcp_server
 
     conn = duckdb.connect(":memory:")

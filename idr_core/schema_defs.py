@@ -58,7 +58,14 @@ SYSTEM_TABLES: List[TableDef] = [
                 "table_fqn", ColumnType.STRING, description="Fully qualified name (schema.table)"
             ),
             ColumnDef(
-                "entity_type", ColumnType.STRING, description="Type of entity (e.g., user, account)"
+                "entity_type",
+                ColumnType.STRING,
+                description="Structural graph role: PRIMARY (or legacy alias PERSON/SUBJECT) vs EVENT/CHILD",
+            ),
+            ColumnDef(
+                "entity_kind",
+                ColumnType.STRING,
+                description="Semantic entity domain kind (e.g., person, organization, product, asset); edges only link sources of the same entity_kind (default: person)",
             ),
             ColumnDef(
                 "entity_key_expr",
@@ -168,6 +175,11 @@ SYSTEM_TABLES: List[TableDef] = [
                 description="Whether the source value is already hashed",
             ),
             ColumnDef("source_is_hashed", ColumnType.BOOL, default="FALSE", description="Source already holds a digest; preserve it without hashing again."),
+            ColumnDef(
+                "issuer_expr",
+                ColumnType.STRING,
+                description="Optional SQL expression/column scoping an identifier to an issuing authority or namespace (e.g., facility_id for MRN, vendor_id for SKU)",
+            ),
         ],
     ),
     TableDef(
@@ -559,6 +571,27 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("entities_moved", ColumnType.INT),
             ColumnDef("run_id", ColumnType.STRING),
             ColumnDef("updated_at", ColumnType.TIMESTAMP),
+        ],
+    ),
+    TableDef(
+        schema="idr_out",
+        name="identity_activation_delta",
+        description="Opt-in run-watermarked activation changelog (NEW, MERGED, SPLIT, PROFILE_CHANGED, RETIRED_MERGED, RETIRED_DELETED) for Reverse-ETL and CRM sync.",
+        cluster_by=["run_id", "lens_id", "change_type"],
+        columns=[
+            ColumnDef("run_id", ColumnType.STRING, is_pk=True, description="Pipeline run ID that emitted this delta event."),
+            ColumnDef("lens_id", ColumnType.STRING, is_pk=True, description="Identity lens view ('default' or named lens ID)."),
+            ColumnDef("resolved_id", ColumnType.STRING, is_pk=True, description="Active or retired cluster resolved_id."),
+            ColumnDef("activation_status", ColumnType.STRING, description="Downstream lifecycle state: ACTIVE or RETIRED."),
+            ColumnDef("change_type", ColumnType.STRING, description="NEW, MERGED, SPLIT, PROFILE_CHANGED, RETIRED_MERGED, or RETIRED_DELETED."),
+            ColumnDef("previous_resolved_ids_json", ColumnType.STRING, description="Sorted JSON array of absorbed/origin prior resolved_ids."),
+            ColumnDef("superseded_by_resolved_id", ColumnType.STRING, description="Winning active resolved_id when change_type is RETIRED_MERGED."),
+            ColumnDef("cluster_size", ColumnType.INT, description="Current member count (0 for RETIRED tombstones)."),
+            ColumnDef("entities_added", ColumnType.INT, description="Entities newly added or merged into this cluster in this run."),
+            ColumnDef("entities_removed", ColumnType.INT, description="Entities split out or deleted from this cluster in this run."),
+            ColumnDef("profile_changed", ColumnType.BOOL, default="FALSE", description="Whether golden profile attributes changed or were newly created."),
+            ColumnDef("confidence_score", ColumnType.DOUBLE, description="Current cluster confidence score (NULL for RETIRED or non-default lens)."),
+            ColumnDef("emitted_at", ColumnType.TIMESTAMP, description="UTC timestamp when this changelog row was emitted."),
         ],
     ),
     TableDef(

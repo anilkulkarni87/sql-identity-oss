@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS idr_meta.source_table (
   table_id STRING,
   table_fqn STRING,          -- project.dataset.table format
   entity_type STRING,
+  entity_kind STRING,
   entity_key_expr STRING,
   watermark_column STRING,
   watermark_lookback_minutes INT64,
@@ -55,7 +56,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.identifier_mapping (
   identifier_type STRING,
   identifier_value_expr STRING,
   is_hashed BOOL,
-  source_is_hashed BOOL DEFAULT FALSE);
+  source_is_hashed BOOL DEFAULT FALSE,
+  issuer_expr STRING);
 
 CREATE TABLE IF NOT EXISTS idr_meta.entity_attribute_mapping (
   table_id STRING,
@@ -387,3 +389,20 @@ CREATE TABLE IF NOT EXISTS idr_out.ai_review_report (
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.config_extension (extension_key STRING, value_json STRING);
+
+CREATE TABLE IF NOT EXISTS idr_out.identity_activation_delta (
+  run_id STRING,
+  lens_id STRING,
+  resolved_id STRING,
+  activation_status STRING,
+  change_type STRING,
+  previous_resolved_ids_json STRING,
+  superseded_by_resolved_id STRING,
+  cluster_size INT64,
+  entities_added INT64,
+  entities_removed INT64,
+  profile_changed BOOL,
+  confidence_score FLOAT64,
+  emitted_at TIMESTAMP,
+  PRIMARY KEY (run_id, lens_id, resolved_id) NOT ENFORCED
+) CLUSTER BY run_id, lens_id, change_type;

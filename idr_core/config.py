@@ -266,6 +266,20 @@ def validate_config(config: Dict[str, Any]) -> bool:
         if src.get("dedup_order_by"):
             validate_sql_expr(str(src["dedup_order_by"]), f"Source {i} dedup_order_by")
 
+        if src.get("entity_kind") is not None and str(src["entity_kind"]).strip():
+            validate_identifier(str(src["entity_kind"]).strip().lower(), f"Source {i} entity_kind")
+
+        if src.get("entity_type") is not None and str(src["entity_type"]).strip():
+            validate_identifier(str(src["entity_type"]).strip().upper(), f"Source {i} entity_type")
+
+        raw_ids = src.get("identifiers")
+        if isinstance(raw_ids, list):
+            for j, ident in enumerate(raw_ids):
+                if isinstance(ident, dict):
+                    raw_issuer = ident.get("issuer") if ident.get("issuer") is not None else ident.get("issuer_expr")
+                    if raw_issuer is not None and str(raw_issuer).strip():
+                        validate_sql_expr(str(raw_issuer).strip(), f"Source {i} identifier {j} issuer")
+
     # Validate survivorship if present
     if config.get("survivorship") is not None:
         from .survivorship import is_registered_survivorship_strategy, list_survivorship_strategies
@@ -305,6 +319,9 @@ def validate_config(config: Dict[str, Any]) -> bool:
     if config.get("evaluation"):
         from .evaluation_config import EvaluationOptions
         EvaluationOptions.model_validate(config["evaluation"])
+    if config.get("activation_delta") is not None:
+        from .activation_delta import validate_activation_delta
+        validate_activation_delta(config["activation_delta"])
     return True
 
 
@@ -539,10 +556,16 @@ ON {join_cond}
         )
         role = str(src.get("role") or "").strip().lower()
         entity_type = src.get("entity_type")
-        if role == "child" and (not entity_type or str(entity_type).upper() == "PERSON"):
+        if role in ("child", "event", "bridge") and (
+            not entity_type or str(entity_type).upper() in ("PERSON", "PRIMARY")
+        ):
             entity_type = "CHILD"
+        elif role == "primary" and not entity_type:
+            entity_type = "PRIMARY"
         elif role == "subject" and not entity_type:
             entity_type = "SUBJECT"
+        raw_kind = str(src.get("entity_kind") or "").strip().lower()
+        entity_kind = validate_identifier(raw_kind, f"Source '{src['id']}' entity_kind") if raw_kind else "person"
         data = {
             "table_id": src["id"],
             "table_fqn": (
@@ -551,6 +574,7 @@ ON {join_cond}
                 else src["table"]
             ),
             "entity_type": entity_type or "PERSON",
+            "entity_kind": entity_kind,
             "entity_key_expr": resolve_entity_key_expr(src, dialect),
             "watermark_column": wm_col,
             "deduplicate": bool(src.get("deduplicate", False)),
@@ -590,12 +614,28 @@ ON {join_cond}
             ]
 
         for id_type, col_expr in id_iter:
+            matched_item = (
+                next((i for i in raw_ids if isinstance(i, dict) and i.get("type") == id_type), {})
+                if isinstance(raw_ids, list)
+                else {}
+            )
+            raw_issuer = (
+                matched_item.get("issuer")
+                if matched_item.get("issuer") is not None
+                else matched_item.get("issuer_expr")
+            )
+            issuer_expr = (
+                validate_sql_expr(str(raw_issuer).strip(), f"Source '{src['id']}' identifier '{id_type}' issuer")
+                if raw_issuer is not None and str(raw_issuer).strip()
+                else None
+            )
             data = {
                 "table_id": src["id"],
                 "identifier_type": id_type,
                 "identifier_value_expr": col_expr,
-                "is_hashed": next((bool(i.get("is_hashed", False)) for i in raw_ids if isinstance(i, dict) and i.get("type") == id_type), False) if isinstance(raw_ids, list) else False,
-                "source_is_hashed": next((bool(i.get("source_is_hashed", False)) for i in raw_ids if isinstance(i, dict) and i.get("type") == id_type), False) if isinstance(raw_ids, list) else False,
+                "is_hashed": bool(matched_item.get("is_hashed", False)),
+                "source_is_hashed": bool(matched_item.get("source_is_hashed", False)),
+                "issuer_expr": issuer_expr,
             }
             statements.append(
                 generate_upsert(
@@ -796,13 +836,30 @@ ON {join_cond}
         }
         statements.append(generate_upsert("idr_meta.survivorship_rule", ["attribute_name"], data))
 
-    for extension in ("evaluation", "grouped_outputs"):
+    for extension in ("evaluation", "grouped_outputs", "activation_delta"):
         if config.get(extension):
             statements.append(generate_upsert("idr_meta.config_extension", ["extension_key"],
                 {"extension_key": extension, "value_json": json.dumps(config[extension])}))
         elif extension in config:
             statements.append(
                 f"DELETE FROM idr_meta.config_extension WHERE extension_key = '{extension}';"
+            )
+
+    if "generate_evidence" in config:
+        if config.get("generate_evidence") is not None:
+            statements.append(
+                generate_upsert(
+                    "idr_meta.config_extension",
+                    ["extension_key"],
+                    {
+                        "extension_key": "generate_evidence",
+                        "value_json": json.dumps(bool(config["generate_evidence"])),
+                    },
+                )
+            )
+        else:
+            statements.append(
+                "DELETE FROM idr_meta.config_extension WHERE extension_key = 'generate_evidence';"
             )
 
     # Multi-Lens definitions (optional)
@@ -867,7 +924,7 @@ def sql_to_config(adapter) -> Dict[str, Any]:
         def _query_active_sources(adapter):
             try:
                 return adapter.query("""
-                    SELECT table_id, table_fqn, entity_type, entity_key_expr,
+                    SELECT table_id, table_fqn, entity_type, entity_kind, entity_key_expr,
                            watermark_column, watermark_lookback_minutes, deduplicate, dedup_order_by
                     FROM idr_meta.source_table
                     WHERE is_active = TRUE
@@ -882,18 +939,26 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 ):
                     try:
                         return adapter.query("""
-                            SELECT table_id, table_fqn, entity_type, entity_key_expr, watermark_column
+                            SELECT table_id, table_fqn, entity_type, entity_key_expr,
+                                   watermark_column, watermark_lookback_minutes, deduplicate, dedup_order_by
                             FROM idr_meta.source_table
                             WHERE is_active = TRUE
                         """)
                     except Exception:
-                        print(
-                            "Warning: 'is_active' column missing in source_table, assuming all active."
-                        )
-                        return adapter.query("""
-                            SELECT table_id, table_fqn, entity_type, entity_key_expr, watermark_column
-                            FROM idr_meta.source_table
-                        """)
+                        try:
+                            return adapter.query("""
+                                SELECT table_id, table_fqn, entity_type, entity_key_expr, watermark_column
+                                FROM idr_meta.source_table
+                                WHERE is_active = TRUE
+                            """)
+                        except Exception:
+                            print(
+                                "Warning: 'is_active' column missing in source_table, assuming all active."
+                            )
+                            return adapter.query("""
+                                SELECT table_id, table_fqn, entity_type, entity_key_expr, watermark_column
+                                FROM idr_meta.source_table
+                            """)
                 raise e
 
         def _query_ids():
@@ -1030,15 +1095,17 @@ def sql_to_config(adapter) -> Dict[str, Any]:
             tid = row["table_id"]
             if tid not in ids_map:
                 ids_map[tid] = []
-            ids_map[tid].append(
-                {
-                    "type": row["identifier_type"],
-                    "column": row["identifier_value_expr"],
-                    "expr": row["identifier_value_expr"],
-                    "is_hashed": bool(row.get("is_hashed", False)),
-                    "source_is_hashed": bool(row.get("source_is_hashed", False)),
-                }
-            )
+            id_entry = {
+                "type": row["identifier_type"],
+                "column": row["identifier_value_expr"],
+                "expr": row["identifier_value_expr"],
+                "is_hashed": bool(row.get("is_hashed", False)),
+                "source_is_hashed": bool(row.get("source_is_hashed", False)),
+            }
+            raw_iss = row.get("issuer_expr")
+            if raw_iss is not None and str(raw_iss).strip():
+                id_entry["issuer"] = str(raw_iss).strip()
+            ids_map[tid].append(id_entry)
 
         attrs_map = {}
         for row in attrs_rows:
@@ -1071,6 +1138,9 @@ def sql_to_config(adapter) -> Dict[str, Any]:
                 "identifiers": ids_map.get(tid, []),
                 "attributes": attrs_map.get(tid, []),
             }
+            raw_kind = str(src_row.get("entity_kind") or "").strip().lower()
+            if raw_kind and raw_kind != "person":
+                source["entity_kind"] = raw_kind
             if src_row.get("deduplicate"):
                 source["deduplicate"] = True
             if src_row.get("dedup_order_by"):
@@ -1668,6 +1738,8 @@ def parse_config_snapshot_row(row: Dict[str, Any]) -> Dict[str, Any]:
                 config_dict["evaluation"] = parsed_rules["evaluation"]
             if parsed_rules.get("grouped_outputs"):
                 config_dict["grouped_outputs"] = parsed_rules["grouped_outputs"]
+            if parsed_rules.get("activation_delta") is not None:
+                config_dict["activation_delta"] = parsed_rules["activation_delta"]
             if parsed_rules.get("ai_assistance"):
                 config_dict["ai_assistance"] = parsed_rules["ai_assistance"]
             if parsed_rules.get("lenses"):
@@ -1803,6 +1875,7 @@ def apply_config_to_warehouse(
             "ai_assistance": cfg.get("ai_assistance"),
             "evaluation": cfg.get("evaluation"),
             "grouped_outputs": cfg.get("grouped_outputs", []),
+            "activation_delta": cfg.get("activation_delta"),
         }
     )
     mappings_json = json.dumps(cfg.get("survivorship", []))

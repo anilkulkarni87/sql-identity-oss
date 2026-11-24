@@ -123,6 +123,18 @@ Examples:
         default=False,
         help="Run only the primary pipeline and skip all configured lenses",
     )
+    run_parser.add_argument(
+        "--activation-delta",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Emit or suppress idr_out.identity_activation_delta for this run (defaults to saved config)",
+    )
+    run_parser.add_argument(
+        "--generate-evidence",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Emit or suppress idr_out.edge_evidence audit rows for this run (opt-in; default: false)",
+    )
 
     # === idr config ===
     config_parser = subparsers.add_parser("config", help="Configuration management")
@@ -1054,6 +1066,8 @@ def handle_run(args) -> int:
             max_cluster_delta_pct=getattr(args, "max_cluster_delta_pct", None),
             lens=getattr(args, "lens", None),
             skip_lenses=getattr(args, "skip_lenses", False),
+            emit_activation_delta=getattr(args, "activation_delta", None),
+            generate_evidence=getattr(args, "generate_evidence", None),
         )
         dry_summary = None
         if args.dry_run:
@@ -1093,6 +1107,10 @@ def handle_run(args) -> int:
         print(f"  Edges:           {result.edges_created:,}")
         print(f"  Clusters:        {result.clusters_impacted:,}")
         print(f"  Duration:        {result.duration_seconds:.1f}s")
+        act_summary = getattr(result, "activation_delta_summary", None) or {}
+        if act_summary:
+            act_parts = ", ".join(f"{k}: {v:,}" for k, v in sorted(act_summary.items()))
+            print(f"  Activation:      {act_parts}")
         if dry_summary is not None:
             print(f"  {'-' * 56}")
             print(f"  New Entities:    {dry_summary.get('new_entities', 0):,}")
@@ -1697,7 +1715,7 @@ def handle_triage(args) -> int:
         escalate_provider=getattr(args, "escalate_provider", None),
         escalate_model=getattr(args, "escalate_model", None),
         escalation_threshold=getattr(args, "escalation_threshold", 0.80),
-        min_subject_fanout=getattr(args, "min_subject_fanout", 2),
+        min_subject_fanout=getattr(args, "min_subject_fanout", 4),
     )
     if getattr(args, "json_output", False):
         print(json.dumps(res, default=str, indent=2))

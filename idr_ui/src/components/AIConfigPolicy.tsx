@@ -25,11 +25,11 @@ export default function AIConfigPolicy({ context, tables, onChange, showBasics =
     const allTables = Array.from(new Set([...tables, ...context.excluded_tables]))
 
     return (
-        <details className="rounded-md border border-line-default/80 bg-surface/60 px-3 py-2 text-xs">
-            <summary className="cursor-pointer select-none flex items-center justify-between gap-2 text-ink-secondary hover:text-ink-primary font-medium">
+        <details className="surface-subtle px-3 py-2 text-xs">
+            <summary className="cursor-pointer select-none flex items-center justify-between gap-2 text-ink-secondary hover:text-ink font-medium">
                 <span>Advanced AI Constraints (Optional)</span>
                 {activeCount > 0 ? (
-                    <span className="px-1.5 py-0.5 rounded-full bg-accent/15 text-accent text-[10px] font-semibold">
+                    <span className="badge-accent tabular-nums">
                         {activeCount} active
                     </span>
                 ) : (
@@ -37,13 +37,13 @@ export default function AIConfigPolicy({ context, tables, onChange, showBasics =
                 )}
             </summary>
 
-            <div className="mt-3 pt-2.5 border-t border-line-default/60 space-y-3">
+            <div className="mt-3 pt-2.5 border-t border-line space-y-3">
                 {showBasics && (
                     <div className="flex flex-wrap items-center gap-3">
                         <label className="inline-flex items-center gap-1.5 text-ink-muted">
                             <span className="font-medium">Grain:</span>
                             <select
-                                className="bg-surface border border-line-default text-ink-primary px-2 py-1 rounded text-xs"
+                                className="bg-surface border border-line-strong text-ink px-2 py-1 rounded text-xs"
                                 value={context.grain}
                                 onChange={e => onChange({ ...context, grain: e.target.value as AIConfigContext['grain'] })}
                             >
@@ -55,7 +55,7 @@ export default function AIConfigPolicy({ context, tables, onChange, showBasics =
                         <label className="inline-flex items-center gap-1.5 text-ink-muted">
                             <span className="font-medium">Event Tables:</span>
                             <select
-                                className="bg-surface border border-line-default text-ink-primary px-2 py-1 rounded text-xs"
+                                className="bg-surface border border-line-strong text-ink px-2 py-1 rounded text-xs"
                                 value={context.event_policy}
                                 onChange={e => onChange({ ...context, event_policy: e.target.value as AIConfigContext['event_policy'] })}
                             >
@@ -69,6 +69,7 @@ export default function AIConfigPolicy({ context, tables, onChange, showBasics =
                                 type="checkbox"
                                 checked={context.fuzzy}
                                 onChange={e => onChange({ ...context, fuzzy: e.target.checked })}
+                                className="rounded border-line-strong text-accent"
                             />
                             Allow fuzzy rules
                         </label>
@@ -78,7 +79,7 @@ export default function AIConfigPolicy({ context, tables, onChange, showBasics =
                 <label className="block space-y-1">
                     <span className="font-medium text-ink-secondary">Allowed Match Keys (optional)</span>
                     <input
-                        className="block w-full rounded bg-surface border border-line-default text-ink-primary px-2.5 py-1.5 text-xs placeholder:text-ink-muted focus:outline-none focus:border-accent"
+                        className="input-field text-xs py-1"
                         placeholder="Leave blank for safe defaults (e.g. EMAIL, PHONE)"
                         value={allowedText}
                         onChange={e => {
@@ -95,7 +96,7 @@ export default function AIConfigPolicy({ context, tables, onChange, showBasics =
                         <div className="font-medium text-ink-secondary">
                             Exclude Tables from AI
                             {context.excluded_tables.length > 0 && (
-                                <span className="ml-1.5 text-[11px] font-normal text-ink-muted">
+                                <span className="ml-1.5 text-[11px] font-normal text-ink-muted tabular-nums">
                                     ({context.excluded_tables.length} excluded)
                                 </span>
                             )}
@@ -119,8 +120,8 @@ export default function AIConfigPolicy({ context, tables, onChange, showBasics =
                                         }
                                         className={`px-2 py-0.5 rounded-full text-[11px] border transition-colors ${
                                             excluded
-                                                ? 'bg-red-500/15 border-red-500/40 text-red-300 line-through'
-                                                : 'bg-surface border-line-default text-ink-secondary hover:border-line-strong'
+                                                ? 'bg-status-danger-soft border-status-danger-border text-status-danger line-through'
+                                                : 'bg-surface border-line text-ink-secondary hover:border-line-strong'
                                         }`}
                                     >
                                         {shortName}
@@ -136,7 +137,7 @@ export default function AIConfigPolicy({ context, tables, onChange, showBasics =
                         Expert: Lock specific config fields (JSON pointers)
                     </summary>
                     <input
-                        className="block w-full rounded bg-surface border border-line-default text-ink-primary px-2.5 py-1.5 mt-1.5 text-xs font-mono placeholder:text-ink-muted focus:outline-none focus:border-accent"
+                        className="input-field mt-1.5 text-xs font-mono py-1"
                         placeholder="/sources/0/entity_key"
                         value={lockedText}
                         onChange={e => {

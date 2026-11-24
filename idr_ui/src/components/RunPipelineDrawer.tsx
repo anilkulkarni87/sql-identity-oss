@@ -80,6 +80,7 @@ function RunPipelineDrawer({ onClose }: { onClose: () => void }) {
     const maxIterId = useId()
     const maxGroupId = useId()
     const strictId = useId()
+    const activationDeltaId = useId()
 
     const [mode, setMode] = useState<'INCR' | 'FULL'>('INCR')
     const [dryRun, setDryRun] = useState(false)
@@ -87,6 +88,23 @@ function RunPipelineDrawer({ onClose }: { onClose: () => void }) {
     const [maxIterations, setMaxIterations] = useState(30)
     const [maxGroupSize, setMaxGroupSize] = useState(10000)
     const [strictMode, setStrictMode] = useState(false)
+    const [emitActivationDelta, setEmitActivationDelta] = useState(false)
+
+    useEffect(() => {
+        let cancelled = false
+        api.getSetupConfig()
+            .then((cfg) => {
+                if (!cancelled && cfg?.activation_delta?.enabled) {
+                    setEmitActivationDelta(true)
+                }
+            })
+            .catch(() => {
+                // ignore if not configured yet
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [])
 
     const [running, setRunning] = useState(false)
     const [progress, setProgress] = useState<LiveProgress | null>(null)
@@ -172,6 +190,7 @@ function RunPipelineDrawer({ onClose }: { onClose: () => void }) {
                 max_iterations: maxIterations,
                 dry_run: dryRun,
                 max_group_size: maxGroupSize,
+                ...(!dryRun ? { emit_activation_delta: emitActivationDelta } : {}),
             })
             setResult(res)
             try {
@@ -336,6 +355,22 @@ function RunPipelineDrawer({ onClose }: { onClose: () => void }) {
                                     />
                                     <span>Strict mode (skip probabilistic fuzzy pass)</span>
                                 </label>
+                                <label
+                                    htmlFor={activationDeltaId}
+                                    className={`flex items-center gap-2 text-xs text-ink-secondary ${
+                                        dryRun ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                    }`}
+                                >
+                                    <input
+                                        id={activationDeltaId}
+                                        type="checkbox"
+                                        checked={emitActivationDelta}
+                                        disabled={running || dryRun}
+                                        onChange={(e) => setEmitActivationDelta(e.target.checked)}
+                                        className="rounded border-line-strong text-accent focus:ring-accent"
+                                    />
+                                    <span>Emit Activation Delta (Reverse-ETL changelog)</span>
+                                </label>
                             </div>
                         )}
                     </div>
@@ -439,6 +474,27 @@ function RunPipelineDrawer({ onClose }: { onClose: () => void }) {
                                         ))}
                                 </div>
                             )}
+                            {!dryRun &&
+                                typeof result.activation_delta_summary === 'object' &&
+                                result.activation_delta_summary !== null &&
+                                Object.keys(result.activation_delta_summary as Record<string, number>).length > 0 && (
+                                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                        {Object.entries(result.activation_delta_summary as Record<string, number>).map(
+                                            ([k, v]) => (
+                                                <span
+                                                    key={k}
+                                                    className={
+                                                        k.startsWith('RETIRED')
+                                                            ? 'badge-danger font-mono text-[10px]'
+                                                            : 'badge-neutral font-mono text-[10px]'
+                                                    }
+                                                >
+                                                    {k}: {Number(v).toLocaleString()}
+                                                </span>
+                                            )
+                                        )}
+                                    </div>
+                                )}
                             <div className="flex items-center gap-2 pt-1">
                                 <button
                                     type="button"

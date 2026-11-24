@@ -2,6 +2,8 @@ export interface Identifier {
     type: string;
     column: string; // Used in UI state (locally 'column', mapped to 'expr' in config)
     expr?: string;  // Used in final config
+    issuer?: string;
+    issuer_expr?: string;
     is_hashed?: boolean;
     source_is_hashed?: boolean;
     is_match_key?: boolean; // If true, used in matching rules
@@ -17,6 +19,8 @@ export interface Attribute {
 export interface SourceConfig {
     id: string;
     table: string; // Table FQN
+    entity_type?: string;
+    entity_kind?: string;
     entity_key?: string;
     key_columns?: string[];
     deduplicate?: boolean;
@@ -154,8 +158,32 @@ export interface AIReview {
     comparison?: { baseline_run_id: string; changes: Record<string, number>; same_extraction: boolean; patch: ReviewPatch };
 }
 
+export interface ActivationDeltaConfig {
+    enabled: boolean;
+    include_lenses?: boolean;
+    seed_initial_full?: boolean;
+    retention_days?: number;
+}
+
+export interface ActivationDeltaRow {
+    run_id: string;
+    lens_id: string;
+    resolved_id: string;
+    activation_status: 'ACTIVE' | 'RETIRED' | string;
+    change_type: 'NEW' | 'MERGED' | 'SPLIT' | 'PROFILE_CHANGED' | 'RETIRED_MERGED' | 'RETIRED_DELETED' | string;
+    previous_resolved_ids_json: string;
+    superseded_by_resolved_id?: string | null;
+    cluster_size: number;
+    entities_added: number;
+    entities_removed: number;
+    profile_changed: boolean;
+    confidence_score?: number | null;
+    emitted_at: string;
+}
+
 export interface IDRConfig {
     grouped_outputs?: Array<{id:string;kind?:'grouped_state';dimensions:string[];fields:string[];sources:Array<{source_id:string;dimensions:Record<string,string>;fields:Record<string,string>;recency_field?:string}>;strategy?:'RECENCY'|'PRIORITY_RECENCY';source_priority?:string[];conflict_policy?:'error'|'mark';null_dimensions?:'error'|'keep'}>;
+    activation_delta?: ActivationDeltaConfig;
     evaluation?: EvaluationOptions;
     sources: SourceConfig[];
     ai_assistance?: AIConfigContext;

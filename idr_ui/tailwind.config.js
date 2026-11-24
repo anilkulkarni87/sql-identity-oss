@@ -1,8 +1,12 @@
+import { fileURLToPath } from 'node:url'
+
+const uiRoot = fileURLToPath(new URL('.', import.meta.url))
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
+    `${uiRoot}index.html`,
+    `${uiRoot}src/**/*.{js,ts,jsx,tsx}`,
   ],
   theme: {
     extend: {

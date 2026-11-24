@@ -148,83 +148,42 @@ class PreflightStage(BaseStage):
             )
 
     def _ensure_schema_upgrades(self) -> None:
-        """Apply necessary schema updates and ensure all system tables exist for existing deployments."""
+        """Declaratively reconcile missing system tables and additive columns from SYSTEM_TABLES."""
         try:
-            from ..schema_defs import SYSTEM_TABLES
             from ..schema_manager import SchemaManager
 
             sm = SchemaManager(self.adapter)
-            for table_def in SYSTEM_TABLES:
-                try:
-                    if table_def.fqn in {
-                        "idr_meta.rule",
-                        "idr_meta.identifier_mapping",
-                        "idr_meta.survivorship_rule",
-                        "idr_out.run_history",
-                        "idr_out.stage_metrics",
-                    } or not self.adapter.table_exists(table_def.fqn):
-                        sm._create_table(table_def)
-                except Exception:
-                    pass
-        except Exception as e:
-            self.logger.warning(f"System table check failed: {e}")
-
-        try:
-            # check if config_hash exists in run_history
-            columns = self.adapter.get_table_columns("idr_out.run_history")
-            col_names = [c["name"].lower() for c in columns]
-            if "config_hash" not in col_names:
-                self.logger.info("Migrating schema: Adding config_hash to idr_out.run_history")
-
-                # Determine type
-                col_type = "STRING"
-                if self.adapter.dialect in ("duckdb", "postgres", "snowflake"):
-                    col_type = "VARCHAR"
-
-                self.adapter.execute(
-                    f"ALTER TABLE idr_out.run_history ADD COLUMN config_hash {col_type}"
+            applied = sm.ensure_schema()
+            if applied:
+                self.logger.info(
+                    f"Schema reconciliation applied {len(applied)} change(s): {', '.join(applied[:8])}",
+                    extra={"run_id": self.run_id},
                 )
         except Exception as e:
-            self.logger.warning(f"Schema migration check failed: {e}")
+            self.logger.warning(f"System schema reconciliation failed: {e}")
 
-        try:
-            # Ensure corroboration columns exist on idr_out.identity_clusters_current
-            cluster_cols = self.adapter.get_table_columns("idr_out.identity_clusters_current")
-            cluster_col_names = [c["name"].lower() for c in cluster_cols] if cluster_cols else []
-            if cluster_col_names:
-                int_type = (
-                    "INT64"
-                    if self.adapter.dialect == "bigquery"
-                    else ("INTEGER" if self.adapter.dialect in ("duckdb", "snowflake") else "INT")
-                )
-                float_type = "FLOAT64" if self.adapter.dialect == "bigquery" else "DOUBLE"
-                for col_name, col_type in [
-                    ("edge_diversity", int_type),
-                    ("edge_count", int_type),
-                    ("max_fanout", int_type),
-                    ("match_density", float_type),
-                    ("subject_count", int_type),
-                    ("child_count", int_type),
-                    ("subject_fanout", int_type),
-                ]:
-                    if col_name not in cluster_col_names:
-                        self.logger.info(
-                            f"Migrating schema: Adding {col_name} to idr_out.identity_clusters_current"
-                        )
-                        self.adapter.execute(
-                            f"ALTER TABLE idr_out.identity_clusters_current ADD COLUMN {col_name} {col_type}"
-                        )
-        except Exception as e:
-            self.logger.warning(f"Cluster corroboration schema migration failed: {e}")
+    def load_evidence_flag(self, run_override: bool | None = None) -> bool:
+        """Load the opt-in generate_evidence flag from RunConfig, environment, or config_extension.
 
-    def load_evidence_flag(self) -> bool:
-        """Load the generate_evidence flag from run config or DB.
-
-        The flag controls whether edge evidence is populated for debugging.
-        Default is False for production performance.
+        Default is False for production performance (never inferred merely from table existence).
         """
-        try:
-            exists = self.adapter.table_exists("idr_out.edge_evidence")
-            return exists  # If table exists, populate it
-        except Exception:
+        if run_override is not None:
+            return bool(run_override)
+
+        import os
+
+        env_val = os.environ.get("IDR_GENERATE_EVIDENCE", "").strip().lower()
+        if env_val in ("1", "true", "yes", "on"):
+            return True
+        if env_val in ("0", "false", "no", "off"):
             return False
+
+        try:
+            from ..config_extensions import read_extensions
+
+            ext = read_extensions(self.adapter)
+            if "generate_evidence" in ext and ext["generate_evidence"] is not None:
+                return bool(ext["generate_evidence"])
+        except Exception:
+            pass
+        return False

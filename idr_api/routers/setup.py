@@ -217,6 +217,9 @@ class IDRConfig(BaseModel):
     overrides: Optional[List[Dict[str, Any]]] = None
     lenses: Optional[List[Dict[str, Any]]] = None
     ai_assistance: Optional[Dict[str, Any]] = None
+    grouped_outputs: Optional[List[Dict[str, Any]]] = None
+    evaluation: Optional[Dict[str, Any]] = None
+    activation_delta: Optional[Dict[str, Any]] = None
     use_default_exclusions: Optional[bool] = False
 
 
@@ -427,6 +430,7 @@ class RunRequest(BaseModel):
     max_cluster_delta_pct: Optional[float] = None
     lens: Optional[str] = None
     skip_lenses: bool = False
+    emit_activation_delta: Optional[bool] = None
     config: Optional[Dict[str, Any]] = None
     ground_truth: Optional[Dict[str, Any]] = None
 
@@ -595,6 +599,7 @@ async def run_pipeline(
             max_cluster_delta_pct=request.max_cluster_delta_pct,
             lens=request.lens,
             skip_lenses=request.skip_lenses,
+            emit_activation_delta=request.emit_activation_delta,
         )
 
         skip_lenses = request.skip_lenses or (request.lens or "").strip().lower() in ("__none__", "none")

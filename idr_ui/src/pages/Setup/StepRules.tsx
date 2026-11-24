@@ -233,7 +233,18 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
         updatePriorities(rules.filter((_, i) => i !== idx))
     }
 
-    const generateId = () => Math.floor(Math.random() * 1000000)
+    const buildReadableRuleId = (prefix: string, name: string) => {
+        const slug = name
+            .toLowerCase()
+            .replace(/[^a-z0-9_]+/g, '_')
+            .replace(/^_+|_+$/g, '') || 'rule'
+        const base = `${prefix}_${slug}`
+        const taken = new Set(rules.map((r) => String(r.id).toLowerCase()))
+        if (!taken.has(base)) return base
+        let n = 2
+        while (taken.has(`${base}_${n}`)) n += 1
+        return `${base}_${n}`
+    }
 
     const addExactRule = (type: string) => {
         const lowerType = type.toLowerCase()
@@ -243,7 +254,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             ? 'PHONE_US_10'
             : 'LOWERCASE'
         const newRule: MatchingRule = {
-            id: generateId(),
+            id: buildReadableRuleId('exact', type),
             type: 'EXACT',
             match_keys: [type],
             priority: rules.length + 1,
@@ -260,7 +271,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             default_threshold: 0.85,
         }
         const newRule: MatchingRule = {
-            id: generateId(),
+            id: buildReadableRuleId('fuzzy', defaultAttr),
             type: 'FUZZY',
             match_keys: [],
             priority: rules.length + 1,

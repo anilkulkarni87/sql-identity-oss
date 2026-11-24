@@ -1,4 +1,4 @@
-import type { AIConfigContext, AIReview, IDRConfig, ReviewPatch, EvaluationOptions, ProfileValidation, ProfilePreviewResult } from "../types";
+import type { AIConfigContext, AIReview, IDRConfig, ReviewPatch, EvaluationOptions, ProfileValidation, ProfilePreviewResult, ActivationDeltaConfig, ActivationDeltaRow } from "../types";
 
 /**
  * API Client for IDR Backend
@@ -172,6 +172,12 @@ export const api = {
     }>>('/metrics/sources'),
 
     // Entity/Cluster Search
+    getTopClusters: (limit = 8) => fetchJson<Array<{
+        resolved_id: string
+        cluster_size: number
+        confidence_score: number | null
+    }>>(`/clusters?limit=${limit}`),
+
     searchEntities: (query: string) => fetchJson<Array<{
         resolved_id: string
         cluster_size: number
@@ -307,7 +313,22 @@ export const api = {
             duration_seconds?: number | null
             notes?: string | null
         }>
+        activation_delta_summary?: Record<string, number> | null
     }>(`/runs/${encodeURIComponent(runId)}`),
+
+    getRunActivationDelta: (
+        runId: string,
+        changeType = 'ALL',
+        lensId = 'default',
+        limit = 50
+    ) => fetchJson<{
+        run_id: string
+        lens_id: string
+        summary: Record<string, number>
+        rows: ActivationDeltaRow[]
+    }>(
+        `/runs/${encodeURIComponent(runId)}/activation-delta?change_type=${encodeURIComponent(changeType)}&lens_id=${encodeURIComponent(lensId)}&limit=${limit}`
+    ),
 
     // System Health
     getHealth: () => fetchJson<{
@@ -340,6 +361,7 @@ export const api = {
         rules?: Array<Record<string, unknown>>
         fuzzy_rules?: Array<Record<string, unknown>>
         survivorship?: Array<Record<string, unknown>>
+        activation_delta?: ActivationDeltaConfig
     }>('/setup/config'),
 
     setupConnect: (platform: string, params: Record<string, unknown>) => fetchJson<{
@@ -417,6 +439,7 @@ export const api = {
         max_cluster_delta_pct?: number
         lens?: string
         skip_lenses?: boolean
+        emit_activation_delta?: boolean
         config?: unknown
         ground_truth?: EvaluationOptions | Record<string, never>
     }) => fetchJson<Record<string, unknown>>('/setup/run', {
@@ -551,6 +574,7 @@ export const api = {
             judge_confidence?: number
             judge_tier?: 'tier1' | 'tier2'
             escalated?: boolean
+            escalation_reason?: string
             cluster_size?: number
             confidence_score?: number | null
             subject_count?: number | null

@@ -323,9 +323,9 @@ def test_bigquery_schema_mapping_env_and_word_boundary(monkeypatch):
 
 
 def test_mcp_get_system_status_auto_discovers_connected_adapter(tmp_path):
+    import idr_mcp.server as mcp_srv
     from idr_api.dependencies import get_manager
     from idr_core.connection_manager import ConnectionManager
-    import idr_mcp.server as mcp_srv
 
     ConnectionManager.instance().disconnect()
     mgr = get_manager()

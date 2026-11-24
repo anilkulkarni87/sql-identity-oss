@@ -71,7 +71,7 @@ class AITriageRequest(BaseModel):
     escalate_provider: Optional[str] = None
     escalate_model: Optional[str] = None
     escalation_threshold: float = 0.80
-    min_subject_fanout: int = 2
+    min_subject_fanout: int = 4
 
 
 class AIAskRequest(BaseModel):

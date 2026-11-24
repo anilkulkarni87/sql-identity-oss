@@ -101,6 +101,11 @@ class IdentifierMappingSpec(BaseModel):
     )
     is_hashed: bool = Field(default=False, description="True if source values are pre-hashed (e.g., SHA-256/MD5).")
     source_is_hashed: bool = Field(default=False, description="True if source already stores a digest that should not be hashed again.")
+    issuer: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("issuer", "issuer_expr"),
+        description="Optional SQL column or expression scoping the identifier to an issuing authority (e.g., facility_id for MRN).",
+    )
 
 
 class AttributeMappingSpec(BaseModel):
@@ -119,7 +124,8 @@ class SourceSpec(BaseModel):
 
     id: str = Field(..., description="Unique alphanumeric/underscore source identifier.")
     table: str = Field(..., description="Fully qualified source table name (schema.table).")
-    entity_type: str = Field(default="PERSON", description="Entity type (e.g., PERSON, CUSTOMER, ORDER, EVENT, ACCOUNT).")
+    entity_type: str = Field(default="PERSON", description="Structural graph role (e.g., PRIMARY, PERSON, EVENT, CHILD).")
+    entity_kind: Optional[str] = Field(default=None, description="Semantic entity domain kind (e.g., person, organization, product, asset).")
     entity_key: str = Field(default="AUTO", description="Primary key column or 'AUTO'.")
     key_columns: List[str] = Field(default_factory=list)
     watermark_lookback_minutes: int = Field(default=0, ge=0)
@@ -299,11 +305,14 @@ class IDRConfigSpec(BaseModel):
                         "type": i.type,
                         "expr": i.expr,
                         **({"source_is_hashed": True} if (i.source_is_hashed or i.is_hashed) else {}),
+                        **({"issuer": i.issuer} if i.issuer else {}),
                     }
                     for i in s.identifiers
                 ],
                 "attributes": [{"name": a.name, "expr": a.expr} for a in s.attributes],
             }
+            if s.entity_kind and s.entity_kind.strip().lower() != "person":
+                src_dict["entity_kind"] = s.entity_kind.strip().lower()
             if s.key_columns:
                 src_dict["key_columns"] = s.key_columns
             if s.watermark_lookback_minutes:

@@ -174,6 +174,7 @@ class RunDetail(RunSummary):
     error_message: Optional[str] = None
     warnings: List[str] = []
     stages: List[StageMetricInfo] = []
+    activation_delta_summary: Optional[Dict[str, int]] = None
 
 
 # ============================================================

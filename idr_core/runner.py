@@ -69,6 +69,8 @@ class RunConfig:
     max_cluster_delta_pct: Optional[float] = None
     lens: Optional[str] = None
     skip_lenses: bool = False
+    emit_activation_delta: Optional[bool] = None
+    generate_evidence: Optional[bool] = None
     lock_ttl_seconds: int = 3600
     force_unlock: bool = False
 
@@ -116,6 +118,7 @@ class RunResult:
     edges_created: int = 0
     clusters_impacted: int = 0
     grouped_output_counts: Dict[str, int] = field(default_factory=dict)
+    activation_delta_summary: Dict[str, int] = field(default_factory=dict)
     clusters_resolved: int = 0
     clusters_changed: int = 0
     source_tables_processed: int = 0
@@ -207,6 +210,7 @@ class IDRRunner:
         self._sources_verified = 0
         self._clusters_changed = 0
         self._grouped_output_counts = {}
+        self._activation_delta_summary = {}
         self._prepared_lens_tables = []
 
         self.logger.info(
@@ -259,7 +263,9 @@ class IDRRunner:
             lock_acquired = True
 
             # Check for optional evidence generation after preflight schema checks
-            self._generate_evidence = preflight.load_evidence_flag()
+            self._generate_evidence = preflight.load_evidence_flag(
+                run_override=config.generate_evidence
+            )
             ctx.generate_evidence = self._generate_evidence
 
             # Record run start (after preflight and lock acquisition)
@@ -375,6 +381,7 @@ class IDRRunner:
                 self._end_stage("output_generation", output_rows or 0)
                 self._clusters_changed = output.clusters_changed
                 self._grouped_output_counts = output.grouped_output_counts
+                self._activation_delta_summary = output.activation_delta_summary
                 status = "SUCCESS"
             else:
                 self._start_stage("dry_run_analysis")
@@ -750,7 +757,12 @@ class IDRRunner:
             data[key] = sorted(data[key], key=lambda item: str(item[field_name]))
         for source in data["sources"]:
             source["identifiers"] = sorted(
-                source.get("identifiers", []), key=lambda item: (item["type"], item.get("expr", ""))
+                source.get("identifiers", []),
+                key=lambda item: (
+                    item["type"],
+                    item.get("expr", ""),
+                    item.get("issuer") or item.get("issuer_expr") or "",
+                ),
             )
             source["attributes"] = sorted(
                 source.get("attributes", []), key=lambda item: item["name"]
@@ -828,6 +840,7 @@ class IDRRunner:
                                 "ai_assistance": full_cfg.get("ai_assistance"),
                                 "evaluation": full_cfg.get("evaluation"),
                                 "grouped_outputs": full_cfg.get("grouped_outputs", []),
+                                "activation_delta": full_cfg.get("activation_delta"),
                                 "use_default_exclusions": bool(
                                     full_cfg.get("use_default_exclusions", False)
                                 ),
@@ -1012,6 +1025,7 @@ class IDRRunner:
             clusters_impacted=clusters,
             clusters_resolved=clusters,
             grouped_output_counts=getattr(self, "_grouped_output_counts", {}),
+            activation_delta_summary=getattr(self, "_activation_delta_summary", {}),
             clusters_changed=getattr(self, "_clusters_changed", 0),
             source_tables_processed=getattr(self, "_sources_verified", 0),
             lp_iterations=iterations,

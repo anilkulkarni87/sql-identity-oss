@@ -28,6 +28,7 @@ class OutputStage(BaseStage):
         super().__init__(ctx)
         self.config = config
         self.clusters_changed = 0
+        self.activation_delta_summary: Dict[str, int] = {}
 
     def upsert(self, target_table, source_query, key_cols, update_cols, insert_cols):
         """Execute platform-specific upsert (MERGE or ON CONFLICT)."""
@@ -382,6 +383,17 @@ class OutputStage(BaseStage):
 
     def _restore_current_outputs(self, snapshots: Dict[str, bool]) -> None:
         """Restore idr_out.*_current tables from pre-Stage-8 snapshots after a failure."""
+        try:
+            if self.adapter.table_exists("idr_out.identity_activation_delta"):
+                safe_run = str(self.run_id).replace("'", "''")
+                self.adapter.execute(
+                    f"DELETE FROM idr_out.identity_activation_delta WHERE run_id = '{safe_run}'"
+                )
+        except Exception as delta_err:
+            self.logger.error(
+                f"Failed to rollback idr_out.identity_activation_delta: {delta_err}",
+                extra={"run_id": self.run_id},
+            )
         for tbl, existed in snapshots.items():
             if not existed:
                 self.adapter.execute(f"DROP TABLE IF EXISTS idr_out.{tbl}")
@@ -774,12 +786,28 @@ class OutputStage(BaseStage):
             self.grouped_output_counts = materialize_grouped_outputs(self.adapter, self.run_id, self.config.run_mode if self.config else "FULL")
 
             # Publish prepared lenses inside the Stage 8 rollback window before advancing watermarks.
+            published_lenses = []
             for lid, cache in (prepared_lenses or []):
                 self.adapter.execute(
                     f"CREATE OR REPLACE TABLE idr_work.lp_labels_lens AS SELECT * FROM {cache}"
                 )
                 self.materialize_lens_output(lid)
                 self.adapter.execute(f"DROP TABLE IF EXISTS {cache}")
+                published_lenses.append(lid)
+
+            # Opt-in activation changelog (0.0s overhead when disabled)
+            from ..activation_delta import materialize_activation_delta
+
+            self.activation_delta_summary = materialize_activation_delta(
+                self.adapter,
+                run_id=self.run_id,
+                run_mode=self.config.run_mode if self.config else "FULL",
+                snapshots=snapshots,
+                emit_override=getattr(self.config, "emit_activation_delta", None)
+                if self.config
+                else None,
+                lens_ids=published_lenses,
+            )
 
             # Count distinct old/new cluster IDs whose memberships actually changed.
             # Include retired IDs after merges and deleted records, not only this run's labels.
