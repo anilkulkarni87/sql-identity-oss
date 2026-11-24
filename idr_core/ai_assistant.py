@@ -18,6 +18,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
+from .llm import LLMClient, mask_pii_payload
+
 
 def _sanitize_json(obj: Any) -> Any:
     """Recursively replace NaN/Inf floats (e.g. from BigQuery/pandas) with None for strict JSON."""
@@ -33,8 +35,6 @@ def _sanitize_json(obj: Any) -> Any:
         except Exception:
             return str(obj)
     return obj
-
-from .llm import LLMClient, mask_pii_payload
 
 
 def get_configured_pii_keys(adapter: Any) -> Set[str]:
@@ -202,63 +202,294 @@ def explain_cluster_with_ai(
     }
 
 
+def _cluster_table_has_structural_cols(adapter: Any) -> bool:
+    try:
+        cols = {
+            str(c.get("name", "")).lower()
+            for c in adapter.get_table_columns("idr_out.identity_clusters_current")
+        }
+        return {"subject_count", "child_count", "subject_fanout"}.issubset(cols)
+    except Exception:
+        return False
+
+
+def _build_escalation_client(
+    base_client: LLMClient,
+    adapter: Any,
+    escalate_provider: Optional[str],
+    escalate_model: Optional[str],
+) -> Optional[LLMClient]:
+    if not escalate_provider and not escalate_model:
+        return None
+    from .llm import LLMConfig, api_key_for_provider, infer_provider_from_model
+
+    inferred_prov, clean_model = infer_provider_from_model(escalate_model, escalate_provider)
+    prov = (inferred_prov or base_client.config.provider).strip().lower()
+    same_provider = prov == base_client.config.provider.strip().lower()
+    cfg = LLMConfig(
+        provider=prov,
+        model=clean_model,
+        base_url=base_client.config.base_url if same_provider else None,
+        api_key=base_client.config.api_key if same_provider else api_key_for_provider(prov),
+        mask_pii=base_client.config.mask_pii if same_provider else None,
+        timeout=base_client.config.timeout,
+    )
+    return LLMClient(cfg, adapter=adapter)
+
+
+_PERSONAL_CONTACT_TYPES = ("email", "phone", "mobile", "ssn", "tax_id")
+
+
+def _has_structural_disagreement(proposal: Dict[str, Any], ctx: Dict[str, Any]) -> bool:
+    """
+    Detect overconfident Tier-1 'KEEP' verdicts that contradict hard SQL graph signals
+    (e.g., multiple distinct personal emails/phones stitched across multiple subjects).
+    """
+    if str(proposal.get("action") or "").upper() != "KEEP":
+        return False
+    signals = ctx.get("structural_signals") or {}
+    subj_fanout = int(signals.get("subject_fanout") or 1)
+    if subj_fanout < 2:
+        return False
+    id_summary = ctx.get("identifier_summary") or {}
+    for itype, stats in id_summary.items():
+        it_low = str(itype).lower()
+        if any(tok in it_low for tok in _PERSONAL_CONTACT_TYPES):
+            if int((stats or {}).get("distinct_values") or 0) >= 2:
+                return True
+    conf_score = signals.get("confidence_score")
+    if subj_fanout >= 4 and conf_score is not None and float(conf_score) <= 0.50:
+        return True
+    return False
+
+
 def triage_with_ai(
     adapter: Any,
     client: Optional[LLMClient] = None,
-    max_confidence: float = 0.65,
+    max_confidence: float = 0.75,
     limit: int = 8,
+    escalate_provider: Optional[str] = None,
+    escalate_model: Optional[str] = None,
+    escalation_threshold: float = 0.80,
+    min_subject_fanout: int = 4,
 ) -> Dict[str, Any]:
-    """Review low-confidence or large clusters and propose stewardship overrides."""
-    client = client or LLMClient()
-    candidates = adapter.query(
+    """
+    3-Tier Confidence-Routed Cascade Judge for borderline identity clusters.
+
+    Tier 0 (Warehouse SQL, $0, Zero PII):
+        Filters out healthy multi-entity clusters; flags only low-confidence,
+        oversized, or multi-subject (subject_fanout >= min_subject_fanout) clusters.
+    Tier 1 (Configured fast/local/warehouse LLM):
+        Judges flagged clusters and returns calibrated verdicts with judge_confidence.
+    Tier 2 (Optional escalation model):
+        Escalates only uncertain Tier-1 verdicts (judge_confidence < escalation_threshold).
+    """
+    client = client or LLMClient(adapter=adapter)
+    if getattr(client, "adapter", None) is None:
+        client.adapter = adapter
+
+    safe_max_conf = float(max_confidence)
+    safe_limit = max(1, min(int(limit), 100))
+    safe_fanout = max(2, int(min_subject_fanout))
+    has_struct = _cluster_table_has_structural_cols(adapter)
+
+    flag_predicate = (
+        f"(confidence_score <= {safe_max_conf} OR cluster_size >= 10 OR subject_fanout >= {safe_fanout})"
+        if has_struct
+        else f"(confidence_score <= {safe_max_conf} OR cluster_size >= 10)"
+    )
+
+    funnel_rows = adapter.query(
         f"""
-        SELECT resolved_id, cluster_size, confidence_score, edge_diversity, edge_count
+        SELECT
+            COUNT(*) AS total_multi_entity_clusters,
+            COALESCE(SUM(CASE WHEN {flag_predicate} THEN 1 ELSE 0 END), 0) AS tier0_flagged
         FROM idr_out.identity_clusters_current
         WHERE cluster_size > 1
-          AND (confidence_score <= {float(max_confidence)} OR cluster_size >= 10)
-        ORDER BY confidence_score ASC, cluster_size DESC
-        LIMIT {int(limit)}
         """
     )
+    total_multi = int((funnel_rows[0].get("total_multi_entity_clusters") or 0) if funnel_rows else 0)
+    tier0_flagged = int((funnel_rows[0].get("tier0_flagged") or 0) if funnel_rows else 0)
+    tier0_auto_passed = max(0, total_multi - tier0_flagged)
+    sql_savings_pct = round((tier0_auto_passed / total_multi) * 100.0, 1) if total_multi > 0 else 100.0
+
+    struct_select = (
+        ", subject_count, child_count, subject_fanout"
+        if has_struct
+        else ""
+    )
+    order_clause = (
+        "ORDER BY subject_fanout DESC, confidence_score ASC, cluster_size DESC"
+        if has_struct
+        else "ORDER BY confidence_score ASC, cluster_size DESC"
+    )
+    candidates = adapter.query(
+        f"""
+        SELECT resolved_id, cluster_size, confidence_score, edge_diversity, edge_count{struct_select}
+        FROM idr_out.identity_clusters_current
+        WHERE cluster_size > 1
+          AND {flag_predicate}
+        {order_clause}
+        LIMIT {safe_limit}
+        """
+    )
+
+    dialect = getattr(adapter, "dialect", "duckdb")
+    tier1_model = client.config.resolved_model(dialect=dialect)
+
+    cascade_summary = {
+        "total_multi_entity_clusters": total_multi,
+        "tier0_auto_passed": tier0_auto_passed,
+        "tier0_flagged": tier0_flagged,
+        "tier1_reviewed": len(candidates),
+        "tier2_escalated": 0,
+        "sql_filter_savings_pct": sql_savings_pct,
+        "escalation_threshold": float(escalation_threshold),
+    }
+
     if not candidates:
         return {
             "status": "CLEAN",
             "pii_masked": client.config.effective_mask_pii,
+            "provider": client.config.provider,
+            "model": tier1_model,
+            "escalate_provider": escalate_provider,
+            "escalate_model": escalate_model,
+            "candidates_reviewed": 0,
+            "cascade_summary": cascade_summary,
             "proposals": [],
-            "message": "No low-confidence or oversized clusters found.",
+            "message": (
+                f"All {total_multi:,} multi-entity clusters auto-passed SQL Tier 0 ($0, zero PII sent)."
+                if total_multi > 0
+                else "No multi-entity clusters found."
+            ),
         }
 
+    meta_by_id: Dict[str, Dict[str, Any]] = {}
+    enriched_by_id: Dict[str, Dict[str, Any]] = {}
     enriched = []
     for c in candidates:
-        ctx = _fetch_cluster_context(adapter, c["resolved_id"], max_members=15, max_edges=25)
+        rid = str(c["resolved_id"])
+        meta_by_id[rid] = {
+            "cluster_size": int(c.get("cluster_size") or 0),
+            "confidence_score": float(c["confidence_score"]) if c.get("confidence_score") is not None else None,
+            "subject_count": int(c["subject_count"]) if c.get("subject_count") is not None else None,
+            "child_count": int(c["child_count"]) if c.get("child_count") is not None else None,
+            "subject_fanout": int(c["subject_fanout"]) if c.get("subject_fanout") is not None else None,
+        }
+        ctx = _fetch_cluster_context(adapter, rid, max_members=15, max_edges=25)
+        # Zero-PII per-identifier distinct value counts (computed before masking so the judge
+        # can distinguish 1 shared personal email linking duplicate accounts vs multiple distinct emails)
+        id_stats: Dict[str, Dict[str, Any]] = {}
+        vals_by_type: Dict[str, set] = {}
+        for edge in ctx.get("edges") or []:
+            itype = str(edge.get("identifier_type") or "unknown")
+            ival = str(edge.get("identifier_value_norm") or "")
+            vals_by_type.setdefault(itype, set()).add(ival)
+            entry = id_stats.setdefault(itype, {"distinct_values": 0, "edge_count": 0})
+            entry["edge_count"] += 1
+        for itype, vset in vals_by_type.items():
+            id_stats[itype]["distinct_values"] = len(vset)
+        ctx["identifier_summary"] = id_stats
+        ctx["structural_signals"] = meta_by_id[rid]
         enriched.append(ctx)
+        enriched_by_id[rid] = ctx
 
-    payload = _apply_pii_mask(adapter, enriched, client)
-    prompt = (
-        "Review these flagged identity clusters and return JSON with a 'proposals' array.\n"
-        "Each proposal must have: resolved_id, action ('KEEP' | 'DO_NOT_LINK' | 'ISOLATE' | 'ADD_EXCLUSION'), "
-        "entity_key_a (optional), entity_key_b (optional), reason (1 sentence).\n\n"
-        f"Flagged Clusters:\n{json.dumps(payload, default=str)}"
-    )
-    raw = client.chat(
-        [
-            {"role": "system", "content": "Return valid JSON only with top-level key 'proposals'."},
-            {"role": "user", "content": prompt},
-        ],
-        json_mode=True,
-    )
-    try:
-        parsed = json.loads(raw)
-        proposals = parsed.get("proposals", [])
-    except Exception:
-        proposals = [{"resolved_id": "parse_error", "action": "REVIEW", "reason": raw[:500]}]
+    def _run_judge_batch(judge_client: LLMClient, batch: List[Dict[str, Any]], tier_label: str) -> List[Dict[str, Any]]:
+        payload = _apply_pii_mask(adapter, batch, judge_client)
+        prompt = (
+            "You are an Identity Resolution quality judge auditing flagged clusters for over-merging.\n"
+            "CRITICAL GUIDELINES:\n"
+            "- Multiple source account IDs (e.g. multiple customer_ids or instore_accounts) linked by a SINGLE "
+            "unique email or phone (identifier_summary shows distinct_values == 1 for that email/phone) is the "
+            "NORMAL signature of duplicate accounts for the SAME person across channels -> recommend 'KEEP'.\n"
+            "- Only recommend 'DO_NOT_LINK' or 'ISOLATE' when there is concrete evidence of over-merging "
+            "(e.g., a transitive bridge chain stitching multiple distinct personal emails/phones together, "
+            "a generic/shared role identifier, or conflicting link paths).\n"
+            "Return valid JSON with a top-level 'proposals' array. For each cluster, include:\n"
+            "- resolved_id (string)\n"
+            "- action: one of 'KEEP' | 'DO_NOT_LINK' | 'ISOLATE' | 'ADD_EXCLUSION'\n"
+            "- judge_confidence: calibrated float between 0.0 and 1.0 (use < 0.80 if uncertain)\n"
+            "- entity_key_a (optional string, required for DO_NOT_LINK or ISOLATE)\n"
+            "- entity_key_b (optional string, required for DO_NOT_LINK)\n"
+            "- reason (1 concise sentence citing the exact identifier_summary/structural evidence)\n\n"
+            f"Flagged Clusters:\n{json.dumps(payload, default=str)}"
+        )
+        raw = judge_client.chat(
+            [
+                {"role": "system", "content": "Return valid JSON only with top-level key 'proposals'."},
+                {"role": "user", "content": prompt},
+            ],
+            json_mode=True,
+        )
+        try:
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            parsed = json.loads(cleaned)
+            items = parsed.get("proposals", [])
+            if not isinstance(items, list):
+                items = []
+        except Exception:
+            items = [{"resolved_id": "parse_error", "action": "REVIEW", "judge_confidence": 0.0, "reason": raw[:500]}]
+
+        out = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            rid = str(item.get("resolved_id") or "")
+            try:
+                jconf = max(0.0, min(1.0, float(item.get("judge_confidence", 0.75))))
+            except (TypeError, ValueError):
+                jconf = 0.5
+            row = {
+                **meta_by_id.get(rid, {}),
+                **item,
+                "resolved_id": rid,
+                "judge_confidence": round(jconf, 3),
+                "judge_tier": tier_label,
+                "escalated": tier_label == "tier2",
+            }
+            out.append(row)
+        return out
+
+    proposals = _run_judge_batch(client, enriched, "tier1")
+
+    # Optional Tier-2 Escalation for uncertain or structurally contradicted Tier-1 verdicts
+    tier2_client = _build_escalation_client(client, adapter, escalate_provider, escalate_model)
+    if tier2_client is not None:
+        escalation_reasons: Dict[str, str] = {}
+        for p in proposals:
+            rid = p.get("resolved_id")
+            if rid not in enriched_by_id:
+                continue
+            if p.get("action") == "REVIEW":
+                escalation_reasons[rid] = "review_requested"
+            elif float(p.get("judge_confidence", 0.0)) < float(escalation_threshold):
+                escalation_reasons[rid] = "low_confidence"
+            elif _has_structural_disagreement(p, enriched_by_id[rid]):
+                escalation_reasons[rid] = "structural_disagreement"
+        uncertain_ids = list(escalation_reasons.keys())
+        if uncertain_ids:
+            esc_batch = [enriched_by_id[rid] for rid in uncertain_ids]
+            esc_proposals = _run_judge_batch(tier2_client, esc_batch, "tier2")
+            for ep in esc_proposals:
+                erid = ep.get("resolved_id")
+                if erid in escalation_reasons:
+                    ep["escalation_reason"] = escalation_reasons[erid]
+            esc_by_id = {p["resolved_id"]: p for p in esc_proposals if p.get("resolved_id")}
+            proposals = [esc_by_id.get(p["resolved_id"], p) for p in proposals]
+            cascade_summary["tier2_escalated"] = len(esc_by_id)
 
     return {
         "status": "OK",
         "pii_masked": client.config.effective_mask_pii,
         "provider": client.config.provider,
-        "model": client.config.resolved_model(),
+        "model": tier1_model,
+        "escalate_provider": tier2_client.config.provider if tier2_client else None,
+        "escalate_model": tier2_client.config.resolved_model(dialect=dialect) if tier2_client else None,
         "candidates_reviewed": len(candidates),
+        "cascade_summary": cascade_summary,
         "proposals": proposals,
     }
 
@@ -285,6 +516,21 @@ def ask_identity_graph(
         )
     except Exception:
         summary["cluster_stats"] = []
+
+    try:
+        summary["edges_by_identifier_type"] = adapter.query(
+            """
+            SELECT
+                identifier_type,
+                COUNT(*) AS edge_count
+            FROM idr_out.identity_edges_current
+            GROUP BY identifier_type
+            ORDER BY edge_count DESC
+            LIMIT 25
+            """
+        )
+    except Exception:
+        summary["edges_by_identifier_type"] = []
 
     try:
         summary["recent_runs"] = adapter.query(
@@ -365,6 +611,10 @@ def suggest_config_with_ai(
     sample_size: int = 2000,
     verify_sql: bool = True,
     on_progress: Optional[Any] = None,
+    context: Any = None,
+    current_config: Optional[Dict[str, Any]] = None,
+    mode: str = "config",
+    base_draft_hash: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate/refine an IDR config dictionary from schema profile + natural-language goal.
@@ -382,478 +632,37 @@ def suggest_config_with_ai(
             goal=prompt_text,
             sample_size=sample_size,
             verify_sql=verify_sql,
-            on_progress=on_progress,
+            on_progress=on_progress, context=context, current_config=current_config,
+            mode=mode, base_draft_hash=base_draft_hash,
         )
         return _sanitize_json(plan.model_dump())
 
-    safe_profile = mask_pii_payload(profiler_summary) if client.config.effective_mask_pii else profiler_summary
-
-    prompt = (
-        "Generate a valid sql-identity-oss JSON config matching the user's goal and profiled tables.\n"
-        "Return a JSON object with this exact top-level shape:\n"
-        '{"sources": [{"id": "table_id", "table": "schema.table", "entity_type": "PERSON", '
-        '"entity_key": "pk_col", "watermark_column": "updated_at", '
-        '"identifiers": [{"type": "email", "expr": "email_col"}], '
-        '"attributes": [{"name": "first_name", "expr": "first_name"}]}], '
-        '"rules": [{"id": "100", "type": "EXACT", "match_keys": ["email"], "priority": 1, "canonicalize": "EMAIL_STANDARD"}], '
-        '"survivorship": [{"attribute": "first_name", "strategy": "RECENCY"}], '
-        '"use_default_exclusions": true, '
-        '"lenses": [{"id": "strict_person", "include_types": ["EMAIL", "CUSTOMER_ID"]}, '
-        '{"id": "household", "include_types": ["EMAIL", "PHONE", "ADDRESS_ID", "CUSTOMER_ID"], "max_group_size": 25}]}\n\n'
-        "Available survivorship strategies: RECENCY, PRIORITY, PRIORITY_RECENCY, LATEST_FROM_SOURCE, "
-        "FREQUENCY, ANY_TRUE, ALL_TRUE, EARLIEST, AGG_MAX, AGG_MIN, AGG_SUM, COLLECT_DISTINCT.\n"
-        "Available canonicalizers: EMAIL_STANDARD, EMAIL_STRIP_PLUS, PHONE_US_10, PHONE_DIGITS, "
-        "ALPHANUMERIC_UPPER, LOWERCASE, UPPERCASE, EXACT.\n\n"
-        f"User Goal: {prompt_text}\n\n"
-        f"Profiled Schema:\n{json.dumps(safe_profile, default=str)}"
-    )
-    raw = client.chat(
-        [
-            {"role": "system", "content": "Return valid JSON only with top-level keys: sources, rules, survivorship, use_default_exclusions, lenses."},
-            {"role": "user", "content": prompt},
-        ],
-        json_mode=True,
-    )
-    config_dict = json.loads(raw)
-    if isinstance(config_dict, dict):
-        if "sources" not in config_dict:
-            for wrapper_key in ("config", "suggested_config", "idr_config"):
-                nested = config_dict.get(wrapper_key)
-                if isinstance(nested, dict) and nested.get("sources"):
-                    config_dict = nested
-                    break
-        base_cfg = (
-            profiler_summary.get("suggested_config")
-            if isinstance(profiler_summary, dict)
-            and isinstance(profiler_summary.get("suggested_config"), dict)
-            else profiler_summary
-        )
-        if not config_dict.get("sources") and isinstance(base_cfg, dict) and base_cfg.get("sources"):
-            config_dict["sources"] = base_cfg["sources"]
-            if not config_dict.get("rules") and base_cfg.get("rules"):
-                config_dict["rules"] = base_cfg["rules"]
-            if not config_dict.get("survivorship") and base_cfg.get("survivorship"):
-                config_dict["survivorship"] = base_cfg["survivorship"]
-    return {
-        "pii_masked": client.config.effective_mask_pii,
-        "provider": client.config.provider,
-        "model": client.config.resolved_model(),
-        "suggested_config": config_dict,
-    }
+    raise ValueError("Configuration generation requires warehouse tables and grounded statistical evidence.")
 
 
 def collect_dry_run_telemetry(
-    adapter: Any,
-    draft_config: Dict[str, Any],
-    dry_run_summary: Optional[Dict[str, Any]] = None,
-    warnings: Optional[List[str]] = None,
+    adapter: Any, draft_config: Dict[str, Any], dry_run_summary=None, warnings=None,
+    *, run_id: Optional[str] = None, owner: str = "cli", lens: str = "default",
 ) -> Dict[str, Any]:
-    """
-    Collect strictly zero-PII aggregate graph diagnostics from the most recent Dry Run
-    (`idr_work.lp_labels`, `idr_work.edges_new`, `idr_out.skipped_identifier_groups`).
-    """
-    telemetry: Dict[str, Any] = {
-        "total_entities": 0,
-        "total_clusters": 0,
-        "singletons": 0,
-        "singleton_pct": 0.0,
-        "max_cluster_size": 0,
-        "size_buckets": {"1": 0, "2_5": 0, "6_20": 0, "21_100": 0, "100_plus": 0},
-        "edges_by_type": {},
-        "zero_edge_rules": [],
-        "mega_cluster_culprits": [],
-        "source_singletons": [],
-        "skipped_supernodes": [],
-        "warnings": list(warnings or []),
-        "dry_run_summary": dry_run_summary or {},
-    }
-
-    try:
-        if adapter.table_exists("idr_work.lp_labels"):
-            rows = adapter.query("""
-                WITH cluster_sizes AS (
-                    SELECT label, COUNT(*) AS sz
-                    FROM idr_work.lp_labels
-                    GROUP BY label
-                )
-                SELECT
-                    COUNT(*) AS total_clusters,
-                    COALESCE(SUM(sz), 0) AS total_entities,
-                    COALESCE(MAX(sz), 0) AS max_sz,
-                    SUM(CASE WHEN sz = 1 THEN 1 ELSE 0 END) AS b1,
-                    SUM(CASE WHEN sz BETWEEN 2 AND 5 THEN 1 ELSE 0 END) AS b2_5,
-                    SUM(CASE WHEN sz BETWEEN 6 AND 20 THEN 1 ELSE 0 END) AS b6_20,
-                    SUM(CASE WHEN sz BETWEEN 21 AND 100 THEN 1 ELSE 0 END) AS b21_100,
-                    SUM(CASE WHEN sz > 100 THEN 1 ELSE 0 END) AS b100_plus
-                FROM cluster_sizes
-            """)
-            if rows:
-                r = {k.lower(): v for k, v in rows[0].items()} if isinstance(rows[0], dict) else {}
-                tc = int(r.get("total_clusters") or 0)
-                te = int(r.get("total_entities") or 0)
-                b1 = int(r.get("b1") or 0)
-                telemetry["total_clusters"] = tc
-                telemetry["total_entities"] = te
-                telemetry["singletons"] = b1
-                raw_pct = (b1 / tc) * 100.0 if tc > 0 else 0.0
-                telemetry["singleton_pct"] = (
-                    99.9 if (0 < b1 < tc and round(raw_pct, 1) >= 100.0) else round(raw_pct, 1)
-                )
-                telemetry["max_cluster_size"] = int(r.get("max_sz") or 0)
-                telemetry["size_buckets"] = {
-                    "1": b1,
-                    "2_5": int(r.get("b2_5") or 0),
-                    "6_20": int(r.get("b6_20") or 0),
-                    "21_100": int(r.get("b21_100") or 0),
-                    "100_plus": int(r.get("b100_plus") or 0),
-                }
-
-            dialect = getattr(adapter, "dialect", "duckdb")
-            split_expr = (
-                "SPLIT(l.entity_key, ':')[OFFSET(0)]"
-                if dialect == "bigquery"
-                else "SPLIT_PART(l.entity_key, ':', 1)"
-            )
-            src_rows = adapter.query(f"""
-                WITH csz AS (
-                    SELECT label, COUNT(*) AS sz FROM idr_work.lp_labels GROUP BY label
-                )
-                SELECT
-                    {split_expr} AS source_id,
-                    COUNT(*) AS total_entities,
-                    SUM(CASE WHEN c.sz = 1 THEN 1 ELSE 0 END) AS singleton_entities
-                FROM idr_work.lp_labels l
-                JOIN csz c ON l.label = c.label
-                GROUP BY 1
-                ORDER BY 3 DESC
-                LIMIT 20
-            """)
-            for sr in src_rows or []:
-                srl = {k.lower(): v for k, v in sr.items()} if isinstance(sr, dict) else {}
-                tot = int(srl.get("total_entities") or 0)
-                sing = int(srl.get("singleton_entities") or 0)
-                telemetry["source_singletons"].append(
-                    {
-                        "source_id": str(srl.get("source_id") or ""),
-                        "total_entities": tot,
-                        "singleton_entities": sing,
-                        "singleton_pct": round((sing / tot) * 100.0, 1) if tot > 0 else 0.0,
-                    }
-                )
-    except Exception:
-        pass
-
-    try:
-        if adapter.table_exists("idr_work.edges_new"):
-            erows = adapter.query("""
-                SELECT LOWER(identifier_type) AS id_type, COUNT(*) AS cnt
-                FROM idr_work.edges_new
-                GROUP BY 1
-                ORDER BY 2 DESC
-            """)
-            for er in erows or []:
-                erl = {k.lower(): v for k, v in er.items()} if isinstance(er, dict) else {}
-                if erl.get("id_type"):
-                    telemetry["edges_by_type"][str(erl["id_type"])] = int(erl.get("cnt") or 0)
-
-            # Pinpoint which identifier_type(s) drive edges inside any mega-cluster (>100 entities)
-            if telemetry["max_cluster_size"] > 100 and adapter.table_exists("idr_work.lp_labels"):
-                crows = adapter.query("""
-                    WITH mega_clusters AS (
-                        SELECT label FROM idr_work.lp_labels GROUP BY label HAVING COUNT(*) > 100
-                    ),
-                    mega_entities AS (
-                        SELECT l.entity_key
-                        FROM idr_work.lp_labels l
-                        JOIN mega_clusters mc ON l.label = mc.label
-                    )
-                    SELECT LOWER(e.identifier_type) AS id_type, COUNT(*) AS edge_cnt
-                    FROM idr_work.edges_new e
-                    JOIN mega_entities m ON e.left_entity_key = m.entity_key
-                    GROUP BY 1
-                    ORDER BY 2 DESC
-                    LIMIT 5
-                """)
-                for cr in crows or []:
-                    crl = {k.lower(): v for k, v in cr.items()} if isinstance(cr, dict) else {}
-                    if crl.get("id_type"):
-                        telemetry["mega_cluster_culprits"].append(
-                            {
-                                "identifier_type": str(crl["id_type"]),
-                                "edge_count": int(crl.get("edge_cnt") or 0),
-                            }
-                        )
-    except Exception:
-        pass
-
-    for rule in draft_config.get("rules") or []:
-        mks = rule.get("match_keys") or ([rule["match_key"]] if rule.get("match_key") else [])
-        for mk in mks:
-            mk_l = str(mk).strip().lower()
-            if mk_l and telemetry["edges_by_type"].get(mk_l, 0) == 0:
-                telemetry["zero_edge_rules"].append(
-                    {"rule_id": str(rule.get("id", "")), "identifier_type": mk_l}
-                )
-
-    try:
-        if adapter.table_exists("idr_out.skipped_identifier_groups"):
-            srows = adapter.query("""
-                SELECT
-                    LOWER(identifier_type) AS id_type,
-                    COUNT(*) AS skipped_groups,
-                    COALESCE(MAX(group_size), 0) AS max_group_size_seen
-                FROM idr_out.skipped_identifier_groups
-                WHERE run_id = (
-                    SELECT run_id FROM idr_out.skipped_identifier_groups
-                    ORDER BY skipped_at DESC LIMIT 1
-                )
-                GROUP BY 1
-                ORDER BY 2 DESC
-            """)
-            for sr in srows or []:
-                srl = {k.lower(): v for k, v in sr.items()} if isinstance(sr, dict) else {}
-                telemetry["skipped_supernodes"].append(
-                    {
-                        "identifier_type": str(srl.get("id_type") or ""),
-                        "skipped_groups": int(srl.get("skipped_groups") or 0),
-                        "max_group_size_seen": int(srl.get("max_group_size_seen") or 0),
-                    }
-                )
-    except Exception:
-        pass
-
-    return telemetry
+    """Retrieve immutable owned preview evidence; never inspect latest shared tables."""
+    from .ai_config import draft_hash
+    from .ai_review import AIReviewService
+    if not run_id:
+        raise ValueError("A run_id from an isolated preview is required; run a new preview.")
+    return AIReviewService(adapter, owner).get(run_id, draft_hash(draft_config), lens)["telemetry"]
 
 
 def critique_dry_run_with_ai(
-    adapter: Any,
-    draft_config: Dict[str, Any],
-    dry_run_summary: Optional[Dict[str, Any]] = None,
-    warnings: Optional[List[str]] = None,
-    client: Optional[LLMClient] = None,
+    adapter: Any, draft_config: Dict[str, Any], dry_run_summary=None, warnings=None,
+    client: Optional[LLMClient] = None, *, run_id: Optional[str] = None,
+    owner: str = "cli", lens: str = "default",
 ) -> Dict[str, Any]:
-    """
-    Analyze zero-PII Dry Run graph telemetry and produce a Graph Health Scorecard
-    with concrete, one-click draft patches (plus optional LLM narrative synthesis).
-    """
-    client = client or LLMClient()
-    telemetry = collect_dry_run_telemetry(
-        adapter, draft_config, dry_run_summary=dry_run_summary, warnings=warnings
-    )
-
-    findings: List[Dict[str, Any]] = []
-    severity_score = 0
-
-    mega_cnt = telemetry["size_buckets"].get("100_plus", 0)
-    if mega_cnt > 0 or telemetry["max_cluster_size"] > 100:
-        severity_score += 3
-        culprits = telemetry.get("mega_cluster_culprits") or []
-        top_culprit = culprits[0] if culprits else None
-        culprit_summary = (
-            " Top connecting identifier(s): "
-            + ", ".join(f"'{c['identifier_type']}' ({c['edge_count']:,} edges)" for c in culprits[:3])
-            + "."
-            if culprits
-            else ""
-        )
-        # Prefer a direct one-click patch to remove the top culprit rule if it's in draft_config
-        configured_rule_types = {
-            str(mk).strip().lower()
-            for r in (draft_config.get("rules") or [])
-            for mk in (r.get("match_keys") or ([r["match_key"]] if r.get("match_key") else []))
-        }
-        mega_patch = None
-        if top_culprit and top_culprit["identifier_type"] in configured_rule_types:
-            cid = top_culprit["identifier_type"]
-            mega_patch = {
-                "action": "remove_rule",
-                "label": f"Remove '{cid}' rule from draft",
-                "target": cid,
-                "value": cid,
-            }
-        elif not draft_config.get("use_default_exclusions"):
-            mega_patch = {
-                "action": "enable_default_exclusions",
-                "label": "Enable Default Placeholder Exclusions",
-                "target": "use_default_exclusions",
-                "value": True,
-            }
-        findings.append(
-            {
-                "severity": "high",
-                "title": f"Large cluster risk detected (max size {telemetry['max_cluster_size']:,})",
-                "detail": (
-                    f"{mega_cnt} cluster(s) exceed 100 entities. This typically indicates a shared/placeholder "
-                    f"identifier, a non-person dimension key (e.g. product/store ID), or a high-volume event table inflating clusters."
-                    f"{culprit_summary}"
-                ),
-                "metric": (
-                    f"max_cluster={telemetry['max_cluster_size']:,} · culprit={top_culprit['identifier_type']}"
-                    if top_culprit
-                    else f"max_cluster={telemetry['max_cluster_size']:,}"
-                ),
-                "patch": mega_patch,
-            }
-        )
-
-    for sn in telemetry["skipped_supernodes"]:
-        severity_score += 1
-        id_type = sn["identifier_type"]
-        findings.append(
-            {
-                "severity": "medium",
-                "title": f"Supernode cap triggered on '{id_type}' ({sn['skipped_groups']} skipped group(s))",
-                "detail": (
-                    f"Up to {sn['max_group_size_seen']:,} entities shared a single '{id_type}' value and were skipped "
-                    f"by max_group_size. Consider enabling default exclusions or tightening max_group_size."
-                ),
-                "metric": f"{sn['skipped_groups']} skipped · max {sn['max_group_size_seen']:,}",
-                "patch": (
-                    {
-                        "action": "enable_default_exclusions",
-                        "label": "Enable Default Exclusions",
-                        "target": "use_default_exclusions",
-                        "value": True,
-                    }
-                    if not draft_config.get("use_default_exclusions")
-                    else None
-                ),
-            }
-        )
-
-    for zr in telemetry["zero_edge_rules"]:
-        severity_score += 1
-        findings.append(
-            {
-                "severity": "medium",
-                "title": f"Rule '{zr['identifier_type']}' produced 0 edges",
-                "detail": (
-                    f"Identifier '{zr['identifier_type']}' formed no edges in the dry run—either it is only mapped "
-                    f"on one source table or values do not overlap across sources."
-                ),
-                "metric": "0 edges",
-                "patch": {
-                    "action": "remove_rule",
-                    "label": f"Remove unused '{zr['identifier_type']}' rule",
-                    "target": zr["identifier_type"],
-                    "value": zr["rule_id"],
-                },
-            }
-        )
-
-    source_ids_in_cfg = {str(s.get("id") or ""): s for s in (draft_config.get("sources") or [])}
-    for src_stat in telemetry["source_singletons"]:
-        sid = src_stat["source_id"]
-        if src_stat["singleton_entities"] >= 25 and src_stat["singleton_pct"] >= 50.0 and len(source_ids_in_cfg) > 1:
-            severity_score += 1
-            findings.append(
-                {
-                    "severity": "medium",
-                    "title": f"Source '{sid}' generated {src_stat['singleton_entities']:,} singletons ({src_stat['singleton_pct']}%)",
-                    "detail": (
-                        f"Over half of '{sid}' entities did not link to any other record—often caused by "
-                        f"anonymous event/session rows or a missing cross-table join key."
-                    ),
-                    "metric": f"{src_stat['singleton_pct']}% singletons",
-                    "patch": (
-                        {
-                            "action": "remove_source",
-                            "label": f"Exclude '{sid}' from draft",
-                            "target": sid,
-                            "value": source_ids_in_cfg[sid].get("table") if sid in source_ids_in_cfg else sid,
-                        }
-                        if sid in source_ids_in_cfg
-                        else None
-                    ),
-                }
-            )
-
-    for fr in draft_config.get("fuzzy_rules") or []:
-        thr = float(fr.get("threshold") or 0.85)
-        if thr < 0.88:
-            severity_score += 1
-            findings.append(
-                {
-                    "severity": "info",
-                    "title": f"Fuzzy rule '{fr.get('id')}' has a permissive threshold ({thr})",
-                    "detail": "Thresholds below 0.88 can introduce false-positive merges on short names; raising to 0.90 improves precision.",
-                    "metric": f"threshold={thr}",
-                    "patch": {
-                        "action": "raise_fuzzy_threshold",
-                        "label": f"Raise '{fr.get('id')}' threshold to 0.90",
-                        "target": str(fr.get("id") or ""),
-                        "value": 0.90,
-                    },
-                }
-            )
-
-    health = (
-        "over_merged_risk"
-        if severity_score >= 3
-        else ("needs_tuning" if findings else "healthy")
-    )
-    headline = (
-        f"Dry run looks healthy: {telemetry['total_entities']:,} entities resolved into "
-        f"{telemetry['total_clusters']:,} clusters (max size {telemetry['max_cluster_size']:,}, "
-        f"{telemetry['singleton_pct']}% singletons)."
-        if not findings
-        else f"Found {len(findings)} tuning opportunity(ies) across {telemetry['total_entities']:,} entities "
-        f"and {telemetry['total_clusters']:,} proposed clusters."
-    )
-
-    provider_used = "deterministic"
-    model_used = "graph_analyzer"
-    if client.config.is_enabled:
-        try:
-            prompt_payload = {
-                "health": health,
-                "telemetry": {
-                    "total_entities": telemetry["total_entities"],
-                    "total_clusters": telemetry["total_clusters"],
-                    "singleton_pct": telemetry["singleton_pct"],
-                    "max_cluster_size": telemetry["max_cluster_size"],
-                    "size_buckets": telemetry["size_buckets"],
-                    "edges_by_type": telemetry["edges_by_type"],
-                    "mega_cluster_culprits": telemetry["mega_cluster_culprits"],
-                    "zero_edge_rules": telemetry["zero_edge_rules"],
-                    "skipped_supernodes": telemetry["skipped_supernodes"],
-                    "top_singleton_sources": telemetry["source_singletons"][:6],
-                },
-                "findings_count": len(findings),
-                "finding_titles": [f["title"] for f in findings[:6]],
-            }
-            llm_summary = client.chat(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an Identity Resolution expert reviewing zero-PII Dry Run graph telemetry. "
-                            "Write a crisp 1-2 sentence executive diagnosis summarizing graph health and the #1 recommended action. "
-                            "Cite exact numbers from the telemetry. Plain text only."
-                        ),
-                    },
-                    {"role": "user", "content": json.dumps(prompt_payload, indent=2)},
-                ],
-                temperature=0.1,
-            ).strip()
-            if llm_summary:
-                headline = llm_summary
-                provider_used = client.config.provider
-                model_used = client.config.resolved_model()
-        except Exception:
-            pass
-
-    return _sanitize_json(
-        {
-            "health": health,
-            "headline": headline,
-            "provider": provider_used,
-            "model": model_used,
-            "pii_masked": True,
-            "telemetry": telemetry,
-            "findings": findings,
-        }
-    )
+    """Review one immutable draft/run/view. Unbound legacy requests are rejected."""
+    from .ai_config import draft_hash
+    from .ai_review import AIReviewService
+    if not run_id:
+        raise ValueError("A run_id from an isolated preview is required; run a new preview.")
+    return AIReviewService(adapter, owner).explain(run_id, draft_hash(draft_config), lens, client, draft_config)
 
 
 def get_run_runtime_trend(adapter: Any, days: int = 14) -> Dict[str, Any]:

@@ -13,6 +13,27 @@ from ..models import RunDetail, RunSummary, StageMetricInfo
 router = APIRouter(tags=["runs"])
 
 
+def _optional_metric(adapter, table, column, fallback="NULL"):
+    names = {col["name"].lower() for col in adapter.get_table_columns(table)}
+    return column if column in names else fallback
+
+
+def _duration(adapter, table):
+    precise = _optional_metric(adapter, table, "duration_seconds_precise")
+    return f"COALESCE({precise}, duration_seconds)"
+
+
+def _run_metrics(adapter):
+    names = {col["name"].lower() for col in adapter.get_table_columns("idr_out.run_history")}
+    precise = "duration_seconds_precise" if "duration_seconds_precise" in names else "NULL"
+    changed = "clusters_changed" if "clusters_changed" in names else "NULL"
+    sources = "source_tables_processed" if "source_tables_processed" in names else "NULL"
+    return (
+        f"COALESCE({precise}, duration_seconds) AS duration_seconds, "
+        f"{changed} AS clusters_changed, {sources} AS source_tables_processed"
+    )
+
+
 @router.get("/api/runs", response_model=List[RunSummary])
 def get_runs(limit: int = Query(20, le=100), adapter=Depends(get_adapter)):
     """Get recent run history."""
@@ -29,7 +50,7 @@ def get_runs(limit: int = Query(20, le=100), adapter=Depends(get_adapter)):
                 run_mode,
                 status,
                 CAST(started_at AS {str_type}) as started_at,
-                duration_seconds,
+                {_run_metrics(adapter)},
                 entities_processed,
                 edges_created,
                 clusters_impacted
@@ -48,6 +69,9 @@ def get_runs(limit: int = Query(20, le=100), adapter=Depends(get_adapter)):
                 entities_processed=(row.get("entities_processed") or 0),
                 edges_created=(row.get("edges_created") or 0),
                 clusters_impacted=(row.get("clusters_impacted") or 0),
+                clusters_resolved=(row.get("clusters_impacted") or 0),
+                clusters_changed=row.get("clusters_changed"),
+                source_tables_processed=row.get("source_tables_processed"),
             )
             for row in rows
         ]
@@ -71,7 +95,7 @@ def get_run_detail(run_id: str, adapter=Depends(get_adapter)):
             run_mode,
             status,
             CAST(started_at AS {str_type}) as started_at,
-            duration_seconds,
+            {_run_metrics(adapter)},
             entities_processed,
             edges_created,
             clusters_impacted,
@@ -112,7 +136,7 @@ def get_run_detail(run_id: str, adapter=Depends(get_adapter)):
                     stage_order,
                     CAST(started_at AS {str_type}) as started_at,
                     CAST(ended_at AS {str_type}) as ended_at,
-                    duration_seconds,
+                    {_duration(adapter, "idr_out.stage_metrics")} AS duration_seconds,
                     rows_out
                 FROM idr_out.stage_metrics
                 WHERE run_id = ?
@@ -126,13 +150,21 @@ def get_run_detail(run_id: str, adapter=Depends(get_adapter)):
                     stage_order=int(s.get("stage_order") or 0),
                     started_at=s.get("started_at"),
                     ended_at=s.get("ended_at"),
-                    duration_seconds=int(s.get("duration_seconds") or 0),
+                    duration_seconds=float(s.get("duration_seconds") or 0),
                     rows_out=int(s.get("rows_out") or 0),
                 )
                 for s in stage_rows
             ]
     except Exception:
         pass
+
+    activation_delta_summary = {}
+    try:
+        from idr_core.activation_delta import summarize_activation_delta
+
+        activation_delta_summary = summarize_activation_delta(adapter, run_id=run_id)
+    except Exception:
+        activation_delta_summary = {}
 
     return RunDetail(
         run_id=row["run_id"],
@@ -143,8 +175,35 @@ def get_run_detail(run_id: str, adapter=Depends(get_adapter)):
         entities_processed=row.get("entities_processed") or 0,
         edges_created=row.get("edges_created") or 0,
         clusters_impacted=row.get("clusters_impacted") or 0,
+        clusters_resolved=row.get("clusters_impacted") or 0,
+        clusters_changed=row.get("clusters_changed"),
+        source_tables_processed=row.get("source_tables_processed"),
         lp_iterations=row.get("lp_iterations") or 0,
         error_message=row.get("error_message"),
         warnings=warnings_list,
         stages=stages,
+        activation_delta_summary=activation_delta_summary or None,
     )
+
+
+@router.get("/api/runs/{run_id}/activation-delta")
+def get_run_activation_delta(
+    run_id: str,
+    change_type: str = Query("ALL"),
+    lens_id: str = Query("default"),
+    limit: int = Query(50, ge=1, le=500),
+    adapter=Depends(get_adapter),
+):
+    """Get activation changelog summary and sample rows for a specific run_id."""
+    from idr_core.activation_delta import query_activation_delta
+
+    try:
+        return query_activation_delta(
+            adapter,
+            run_id=run_id,
+            change_type=change_type,
+            lens_id=lens_id,
+            limit=limit,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e

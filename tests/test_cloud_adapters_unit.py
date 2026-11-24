@@ -350,7 +350,7 @@ class TestFourDialectStageSQL:
             [{"attribute_name": "first_name"}],
             [{"identifier_type": "email"}],
         ]
-        adapter.query_one.side_effect = [5, 0, 2]
+        adapter.query_one.side_effect = [5, 0, 0, 2]
         clusters = graph.run_fuzzy_matching(max_iters=5)
         assert clusters == 2
 

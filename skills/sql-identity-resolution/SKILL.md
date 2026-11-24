@@ -8,7 +8,7 @@ description: Warehouse-native deterministic identity resolution and Customer 360
 Use this skill whenever the user wants to:
 1. **Discover & Configure Identity Resolution:** Profile warehouse tables (`DuckDB`, `Snowflake`, `BigQuery`, `Databricks`) to identify entity keys, matchable identifiers (`EMAIL`, `PHONE`, `LOYALTY_ID`, etc.), and survivorship rules.
 2. **Simulate & Prevent Supernodes:** Preview the impact of matching rules (`max_group_size` guardrails, skipped identifier groups, dry-run cluster movement) before touching production tables.
-3. **Export to Governed `dbt` Production (`dbt_idr`):** Compile discovered or active YAML/metadata configurations directly into the 6 standard `dbt_idr` seed CSVs.
+3. **Export to Governed `dbt` Production (`dbt_idr`):** Compile discovered or active YAML/metadata configurations directly into the 7 standard `dbt_idr` seed CSVs.
 4. **Resolve Customer 360 Context (Agent Grounding):** Look up any customer identifier (`email`, `phone`, `entity_key`) to retrieve the deterministic Golden Profile, linked cross-system accounts, and Spanning Tree confidence score before taking downstream actions.
 
 ---
@@ -45,6 +45,7 @@ Choose the target runtime:
   - `idr_rules.csv`
   - `idr_exclusions.csv`
   - `idr_survivorship_rules.csv`
+  - `idr_overrides.csv`
 
 ### Step 5: Deterministic Customer 360 Grounding (`resolve_customer_360`)
 Before executing customer-facing actions (support tickets, billing adjustments, CRM merges):
@@ -151,7 +152,7 @@ overrides:                           # Optional manual stewardship overrides
 ### Agentic Safety & Triage Tools (MCP)
 - **Remote MCP**: FastAPI mounts Streamable HTTP at `POST /mcp` (shared OAuth/SSO & `ConnectionManager`).
 - **Two-Step Guardrails**: `forget_customer_identity` defaults to `dry_run=True` and issues a 5-minute `confirmation_token` + `blast_radius_summary` required for `dry_run=False`. `manage_identity_override` also supports `dry_run=True` preview tokens.
-- **Triage Loop**: `get_triage_queue(max_confidence=0.45)` + `submit_evaluation_label(sample_id, label, rationale)`.
+- **Triage Loop & 3-Tier Cascade Judge**: `get_triage_queue(max_confidence=0.75)` (SQL Tier 0, $0) + `run_tiered_triage(provider="warehouse", escalate_model="claude-3-5-sonnet-latest")` (Tier 1 -> Tier 2 cascade with structural disagreement calibration) + `submit_evaluation_label(sample_id, label, rationale)`.
 - **Bounded Payloads**: `get_cluster` and `explain_cluster` cap members/edges (`max_entities`, `max_edges`) and return `truncated: true` when exceeded.
 - **Resources & Prompts**: `idr://spec/config-schema`, `idr://spec/cli-commands`, `idr://spec/canonicalizers`, and prompt `model_config_from_tables`.
 

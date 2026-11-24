@@ -19,10 +19,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+Tuple_Provider_Model = Tuple[str, str]
+
+_UUID_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
 _EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-])([A-Za-z0-9._%+-]*)(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
-_PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})(?!\d)")
+_PHONE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:\+?1[-.\s]?)?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})(?![A-Za-z0-9])"
+)
 _SSN_RE = re.compile(r"\b\d{3}-\d{2}-(\d{4})\b")
 
 _SENSITIVE_KEY_TOKENS = (
@@ -48,14 +55,72 @@ _SENSITIVE_KEY_TOKENS = (
 
 
 def is_local_endpoint(provider: str, base_url: Optional[str] = None) -> bool:
-    """Return True if the configured LLM endpoint runs locally (e.g. Ollama on localhost)."""
+    """Return True if the configured LLM endpoint runs locally or inside the warehouse perimeter."""
     prov = (provider or "").strip().lower()
+    if prov == "warehouse":
+        return True
     url = (base_url or "").strip()
     if not url:
         return prov == "ollama"
     parsed = urllib.parse.urlparse(url if "://" in url else f"http://{url}")
     host = (parsed.hostname or "").lower()
     return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal")
+
+
+_KNOWN_PROVIDER_PREFIXES = {
+    "warehouse",
+    "ollama",
+    "openai",
+    "anthropic",
+    "gemini",
+    "openai_compatible",
+}
+
+
+def infer_provider_from_model(
+    model_name: Optional[str], explicit_provider: Optional[str] = None
+) -> Tuple_Provider_Model:
+    """Resolve (provider, clean_model) from an optional provider and model string (supports 'provider:model')."""
+    raw_model = (model_name or "").strip()
+    prov = (explicit_provider or "").strip().lower()
+    if ":" in raw_model and not prov:
+        maybe_prov, rest = raw_model.split(":", 1)
+        if maybe_prov.strip().lower() in _KNOWN_PROVIDER_PREFIXES and rest.strip():
+            return maybe_prov.strip().lower(), rest.strip()
+    if prov:
+        return prov, raw_model
+    lower = raw_model.lower()
+    if lower.startswith("claude-"):
+        return "anthropic", raw_model
+    if lower.startswith(("gpt-", "o1", "o3", "o4", "chatgpt-")):
+        return "openai", raw_model
+    if lower.startswith("gemini-"):
+        return "gemini", raw_model
+    return "", raw_model
+
+
+def api_key_for_provider(provider: str) -> Optional[str]:
+    """Look up the environment API key matching a specific LLM provider."""
+    prov = (provider or "").strip().lower()
+    env_prov = os.environ.get("IDR_LLM_PROVIDER", "").strip().lower()
+    generic_key = os.environ.get("IDR_LLM_API_KEY", "").strip() or None
+    if prov == "openai":
+        return os.environ.get("OPENAI_API_KEY", "").strip() or (
+            generic_key if env_prov in ("", "openai") else None
+        )
+    if prov == "anthropic":
+        return os.environ.get("ANTHROPIC_API_KEY", "").strip() or (
+            generic_key if env_prov in ("", "anthropic") else None
+        )
+    if prov == "gemini":
+        return (
+            os.environ.get("GEMINI_API_KEY", "").strip()
+            or os.environ.get("GOOGLE_API_KEY", "").strip()
+            or (generic_key if env_prov in ("", "gemini") else None)
+        )
+    if prov == "openai_compatible":
+        return generic_key or os.environ.get("OPENAI_API_KEY", "").strip() or None
+    return generic_key if env_prov == prov else None
 
 
 def mask_pii_text(text: str) -> str:
@@ -70,9 +135,19 @@ def mask_pii_text(text: str) -> str:
         dom_tail = f".{dom_parts[1]}" if len(dom_parts) > 1 else ""
         return f"{first}***@{dom_head}{dom_tail}"
 
-    masked = _EMAIL_RE.sub(_mask_email_match, text)
+    uuids: List[str] = []
+
+    def _stash_uuid(m: re.Match[str]) -> str:
+        idx = len(uuids)
+        uuids.append(m.group(0))
+        return f"__IDR_UUID_{idx}__"
+
+    masked = _UUID_RE.sub(_stash_uuid, text)
+    masked = _EMAIL_RE.sub(_mask_email_match, masked)
     masked = _SSN_RE.sub(r"***-**-\1", masked)
     masked = _PHONE_RE.sub(r"***-***-\3", masked)
+    for idx, tok in enumerate(uuids):
+        masked = masked.replace(f"__IDR_UUID_{idx}__", tok)
     return masked
 
 
@@ -164,10 +239,19 @@ class LLMConfig:
             return "https://generativelanguage.googleapis.com/v1beta"
         return ""
 
-    def resolved_model(self) -> str:
+    def resolved_model(self, dialect: Optional[str] = None) -> str:
         if self.model and self.model.strip():
             return self.model.strip()
         prov = self.provider.strip().lower()
+        if prov == "warehouse":
+            d = (dialect or "duckdb").strip().lower()
+            wh_defaults = {
+                "snowflake": "llama3.1-8b",
+                "databricks": "databricks-meta-llama-3-1-8b-instruct",
+                "bigquery": "",
+                "duckdb": "llama3.2",
+            }
+            return wh_defaults.get(d, "llama3.2")
         defaults = {
             "ollama": "llama3.2",
             "openai": "gpt-4o-mini",
@@ -178,10 +262,38 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        provider = os.environ.get("IDR_LLM_PROVIDER", "disabled").strip().lower()
+        raw_provider = os.environ.get("IDR_LLM_PROVIDER", "").strip().lower()
         model = os.environ.get("IDR_LLM_MODEL", "").strip()
         base_url = os.environ.get("IDR_LLM_BASE_URL", "").strip() or None
         api_key = os.environ.get("IDR_LLM_API_KEY", "").strip() or None
+
+        openai_key = os.environ.get("OPENAI_API_KEY", "").strip() or None
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip() or None
+        gemini_key = (
+            os.environ.get("GEMINI_API_KEY", "").strip()
+            or os.environ.get("GOOGLE_API_KEY", "").strip()
+            or None
+        )
+
+        if raw_provider:
+            provider = raw_provider
+        elif openai_key:
+            provider = "openai"
+        elif anthropic_key:
+            provider = "anthropic"
+        elif gemini_key:
+            provider = "gemini"
+        else:
+            provider = "disabled"
+
+        if not api_key:
+            if provider == "openai":
+                api_key = openai_key
+            elif provider == "anthropic":
+                api_key = anthropic_key
+            elif provider == "gemini":
+                api_key = gemini_key
+
         raw_mask = os.environ.get("IDR_LLM_MASK_PII", "").strip().lower()
         mask_pii: Optional[bool] = None
         if raw_mask in ("1", "true", "yes"):
@@ -210,10 +322,11 @@ class LLMConfig:
 
 
 class LLMClient:
-    """Thin multi-provider chat client with automatic PII masking."""
+    """Thin multi-provider chat client with automatic PII masking and warehouse-native AI."""
 
-    def __init__(self, config: Optional[LLMConfig] = None):
+    def __init__(self, config: Optional[LLMConfig] = None, adapter: Any = None):
         self.config = config or LLMConfig.from_env()
+        self.adapter = adapter
 
     def chat(
         self,
@@ -223,11 +336,12 @@ class LLMClient:
     ) -> str:
         if not self.config.is_enabled:
             raise RuntimeError(
-                "AI assistant is disabled. Set IDR_LLM_PROVIDER (e.g. 'ollama') or configure in UI Settings."
+                "AI assistant is disabled. Set IDR_LLM_PROVIDER (e.g. 'ollama', 'warehouse', or 'openai') or configure in UI Settings."
             )
 
         prov = self.config.provider.strip().lower()
-        model = self.config.resolved_model()
+        dialect = getattr(self.adapter, "dialect", "duckdb") if self.adapter is not None else "duckdb"
+        model = self.config.resolved_model(dialect=dialect)
         base_url = self.config.resolved_base_url()
 
         safe_messages = messages
@@ -236,6 +350,8 @@ class LLMClient:
                 {"role": m["role"], "content": mask_pii_text(m["content"])} for m in messages
             ]
 
+        if prov == "warehouse":
+            return self._call_warehouse(model, safe_messages, temperature, json_mode)
         if prov in ("ollama", "openai", "openai_compatible"):
             return self._call_openai_compatible(base_url, model, safe_messages, temperature, json_mode)
         if prov == "anthropic":
@@ -243,6 +359,63 @@ class LLMClient:
         if prov == "gemini":
             return self._call_gemini(base_url, model, safe_messages, temperature, json_mode)
         raise ValueError(f"Unsupported LLM provider: '{self.config.provider}'")
+
+    def _call_warehouse(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        json_mode: bool,
+    ) -> str:
+        """Invoke warehouse-native SQL AI functions (Snowflake Cortex, Databricks ai_query, BigQuery ML, or DuckDB -> local Ollama)."""
+        if self.adapter is None:
+            raise RuntimeError(
+                "Warehouse-native AI provider requires an active warehouse connection."
+            )
+        dialect = str(getattr(self.adapter, "dialect", "duckdb") or "duckdb").strip().lower()
+        if dialect == "duckdb":
+            ollama_url = self.config.base_url or "http://localhost:11434/v1"
+            return self._call_openai_compatible(
+                ollama_url.rstrip("/"), model or "llama3.2", messages, temperature, json_mode
+            )
+
+        prompt_parts = []
+        for msg in messages:
+            role = str(msg.get("role", "user")).upper()
+            content = str(msg.get("content", ""))
+            prompt_parts.append(f"{role}:\n{content}")
+        if json_mode:
+            prompt_parts.append("SYSTEM:\nReturn valid JSON only with no markdown fences.")
+        full_prompt = "\n\n".join(prompt_parts)
+        escaped_prompt = full_prompt.replace("'", "''")
+        escaped_model = (model or "").strip().replace("'", "''")
+
+        if dialect == "snowflake":
+            sql = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{escaped_model}', '{escaped_prompt}') AS response"
+        elif dialect == "databricks":
+            sql = f"SELECT ai_query('{escaped_model}', '{escaped_prompt}') AS response"
+        elif dialect == "bigquery":
+            if not escaped_model:
+                raise RuntimeError(
+                    "BigQuery warehouse-native AI requires a remote model FQN in 'model' "
+                    "(e.g. `my_project.my_dataset.gemini_flash`)."
+                )
+            safe_bq_model = escaped_model.strip("`")
+            sql = (
+                f"SELECT ml_generate_text_llm_result AS response "
+                f"FROM ML.GENERATE_TEXT(MODEL `{safe_bq_model}`, "
+                f"(SELECT '{escaped_prompt}' AS prompt), "
+                f"STRUCT({float(temperature)} AS temperature, TRUE AS flatten_json_output))"
+            )
+        else:
+            raise RuntimeError(f"Warehouse-native AI is not supported for dialect '{dialect}'.")
+
+        rows = self.adapter.query(sql)
+        if not rows:
+            return ""
+        first = rows[0]
+        val = first.get("response") if isinstance(first, dict) else first[0]
+        return str(val or "").strip()
 
     def _post_json(self, url: str, body: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
         payload = json.dumps(body).encode("utf-8")
@@ -395,7 +568,8 @@ class LLMClient:
             )
 
         prov = self.config.provider.strip().lower()
-        model = self.config.resolved_model()
+        dialect = getattr(self.adapter, "dialect", "duckdb") if self.adapter is not None else "duckdb"
+        model = self.config.resolved_model(dialect=dialect)
         base_url = self.config.resolved_base_url()
 
         safe_messages = messages
@@ -404,11 +578,21 @@ class LLMClient:
                 {"role": m["role"], "content": mask_pii_text(m["content"])} for m in messages
             ]
 
-        if prov == "ollama":
+        if prov == "warehouse" and str(dialect).strip().lower() != "duckdb":
+            schema_instruction = (
+                "Return a single valid JSON object strictly conforming to this JSON Schema "
+                "(no markdown prose or explanations):\n" + json.dumps(json_schema)
+            )
+            wh_messages = list(safe_messages) + [{"role": "system", "content": schema_instruction}]
+            raw = self._call_warehouse(model, wh_messages, temperature, json_mode=True)
+            return self._extract_json_object(raw)
+
+        if prov == "ollama" or (prov == "warehouse" and str(dialect).strip().lower() == "duckdb"):
             num_ctx = int(os.environ.get("IDR_OLLAMA_NUM_CTX", "16384") or "16384")
-            root = _ollama_root_url(base_url)
+            ollama_base = base_url or "http://localhost:11434/v1"
+            root = _ollama_root_url(ollama_base)
             body = {
-                "model": model,
+                "model": model or "llama3.2",
                 "messages": safe_messages,
                 "stream": False,
                 "format": json_schema,
@@ -426,7 +610,9 @@ class LLMClient:
                 # Only fall back to OpenAI-compatible endpoint if server rejects /api/chat schema (not on timeouts)
                 err_str = str(exc)
                 if any(code in err_str for code in ("HTTP 400", "HTTP 404", "HTTP 405", "HTTP 422")):
-                    raw = self._call_openai_compatible(base_url, model, safe_messages, temperature, json_mode=True)
+                    raw = self._call_openai_compatible(
+                        ollama_base, model or "llama3.2", safe_messages, temperature, json_mode=True
+                    )
                     return self._extract_json_object(raw)
                 raise
 

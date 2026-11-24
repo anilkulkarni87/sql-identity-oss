@@ -7,6 +7,7 @@ and outputs a production-ready declarative YAML manifest.
 """
 
 from typing import Any, Dict, List, Optional
+
 import yaml
 
 from idr_core.profiler import IDRDataProfiler, is_system_table
@@ -116,7 +117,7 @@ class AutoBootstrapper:
                     "AND table_type = 'BASE TABLE'"
                 )
                 rows = self.adapter.query(sql)
-                return [r["fqn"] for r in rows if isinstance(r, dict)]
+                return [r["fqn"] for r in rows if isinstance(r, dict) and not is_system_table(r["fqn"])]
         except Exception:
             pass
 

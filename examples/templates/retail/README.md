@@ -24,7 +24,8 @@ Typical retail sources:
 
 ```sql
 -- Register your sources
-INSERT INTO idr_meta.source_table VALUES
+INSERT INTO idr_meta.source_table
+(table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active) VALUES
 ('ecommerce', 'sales.ecommerce_customers', 'PERSON', 'customer_id', 'updated_at', 0, TRUE),
 ('store_pos', 'sales.store_transactions', 'PERSON', 'transaction_id', 'transaction_date', 0, TRUE),
 ('loyalty', 'marketing.loyalty_members', 'PERSON', 'member_id', 'enrollment_date', 0, TRUE),
@@ -36,41 +37,42 @@ INSERT INTO idr_meta.source_table VALUES
 
 ```sql
 -- Configure identifier rules
-INSERT INTO idr_meta.rule VALUES
-('email_rule', 'EMAIL', 1, TRUE, 50000),
-('phone_rule', 'PHONE', 2, TRUE, 10000),
-('loyalty_rule', 'LOYALTY_ID', 3, TRUE, 100),
-('address_rule', 'ADDRESS', 4, TRUE, 5000);
+INSERT INTO idr_meta.rule
+(rule_id, identifier_type, canonicalize, max_group_size, priority, is_active) VALUES
+('email_rule', 'EMAIL', 'EMAIL_STANDARD', 50000, 1, TRUE),
+('phone_rule', 'PHONE', 'PHONE_US_10', 10000, 2, TRUE),
+('loyalty_rule', 'LOYALTY_ID', 'UPPERCASE', 100, 3, TRUE),
+('address_rule', 'ADDRESS', 'UPPERCASE', 5000, 4, TRUE);
 ```
 
 ## Identifier Mappings
 
 ```sql
 -- E-commerce
-INSERT INTO idr_meta.identifier_mapping VALUES
-('ecommerce', 'EMAIL', 'email', TRUE),
-('ecommerce', 'PHONE', 'phone', TRUE),
-('ecommerce', 'LOYALTY_ID', 'loyalty_number', TRUE),
-('ecommerce', 'ADDRESS', 'shipping_address', TRUE);
+INSERT INTO idr_meta.identifier_mapping (table_id, identifier_type, identifier_value_expr, is_hashed) VALUES
+('ecommerce', 'EMAIL', 'email', FALSE),
+('ecommerce', 'PHONE', 'phone', FALSE),
+('ecommerce', 'LOYALTY_ID', 'loyalty_number', FALSE),
+('ecommerce', 'ADDRESS', 'shipping_address', FALSE);
 
 -- Store POS
-INSERT INTO idr_meta.identifier_mapping VALUES
-('store_pos', 'EMAIL', 'receipt_email', TRUE),
-('store_pos', 'PHONE', 'customer_phone', TRUE),
-('store_pos', 'LOYALTY_ID', 'loyalty_scan', TRUE);
+INSERT INTO idr_meta.identifier_mapping (table_id, identifier_type, identifier_value_expr, is_hashed) VALUES
+('store_pos', 'EMAIL', 'receipt_email', FALSE),
+('store_pos', 'PHONE', 'customer_phone', FALSE),
+('store_pos', 'LOYALTY_ID', 'loyalty_scan', FALSE);
 
 -- Loyalty
-INSERT INTO idr_meta.identifier_mapping VALUES
-('loyalty', 'EMAIL', 'email_address', TRUE),
-('loyalty', 'PHONE', 'mobile_phone', TRUE),
-('loyalty', 'LOYALTY_ID', 'member_id', FALSE),  -- Already normalized
-('loyalty', 'ADDRESS', 'mailing_address', TRUE);
+INSERT INTO idr_meta.identifier_mapping (table_id, identifier_type, identifier_value_expr, is_hashed) VALUES
+('loyalty', 'EMAIL', 'email_address', FALSE),
+('loyalty', 'PHONE', 'mobile_phone', FALSE),
+('loyalty', 'LOYALTY_ID', 'member_id', FALSE),
+('loyalty', 'ADDRESS', 'mailing_address', FALSE);
 
 -- Mobile App
-INSERT INTO idr_meta.identifier_mapping VALUES
-('mobile_app', 'EMAIL', 'registered_email', TRUE),
-('mobile_app', 'PHONE', 'device_phone', TRUE),
-('mobile_app', 'LOYALTY_ID', 'linked_loyalty', TRUE);
+INSERT INTO idr_meta.identifier_mapping (table_id, identifier_type, identifier_value_expr, is_hashed) VALUES
+('mobile_app', 'EMAIL', 'registered_email', FALSE),
+('mobile_app', 'PHONE', 'device_phone', FALSE),
+('mobile_app', 'LOYALTY_ID', 'linked_loyalty', FALSE);
 ```
 
 ## Exclusions
@@ -79,12 +81,12 @@ Common retail exclusions:
 
 ```sql
 -- Exclude test/generic values
-INSERT INTO idr_meta.identifier_exclusion VALUES
-('EMAIL', 'test@%', TRUE, 'Test emails', CURRENT_TIMESTAMP),
-('EMAIL', '%@example.com', TRUE, 'Example domain', CURRENT_TIMESTAMP),
-('EMAIL', 'noreply@%', TRUE, 'No-reply emails', CURRENT_TIMESTAMP),
-('PHONE', '0000000000', FALSE, 'Placeholder phone', CURRENT_TIMESTAMP),
-('PHONE', '1111111111', FALSE, 'Placeholder phone', CURRENT_TIMESTAMP);
+INSERT INTO idr_meta.identifier_exclusion (identifier_type, identifier_value_pattern, match_type, reason) VALUES
+('EMAIL', 'test@%', 'LIKE', 'Test emails'),
+('EMAIL', '%@example.com', 'LIKE', 'Example domain'),
+('EMAIL', 'noreply@%', 'LIKE', 'No-reply emails'),
+('PHONE', '0000000000', 'EXACT', 'Placeholder phone'),
+('PHONE', '1111111111', 'EXACT', 'Placeholder phone');
 ```
 
 ## Expected Results

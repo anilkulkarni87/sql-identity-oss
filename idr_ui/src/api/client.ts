@@ -1,3 +1,5 @@
+import type { AIConfigContext, AIReview, IDRConfig, ReviewPatch, EvaluationOptions, ProfileValidation, ProfilePreviewResult, ActivationDeltaConfig, ActivationDeltaRow } from "../types";
+
 /**
  * API Client for IDR Backend
  */
@@ -81,6 +83,43 @@ async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T>
     return JSON.parse(text) as T
 }
 
+async function readAIStream<T>(response: Response, onProgress?: (event: Record<string, unknown>) => void): Promise<T> {
+    if (!response.body) throw new APIError(502, 'Progress stream unavailable; retry explicitly.')
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let result: T | undefined
+    const consume = (frame: string) => {
+        const lines = frame.split('\n')
+        const kind = lines.find(line => line.startsWith('event:'))?.slice(6).trim()
+        const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('\n')
+        if (!data) return
+        const value = JSON.parse(data)
+        if (kind === 'progress') onProgress?.(value)
+        if (kind === 'result') result = value as T
+        if (kind === 'error') throw new APIError(422, value.detail || 'AI operation failed')
+    }
+    try {
+        while (true) {
+            const {value, done} = await reader.read()
+            buffer += done ? decoder.decode() : decoder.decode(value, {stream:true})
+            const frames = buffer.split(/\r?\n\r?\n/)
+            buffer = frames.pop() || ''
+            frames.forEach(consume)
+            if (done) { if (buffer.trim()) consume(buffer); break }
+        }
+        if (!result) throw new APIError(502, 'Stream ended before returning a result.')
+        return result
+    } finally { reader.releaseLock() }
+}
+
+export interface AIGenerationOptions {
+    mode: 'config' | 'rules';
+    current_config: IDRConfig;
+    context: AIConfigContext;
+    base_draft_hash?: string;
+}
+
 export const api = {
     connect: (payload: Record<string, string>) => fetchJson<{
         status: string
@@ -133,6 +172,12 @@ export const api = {
     }>>('/metrics/sources'),
 
     // Entity/Cluster Search
+    getTopClusters: (limit = 8) => fetchJson<Array<{
+        resolved_id: string
+        cluster_size: number
+        confidence_score: number | null
+    }>>(`/clusters?limit=${limit}`),
+
     searchEntities: (query: string) => fetchJson<Array<{
         resolved_id: string
         cluster_size: number
@@ -144,6 +189,19 @@ export const api = {
         super_cluster_id?: string | null
         cluster_size: number
         confidence_score: number | null
+        confidence_breakdown?: {
+            verdict: string
+            confidence_score: number | null
+            subject_count: number
+            child_count: number
+            subject_fanout: number
+            max_fanout: number
+            edge_diversity: number
+            edge_count: number
+            match_density?: number | null
+            has_fuzzy_bridge: boolean
+            reason: string
+        } | null
         entities: Array<{
             entity_key: string
             source_id: string
@@ -255,7 +313,22 @@ export const api = {
             duration_seconds?: number | null
             notes?: string | null
         }>
+        activation_delta_summary?: Record<string, number> | null
     }>(`/runs/${encodeURIComponent(runId)}`),
+
+    getRunActivationDelta: (
+        runId: string,
+        changeType = 'ALL',
+        lensId = 'default',
+        limit = 50
+    ) => fetchJson<{
+        run_id: string
+        lens_id: string
+        summary: Record<string, number>
+        rows: ActivationDeltaRow[]
+    }>(
+        `/runs/${encodeURIComponent(runId)}/activation-delta?change_type=${encodeURIComponent(changeType)}&lens_id=${encodeURIComponent(lensId)}&limit=${limit}`
+    ),
 
     // System Health
     getHealth: () => fetchJson<{
@@ -288,6 +361,7 @@ export const api = {
         rules?: Array<Record<string, unknown>>
         fuzzy_rules?: Array<Record<string, unknown>>
         survivorship?: Array<Record<string, unknown>>
+        activation_delta?: ActivationDeltaConfig
     }>('/setup/config'),
 
     setupConnect: (platform: string, params: Record<string, unknown>) => fetchJson<{
@@ -365,11 +439,15 @@ export const api = {
         max_cluster_delta_pct?: number
         lens?: string
         skip_lenses?: boolean
+        emit_activation_delta?: boolean
         config?: unknown
+        ground_truth?: EvaluationOptions | Record<string, never>
     }) => fetchJson<Record<string, unknown>>('/setup/run', {
         method: 'POST',
         body: JSON.stringify(payload),
     }),
+
+    previewProfiles: (payload: {config:IDRConfig; run_id?:string; draft_hash?:string; lens?:string; options:Record<string,unknown>}) => fetchJson<ProfileValidation | ProfilePreviewResult>('/setup/profile-preview', {method:'POST', body:JSON.stringify(payload)}),
 
     getRunProgress: () => fetchJson<{
         run_id?: string | null
@@ -463,19 +541,59 @@ export const api = {
         })
     }),
 
-    runAiTriage: (maxConfidence = 0.65, limit = 8) => fetchJson<{
+    runAiTriage: (
+        maxConfidence = 0.75,
+        limit = 8,
+        options?: {
+            escalateProvider?: string
+            escalateModel?: string
+            escalationThreshold?: number
+            minSubjectFanout?: number
+        }
+    ) => fetchJson<{
         status: string
         pii_masked: boolean
+        provider?: string
+        model?: string
+        escalate_provider?: string | null
+        escalate_model?: string | null
+        candidates_reviewed?: number
+        message?: string
+        cascade_summary?: {
+            total_multi_entity_clusters: number
+            tier0_auto_passed: number
+            tier0_flagged: number
+            tier1_reviewed: number
+            tier2_escalated: number
+            sql_filter_savings_pct: number
+            escalation_threshold: number
+        }
         proposals: Array<{
             resolved_id: string
             action: string
+            judge_confidence?: number
+            judge_tier?: 'tier1' | 'tier2'
+            escalated?: boolean
+            escalation_reason?: string
+            cluster_size?: number
+            confidence_score?: number | null
+            subject_count?: number | null
+            child_count?: number | null
+            subject_fanout?: number | null
             entity_key_a?: string
             entity_key_b?: string
             reason: string
         }>
     }>('/ai/triage', {
         method: 'POST',
-        body: JSON.stringify({ max_confidence: maxConfidence, limit })
+        body: JSON.stringify({
+            max_confidence: maxConfidence,
+            limit,
+            ...(options?.escalateProvider ? { escalate_provider: options.escalateProvider } : {}),
+            ...(options?.escalateModel ? { escalate_model: options.escalateModel } : {}),
+            ...(options?.escalationThreshold !== undefined ? { escalation_threshold: options.escalationThreshold } : {}),
+            ...(options?.minSubjectFanout !== undefined ? { min_subject_fanout: options.minSubjectFanout } : {}),
+        }),
     }),
 
     askAi: (question: string) => fetchJson<{
@@ -508,7 +626,13 @@ export const api = {
         body: JSON.stringify({ message, history })
     }),
 
-    suggestConfigAi: (tables?: string[], prompt = 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views.') => fetchJson<{
+    suggestConfigAi: (tables?: string[], prompt = '', options?: AIGenerationOptions) => fetchJson<{
+        proposal_id: string
+        base_draft_hash: string
+        candidate_draft_hash: string
+        status: 'ready_for_preview' | 'needs_decisions' | 'invalid'
+        decisions: Array<{ target: string; origin: string; reason: string; needs_review: boolean }>
+        diff: Array<{ path: string; before: unknown; after: unknown }>
         pii_masked: boolean
         provider: string
         model: string
@@ -575,14 +699,16 @@ export const api = {
         body: JSON.stringify({
             ...(tables && tables.length > 0 ? { tables } : {}),
             prompt,
-            goal: prompt
+            goal: prompt,
+            ...options,
         })
     }),
 
     suggestConfigAiStream: async (
         tables?: string[],
         prompt = 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views.',
-        onProgress?: (evt: { stage: string; step: number; total_steps: number; message: string }) => void
+        onProgress?: (evt: { stage: string; step: number; total_steps: number; message: string }) => void,
+        options?: AIGenerationOptions
     ) => {
         const res = await apiRequest('/ai/suggest-config/stream', {
             method: 'POST',
@@ -590,104 +716,31 @@ export const api = {
                 ...(tables && tables.length > 0 ? { tables } : {}),
                 prompt,
                 goal: prompt,
+                ...options,
             }),
         })
-        if (!res.body) {
-            return api.suggestConfigAi(tables, prompt)
-        }
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let finalResult: any = null
-
-        while (true) {
-            const { value, done } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const frames = buffer.split('\n\n')
-            buffer = frames.pop() || ''
-
-            for (const frame of frames) {
-                if (!frame.trim() || frame.startsWith(':')) continue
-                let eventType = 'message'
-                const dataLines: string[] = []
-                for (const line of frame.split('\n')) {
-                    if (line.startsWith('event:')) {
-                        eventType = line.slice(6).trim()
-                    } else if (line.startsWith('data:')) {
-                        dataLines.push(line.slice(5).trim())
-                    }
-                }
-                const rawData = dataLines.join('\n')
-                if (!rawData) continue
-                const parsed = JSON.parse(rawData)
-                if (eventType === 'progress') {
-                    onProgress?.(parsed)
-                } else if (eventType === 'result') {
-                    finalResult = parsed
-                } else if (eventType === 'error') {
-                    throw new APIError(400, parsed?.detail || 'AI config suggestion failed')
-                }
-            }
-        }
-        if (!finalResult) {
-            throw new APIError(500, 'AI stream ended before returning a configuration.')
-        }
-        return finalResult as Awaited<ReturnType<typeof api.suggestConfigAi>>
+        return readAIStream<Awaited<ReturnType<typeof api.suggestConfigAi>>>(res, event =>
+            onProgress?.(event as {stage: string; step: number; total_steps: number; message: string}))
     },
 
-    critiqueDryRunAi: (
-        config: Record<string, unknown>,
-        dryRunSummary?: Record<string, unknown>,
-        warnings?: string[]
-    ) =>
-        fetchJson<{
-            health: 'healthy' | 'needs_tuning' | 'over_merged_risk'
-            headline: string
-            provider: string
-            model: string
-            pii_masked: boolean
-            telemetry: {
-                total_entities: number
-                total_clusters: number
-                singletons: number
-                singleton_pct: number
-                max_cluster_size: number
-                size_buckets: Record<string, number>
-                edges_by_type: Record<string, number>
-                zero_edge_rules: Array<{ rule_id: string; identifier_type: string }>
-                source_singletons: Array<{
-                    source_id: string
-                    total_entities: number
-                    singleton_entities: number
-                    singleton_pct: number
-                }>
-                skipped_supernodes: Array<{
-                    identifier_type: string
-                    skipped_groups: number
-                    max_group_size_seen: number
-                }>
-            }
-            findings: Array<{
-                severity: 'high' | 'medium' | 'info'
-                title: string
-                detail: string
-                metric: string
-                patch?: {
-                    action: 'remove_source' | 'remove_rule' | 'enable_default_exclusions' | 'raise_fuzzy_threshold'
-                    label: string
-                    target: string
-                    value: unknown
-                } | null
-            }>
-        }>('/ai/critique-dry-run', {
-            method: 'POST',
-            body: JSON.stringify({
-                config,
-                dry_run_summary: dryRunSummary || {},
-                warnings: warnings || [],
-            }),
+    critiqueDryRunAi: (config: Record<string, unknown>, runId: string, fingerprint: string, lens = 'default') =>
+        fetchJson<AIReview>('/ai/critique-dry-run', {
+            method: 'POST', body: JSON.stringify({config, run_id: runId, draft_hash: fingerprint, lens}),
         }),
+
+    compareAiPatch: async (runId: string, config: IDRConfig, patch: ReviewPatch, lens = 'default', onProgress?: (event: Record<string, unknown>) => void) => {
+        const response = await apiRequest('/ai/compare/stream', {
+            method: 'POST', body: JSON.stringify({run_id: runId, config, patch, lens}),
+        })
+        return readAIStream<AIReview>(response, onProgress)
+    },
+
+    applyAiPatch: (config: IDRConfig, patch: ReviewPatch) =>
+        fetchJson<{ config: IDRConfig; draft_hash: string; review_stale: boolean }>('/ai/patch', {
+            method: 'POST', body: JSON.stringify({config, patch}),
+        }),
+
+    getAiReview: (runId: string) => fetchJson<AIReview>(`/ai/reviews/${encodeURIComponent(runId)}`),
 
     // Multi-Lens Identity
     listLenses: () => fetchJson<{
@@ -727,6 +780,19 @@ export const api = {
         super_cluster_id?: string | null
         cluster_size: number
         confidence_score: number | null
+        confidence_breakdown?: {
+            verdict: string
+            confidence_score: number | null
+            subject_count: number
+            child_count: number
+            subject_fanout: number
+            max_fanout: number
+            edge_diversity: number
+            edge_count: number
+            match_density?: number | null
+            has_fuzzy_bridge: boolean
+            reason: string
+        } | null
         entities: Array<{
             entity_key: string
             source_id: string

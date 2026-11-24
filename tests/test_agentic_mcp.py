@@ -227,6 +227,7 @@ def test_fastapi_mounts_remote_mcp_route():
 def test_agent_self_discovery_resources_and_docs():
     """Verify MCP resources/prompt, SKILL.md, and docs/llms.txt exist and return valid content."""
     import os
+
     import idr_mcp.server as mcp_server
 
     assert "sources:" in mcp_server.resource_config_schema()

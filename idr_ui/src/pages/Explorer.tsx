@@ -33,7 +33,81 @@ export default function Explorer() {
     const [searchQuery, setSearchQuery] = useState('')
     const debouncedSearchQuery = useDebounce(searchQuery, 250)
 
+    // 3-Tier AI Triage Queue state
+    const [triageOpen, setTriageOpen] = useState(false)
+    const [triageLoading, setTriageLoading] = useState(false)
+    const [triageMaxConf, setTriageMaxConf] = useState('0.75')
+    const [triageEscalateProvider, setTriageEscalateProvider] = useState('')
+    const [triageEscalateModel, setTriageEscalateModel] = useState('')
+    const [triageResult, setTriageResult] = useState<Awaited<ReturnType<typeof api.runAiTriage>> | null>(null)
+    const [triageError, setTriageError] = useState<string | null>(null)
+    const [applyingOverrideKey, setApplyingOverrideKey] = useState<string | null>(null)
+    const [appliedOverrides, setAppliedOverrides] = useState<Record<string, boolean>>({})
+
+    const handleRunTriage = async () => {
+        setTriageLoading(true)
+        setTriageError(null)
+        try {
+            const parsedMax = Number(triageMaxConf)
+            const hasEscalation = Boolean(triageEscalateProvider || triageEscalateModel.trim())
+            const res = await api.runAiTriage(
+                Number.isFinite(parsedMax) ? parsedMax : 0.75,
+                8,
+                hasEscalation
+                    ? {
+                          ...(triageEscalateProvider ? { escalateProvider: triageEscalateProvider } : {}),
+                          ...(triageEscalateModel.trim() ? { escalateModel: triageEscalateModel.trim() } : {}),
+                          escalationThreshold: 0.8,
+                      }
+                    : undefined
+            )
+            setTriageResult(res)
+        } catch (err: any) {
+            const msg = String(err?.message || err)
+            setTriageError(msg)
+            toast('error', 'AI Triage failed', msg)
+        } finally {
+            setTriageLoading(false)
+        }
+    }
+
+    const handleApplyTriageOverride = async (proposal: {
+        resolved_id: string
+        action: string
+        entity_key_a?: string
+        entity_key_b?: string
+        reason: string
+    }) => {
+        const overrideType = proposal.action as 'DO_NOT_LINK' | 'ISOLATE' | 'FORCE_LINK'
+        if (!proposal.entity_key_a || (overrideType !== 'ISOLATE' && !proposal.entity_key_b)) {
+            toast('error', 'Missing entity key', 'Inspect the cluster to select specific entity keys for override.')
+            return
+        }
+        const key = `${proposal.resolved_id}:${proposal.action}:${proposal.entity_key_a}`
+        setApplyingOverrideKey(key)
+        try {
+            await api.manageOverride({
+                action: 'add',
+                override_type: overrideType,
+                entity_key_a: proposal.entity_key_a,
+                entity_key_b: proposal.entity_key_b,
+                reason: `AI Triage (${proposal.resolved_id}): ${proposal.reason}`,
+            })
+            setAppliedOverrides(prev => ({ ...prev, [key]: true }))
+            toast(
+                'success',
+                'Override saved to idr_meta.identity_override',
+                `${overrideType} recorded. Re-run the pipeline to apply it to the graph.`
+            )
+        } catch (err: any) {
+            toast('error', 'Failed to save override', String(err?.message || err))
+        } finally {
+            setApplyingOverrideKey(null)
+        }
+    }
+
     const selectedCluster = searchParams.get('cluster')
+    const [resultsCollapsed, setResultsCollapsed] = useState<boolean>(Boolean(selectedCluster))
     const setSelectedCluster = (clusterId: string | null) => {
         if (clusterId) {
             setSearchParams({ cluster: clusterId })
@@ -49,6 +123,12 @@ export default function Explorer() {
     const [aiExplanation, setAiExplanation] = useState<string | null>(null)
     const [aiExplaining, setAiExplaining] = useState(false)
     const [aiCustomPrompt, setAiCustomPrompt] = useState('')
+
+    useEffect(() => {
+        setAiExplanation(null)
+        setAiCustomPrompt('')
+        setSelectedNode(null)
+    }, [selectedCluster])
 
     const [selectedNode, setSelectedNode] = useState<GraphNodeData | null>(null)
     const [activeTab, setActiveTab] = useState<InspectorTab>('golden')
@@ -115,6 +195,12 @@ export default function Explorer() {
                 ? api.getLensClusters(selectedLens, debouncedSearchQuery)
                 : api.searchEntities(debouncedSearchQuery),
         enabled: isConnected && (selectedLens ? true : debouncedSearchQuery.trim().length >= 3),
+    })
+
+    const { data: topClusters } = useQuery({
+        queryKey: ['topClusters'],
+        queryFn: () => api.getTopClusters(8),
+        enabled: isConnected && !selectedCluster && !selectedLens && debouncedSearchQuery.trim().length < 3,
     })
 
     const {
@@ -186,6 +272,11 @@ export default function Explorer() {
 
     const visibleEntities: GraphNodeData[] = useMemo(() => {
         if (!clusterDetail?.entities) return []
+        const degByEntity: Record<string, number> = {}
+        for (const ed of clusterDetail.edges || []) {
+            degByEntity[ed.left_entity_key] = (degByEntity[ed.left_entity_key] || 0) + 1
+            degByEntity[ed.right_entity_key] = (degByEntity[ed.right_entity_key] || 0) + 1
+        }
         return clusterDetail.entities
             .filter((e) => !hiddenSources.has(e.source_id))
             .map((e) => {
@@ -200,6 +291,7 @@ export default function Explorer() {
                     color: colorScheme.bg,
                     borderColor: colorScheme.border,
                     size: 24,
+                    degree: degByEntity[e.entity_key] || 0,
                 }
             })
     }, [clusterDetail, uniqueSources, hiddenSources])
@@ -257,7 +349,7 @@ export default function Explorer() {
                 (e.rule_id || '').toLowerCase().includes('fuzzy') ||
                 (e.identifier_type || '').toLowerCase().includes('fuzzy')
             edges.push({
-                id: `edge-${idx}`,
+                id: `${srcId}__${tgtId}__${e.identifier_type}__${idx}`,
                 source: srcId,
                 target: tgtId,
                 label: e.identifier_type,
@@ -326,12 +418,12 @@ export default function Explorer() {
             const k = rawKey.toLowerCase()
             if (/name|email|phone|gender|birth|dob|segment|tier|customer|account/.test(k)) {
                 categories['Identity & Contact'].push({ key: rawKey, label, value: rawVal })
-            } else if (/amount|spend|value|price|subtotal|discount|cost|points|payment|order|store|balance/.test(k)) {
-                categories['Commerce & Transactions'].push({ key: rawKey, label, value: rawVal })
-            } else if (/channel|visit|timestamp|date|event|device|browser|os|ip|session|fraud|score|verified/.test(k)) {
-                categories['Engagement & Activity'].push({ key: rawKey, label, value: rawVal })
             } else if (/address|street|city|state|zip|postal|country/.test(k)) {
                 categories['Location & Address'].push({ key: rawKey, label, value: rawVal })
+            } else if (/amount|spend|value|price|subtotal|discount|cost|points|payment|order|store|balance/.test(k)) {
+                categories['Commerce & Transactions'].push({ key: rawKey, label, value: rawVal })
+            } else if (/channel|visit|timestamp|date|event|device|browser|\bos\b|\bip\b|ip_address|session|fraud|score|verified/.test(k)) {
+                categories['Engagement & Activity'].push({ key: rawKey, label, value: rawVal })
             } else {
                 categories['Additional Attributes'].push({ key: rawKey, label, value: rawVal })
             }
@@ -484,12 +576,17 @@ export default function Explorer() {
                                 ))}
                             </select>
 
-                            {availableLenses.length >= 2 && (
+                            {availableLenses.length >= 1 && (
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        setDiffLensA(availableLenses[0].id)
-                                        setDiffLensB(availableLenses[1].id)
+                                        if (availableLenses.length >= 2) {
+                                            setDiffLensA(availableLenses[0].id)
+                                            setDiffLensB(availableLenses[1].id)
+                                        } else {
+                                            setDiffLensA('default')
+                                            setDiffLensB(availableLenses[0].id)
+                                        }
                                         setDiffModalOpen(true)
                                     }}
                                     className="btn-secondary text-xs"
@@ -500,6 +597,16 @@ export default function Explorer() {
                             )}
                         </>
                     )}
+
+                    <button
+                        type="button"
+                        onClick={() => setTriageOpen(prev => !prev)}
+                        className={`btn-secondary text-xs ${triageOpen ? 'border-accent text-accent bg-accent-soft' : ''}`}
+                        title="3-Tier AI Triage Queue (SQL Tier 0 -> LLM Tier 1 -> optional Tier 2 escalation)"
+                    >
+                        <Bot className="w-3.5 h-3.5 text-accent" />
+                        AI Triage
+                    </button>
 
                     <div className="relative w-full sm:w-80">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-subtle pointer-events-none" />
@@ -529,6 +636,216 @@ export default function Explorer() {
                 </div>
             </div>
 
+            {/* Collapsible 3-Tier AI Triage Queue Panel */}
+            {triageOpen && (
+                <div className="surface-panel p-4 space-y-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div className="font-semibold text-ink flex items-center gap-1.5">
+                                <Bot className="w-4 h-4 text-accent" />
+                                3-Tier AI Triage Queue
+                                <span className="badge-accent text-[10px]">SQL Tier 0 → LLM Judge</span>
+                            </div>
+                            <p className="text-ink-muted text-[11px] mt-0.5">
+                                Filters healthy clusters in warehouse SQL ($0, zero PII) and judges only borderline or multi-subject clusters. Approved splits write to <code className="font-mono">idr_meta.identity_override</code>.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setTriageOpen(false)}
+                            aria-label="Close AI Triage Queue"
+                            className="p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-end gap-2.5 pt-1">
+                        <label className="space-y-1">
+                            <span className="text-[11px] text-ink-muted block">Tier-0 Max Confidence</span>
+                            <input
+                                type="number"
+                                step="0.05"
+                                min="0.1"
+                                max="1.0"
+                                value={triageMaxConf}
+                                onChange={(e) => setTriageMaxConf(e.target.value)}
+                                className="input-field text-xs py-1 w-28 font-mono"
+                            />
+                        </label>
+                        <label className="space-y-1">
+                            <span className="text-[11px] text-ink-muted block">Tier-2 Provider (optional)</span>
+                            <select
+                                aria-label="Tier-2 Escalation Provider"
+                                value={triageEscalateProvider}
+                                onChange={(e) => setTriageEscalateProvider(e.target.value)}
+                                className="input-field text-xs py-1 w-40"
+                            >
+                                <option value="">Auto-detect</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="gemini">Google Gemini</option>
+                                <option value="warehouse">Warehouse Native</option>
+                                <option value="ollama">Ollama (Local)</option>
+                            </select>
+                        </label>
+                        <label className="space-y-1">
+                            <span className="text-[11px] text-ink-muted block">Tier-2 Escalation Model (optional)</span>
+                            <input
+                                type="text"
+                                value={triageEscalateModel}
+                                onChange={(e) => setTriageEscalateModel(e.target.value)}
+                                placeholder="e.g. claude-3-5-sonnet-latest or gpt-4o"
+                                className="input-field text-xs py-1 w-60 font-mono"
+                            />
+                        </label>
+                        <button
+                            type="button"
+                            onClick={handleRunTriage}
+                            disabled={triageLoading}
+                            className="btn-primary text-xs py-1.5"
+                        >
+                            {triageLoading ? (
+                                <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    Running Cascade…
+                                </>
+                            ) : (
+                                <>
+                                    <Bot className="w-3.5 h-3.5" />
+                                    Run 3-Tier Triage
+                                </>
+                            )}
+                        </button>
+                    </div>
+
+                    {triageError && (
+                        <div className="rounded-md border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-status-danger text-xs">
+                            {triageError}
+                        </div>
+                    )}
+
+                    {triageResult?.cascade_summary && (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                            <div className="rounded-md border border-line bg-subtle px-3 py-2">
+                                <div className="text-[11px] text-ink-muted">Multi-Entity Clusters</div>
+                                <div className="text-sm font-mono font-semibold text-ink mt-0.5">
+                                    {triageResult.cascade_summary.total_multi_entity_clusters.toLocaleString()}
+                                </div>
+                            </div>
+                            <div className="rounded-md border border-line bg-subtle px-3 py-2">
+                                <div className="text-[11px] text-ink-muted">SQL Tier 0 Auto-Passed ($0)</div>
+                                <div className="text-sm font-mono font-semibold text-status-success mt-0.5">
+                                    {triageResult.cascade_summary.tier0_auto_passed.toLocaleString()}{' '}
+                                    <span className="text-[11px] font-normal">
+                                        ({triageResult.cascade_summary.sql_filter_savings_pct}%)
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="rounded-md border border-line bg-subtle px-3 py-2">
+                                <div className="text-[11px] text-ink-muted">Tier 1 Judged ({triageResult.model || 'LLM'})</div>
+                                <div className="text-sm font-mono font-semibold text-ink mt-0.5">
+                                    {triageResult.cascade_summary.tier1_reviewed.toLocaleString()}
+                                </div>
+                            </div>
+                            <div className="rounded-md border border-line bg-subtle px-3 py-2">
+                                <div className="text-[11px] text-ink-muted">Tier 2 Escalated</div>
+                                <div className="text-sm font-mono font-semibold text-accent mt-0.5">
+                                    {triageResult.cascade_summary.tier2_escalated.toLocaleString()}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {triageResult && triageResult.proposals.length === 0 && (
+                        <div className="rounded-md border border-line bg-subtle px-3 py-2.5 text-ink-secondary">
+                            {triageResult.message || 'No borderline clusters flagged.'}
+                        </div>
+                    )}
+
+                    {triageResult && triageResult.proposals.length > 0 && (
+                        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                            {triageResult.proposals.map((p, idx) => {
+                                const key = `${p.resolved_id}:${p.action}:${p.entity_key_a || ''}`
+                                const canOverride =
+                                    (p.action === 'ISOLATE' && Boolean(p.entity_key_a)) ||
+                                    ((p.action === 'DO_NOT_LINK' || p.action === 'FORCE_LINK') &&
+                                        Boolean(p.entity_key_a) &&
+                                        Boolean(p.entity_key_b))
+                                const isApplied = Boolean(appliedOverrides[key])
+                                return (
+                                    <div
+                                        key={`${p.resolved_id}-${idx}`}
+                                        className="rounded-md border border-line bg-subtle px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                                    >
+                                        <div className="space-y-1 min-w-0">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                <span className="font-mono font-semibold text-ink">{p.resolved_id}</span>
+                                                <span
+                                                    className={
+                                                        p.action === 'KEEP'
+                                                            ? 'badge-success'
+                                                            : p.action === 'DO_NOT_LINK' || p.action === 'ISOLATE'
+                                                            ? 'badge-danger'
+                                                            : 'badge-warning'
+                                                    }
+                                                >
+                                                    {p.action}
+                                                </span>
+                                                <span
+                                                    className="badge-neutral font-mono text-[10px]"
+                                                    title={
+                                                        p.escalation_reason === 'structural_disagreement'
+                                                            ? 'Escalated to Tier 2: Tier-1 verdict conflicted with SQL structural fanout/identifier evidence'
+                                                            : p.escalation_reason
+                                                            ? `Escalated (${p.escalation_reason})`
+                                                            : undefined
+                                                    }
+                                                >
+                                                    {p.escalated ? 'TIER 2' : 'TIER 1'}
+                                                    {p.judge_confidence !== undefined ? ` · ${Math.round(p.judge_confidence * 100)}%` : ''}
+                                                    {p.escalation_reason === 'structural_disagreement' ? ' · Guardrail' : ''}
+                                                </span>
+                                                {p.subject_fanout !== null && p.subject_fanout !== undefined && (
+                                                    <span className="badge-neutral font-mono text-[10px]">
+                                                        fanout {p.subject_fanout}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="text-ink-secondary">{p.reason}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                            {p.resolved_id && p.resolved_id !== 'parse_error' && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSelectedCluster(p.resolved_id)
+                                                        setResultsCollapsed(true)
+                                                    }}
+                                                    className="btn-secondary text-[11px] py-1 px-2"
+                                                >
+                                                    Inspect
+                                                </button>
+                                            )}
+                                            {canOverride && (
+                                                <button
+                                                    type="button"
+                                                    disabled={applyingOverrideKey === key || isApplied}
+                                                    onClick={() => handleApplyTriageOverride(p)}
+                                                    className="btn-primary text-[11px] py-1 px-2 disabled:opacity-50"
+                                                >
+                                                    {isApplied ? 'Override Saved' : applyingOverrideKey === key ? 'Saving…' : 'Apply Override'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {!selectedLens && searchQuery.trim().length > 0 && searchQuery.trim().length < 3 && (
                 <p className="text-xs text-ink-muted">
                     Type at least 3 characters to query the identity index.
@@ -547,9 +864,20 @@ export default function Explorer() {
                                     : `${searchResults?.length || 0} matching clusters`}
                         </span>
                         {searchResults && searchResults.length > 0 && (
-                            <span>Select a cluster to inspect</span>
+                            selectedCluster ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setResultsCollapsed((v) => !v)}
+                                    className="text-accent hover:underline font-medium"
+                                >
+                                    {resultsCollapsed ? `Show all ${searchResults.length} results` : 'Hide list'}
+                                </button>
+                            ) : (
+                                <span>Select a cluster to inspect</span>
+                            )
                         )}
                     </div>
+                    {(!resultsCollapsed || !selectedCluster) && (
                     <div className="max-h-52 overflow-y-auto divide-y divide-line">
                         {searchResults && searchResults.length === 0 && !searching ? (
                             <div className="px-3 py-5 text-center text-xs text-ink-muted">
@@ -564,6 +892,7 @@ export default function Explorer() {
                                         type="button"
                                         onClick={() => {
                                             setSelectedCluster(result.resolved_id)
+                                            setResultsCollapsed(true)
                                             setSelectedNode(null)
                                             setHiddenSources(new Set())
                                             setAiExplanation(null)
@@ -595,6 +924,7 @@ export default function Explorer() {
                             })
                         )}
                     </div>
+                    )}
                 </div>
             )}
 
@@ -705,7 +1035,7 @@ export default function Explorer() {
                     </div>
 
                     {aiExplanation && (
-                        <div className="p-3.5 rounded-md bg-subtle border border-line text-xs text-ink whitespace-pre-wrap relative">
+                        <div className="p-3.5 pr-8 rounded-md bg-subtle border border-line text-xs text-ink space-y-1.5 relative leading-relaxed">
                             <button
                                 type="button"
                                 onClick={() => setAiExplanation(null)}
@@ -714,7 +1044,34 @@ export default function Explorer() {
                             >
                                 <X className="w-3.5 h-3.5" />
                             </button>
-                            {aiExplanation}
+                            {aiExplanation.split('\n').map((rawLine, lineIdx) => {
+                                const line = rawLine.trimEnd()
+                                if (!line.trim()) return <div key={lineIdx} className="h-1" />
+                                const renderInline = (text: string) =>
+                                    text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) => {
+                                        if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+                                            return <strong key={i} className="font-semibold text-ink">{part.slice(2, -2)}</strong>
+                                        }
+                                        if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+                                            return <code key={i} className="px-1 py-0.5 rounded bg-surface border border-line font-mono text-[11px]">{part.slice(1, -1)}</code>
+                                        }
+                                        return <span key={i}>{part}</span>
+                                    })
+                                const headingMatch = line.match(/^#{1,4}\s+(.*)$/)
+                                if (headingMatch) {
+                                    return <div key={lineIdx} className="font-semibold text-ink pt-1">{renderInline(headingMatch[1])}</div>
+                                }
+                                const bulletMatch = line.match(/^[-*]\s+(.*)$/)
+                                if (bulletMatch) {
+                                    return (
+                                        <div key={lineIdx} className="flex items-start gap-1.5 pl-1">
+                                            <span className="text-ink-muted select-none">•</span>
+                                            <span>{renderInline(bulletMatch[1])}</span>
+                                        </div>
+                                    )
+                                }
+                                return <p key={lineIdx}>{renderInline(line)}</p>
+                            })}
                         </div>
                     )}
 
@@ -930,8 +1287,27 @@ export default function Explorer() {
                                         )}
                                     </button>
                                     {clusterDetail.confidence_score != null && (
-                                        <span className="badge-success font-mono tabular-nums">
+                                        <span
+                                            className="badge-success font-mono tabular-nums"
+                                            title={clusterDetail.confidence_breakdown?.reason || 'Deterministic confidence score'}
+                                        >
                                             {(clusterDetail.confidence_score * 100).toFixed(1)}%
+                                        </span>
+                                    )}
+                                    {clusterDetail.confidence_breakdown && clusterDetail.cluster_size > 1 && (
+                                        <span
+                                            className="badge-neutral font-mono text-[11px]"
+                                            title={clusterDetail.confidence_breakdown.reason}
+                                        >
+                                            {clusterDetail.confidence_breakdown.subject_count} subj
+                                            {clusterDetail.confidence_breakdown.child_count > 0
+                                                ? ` + ${clusterDetail.confidence_breakdown.child_count} child`
+                                                : ''}
+                                            {' · '}
+                                            {clusterDetail.confidence_breakdown.edge_diversity} rule
+                                            {clusterDetail.confidence_breakdown.edge_diversity === 1 ? '' : 's'}
+                                            {' · fanout '}
+                                            {clusterDetail.confidence_breakdown.subject_fanout}
                                         </span>
                                     )}
                                     {clusterDetail.super_cluster_id &&
@@ -947,7 +1323,10 @@ export default function Explorer() {
 
                                 <div className="flex items-center gap-2 shrink-0">
                                     <span className="text-xs font-mono tabular-nums text-ink-muted">
-                                        {visibleEntities.length}/{clusterDetail.entities.length} entities · {graphEdges.length} edges
+                                        {visibleEntities.length}/{clusterDetail.entities.length} {clusterDetail.entities.length === 1 ? 'entity' : 'entities'} ·{' '}
+                                        {graphEdges.length === (clusterDetail.edges?.length ?? 0)
+                                            ? `${graphEdges.length} ${graphEdges.length === 1 ? 'edge' : 'edges'}`
+                                            : `${graphEdges.length} visible / ${clusterDetail.edges?.length ?? 0} total ${(clusterDetail.edges?.length ?? 0) === 1 ? 'edge' : 'edges'}`}
                                     </span>
                                     <button
                                         type="button"
@@ -1027,6 +1406,7 @@ export default function Explorer() {
 
                             <div className="flex-1 min-h-[500px]">
                                 <IdentityGraph
+                                    key={selectedCluster || 'none'}
                                     nodes={graphNodes}
                                     edges={graphEdges}
                                     selectedNodeId={selectedNode?.id}
@@ -1330,7 +1710,16 @@ export default function Explorer() {
                                                 <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
                                                     <dt className="text-ink-muted">Graph Degree</dt>
                                                     <dd className="font-mono tabular-nums font-medium text-ink">
-                                                        {selectedNode.degree || 0} incident links
+                                                        {(() => {
+                                                            const deg =
+                                                                selectedNode.degree ??
+                                                                (clusterDetail.edges || []).filter(
+                                                                    (e) =>
+                                                                        e.left_entity_key === selectedNode.id ||
+                                                                        e.right_entity_key === selectedNode.id
+                                                                ).length
+                                                            return `${deg} incident ${deg === 1 ? 'link' : 'links'}`
+                                                        })()}
                                                     </dd>
                                                 </div>
                                             </dl>
@@ -1446,15 +1835,73 @@ export default function Explorer() {
                 </div>
             )}
 
-            {/* Empty State */}
+            {/* Cold-Start: Top Resolved Clusters or Empty State */}
             {!selectedCluster && !selectedLens && searchQuery.trim().length < 3 && (
-                <div className="surface-panel py-16 px-4 text-center">
-                    <Search className="w-8 h-8 mx-auto mb-2.5 text-ink-subtle" />
-                    <h2 className="text-sm font-semibold text-ink">Search the identity index</h2>
-                    <p className="text-xs text-ink-muted mt-1 max-w-md mx-auto">
-                        Enter an email address, phone number, customer key, or cluster hash (minimum 3 characters) to inspect its entity graph and Golden Record.
-                    </p>
-                </div>
+                topClusters && topClusters.length > 0 ? (
+                    <div className="surface-panel overflow-hidden">
+                        <div className="px-3.5 py-2.5 bg-subtle border-b border-line flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h2 className="text-[13px] font-semibold text-ink">Notable Resolved Clusters</h2>
+                                <p className="text-[11px] text-ink-muted">
+                                    Select a multi-entity cluster below to inspect its graph and Golden Record, or search any identifier above.
+                                </p>
+                            </div>
+                            <span className="badge-neutral font-mono tabular-nums">
+                                Top {topClusters.length}
+                            </span>
+                        </div>
+                        <div className="divide-y divide-line">
+                            {topClusters.map((cluster: ClusterSummary) => (
+                                <button
+                                    key={cluster.resolved_id}
+                                    type="button"
+                                    onClick={() => {
+                                        setSelectedCluster(cluster.resolved_id)
+                                        setResultsCollapsed(true)
+                                        setSelectedNode(null)
+                                        setHiddenSources(new Set())
+                                        setAiExplanation(null)
+                                        setActiveTab('golden')
+                                    }}
+                                    className="w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-3 bg-surface hover:bg-subtle transition-colors"
+                                >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <Hash className="w-3.5 h-3.5 text-accent shrink-0" />
+                                        <span className="font-mono text-xs font-medium text-ink truncate">
+                                            {cluster.resolved_id}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0 font-mono tabular-nums">
+                                        {cluster.confidence_score != null && (
+                                            <span
+                                                className={
+                                                    cluster.confidence_score >= 0.8
+                                                        ? 'badge-success'
+                                                        : cluster.confidence_score >= 0.5
+                                                        ? 'badge-warning'
+                                                        : 'badge-danger'
+                                                }
+                                            >
+                                                {(cluster.confidence_score * 100).toFixed(1)}%
+                                            </span>
+                                        )}
+                                        <span className="badge-neutral">
+                                            {cluster.cluster_size.toLocaleString()} {cluster.cluster_size === 1 ? 'entity' : 'entities'}
+                                        </span>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="surface-panel py-16 px-4 text-center">
+                        <Search className="w-8 h-8 mx-auto mb-2.5 text-ink-subtle" />
+                        <h2 className="text-sm font-semibold text-ink">Search the identity index</h2>
+                        <p className="text-xs text-ink-muted mt-1 max-w-md mx-auto">
+                            Enter an email address, phone number, customer key, or cluster hash (minimum 3 characters) to inspect its entity graph and Golden Record.
+                        </p>
+                    </div>
+                )
             )}
 
             {/* Lens Diff Modal */}
@@ -1485,6 +1932,7 @@ export default function Explorer() {
                                         onChange={(e) => setDiffLensA(e.target.value)}
                                         className="input-field text-xs"
                                     >
+                                        <option value="default">Primary Graph (default)</option>
                                         {availableLenses.map((l) => (
                                             <option key={l.id} value={l.id}>{l.id}</option>
                                         ))}
@@ -1497,6 +1945,7 @@ export default function Explorer() {
                                         onChange={(e) => setDiffLensB(e.target.value)}
                                         className="input-field text-xs"
                                     >
+                                        <option value="default">Primary Graph (default)</option>
                                         {availableLenses.map((l) => (
                                             <option key={l.id} value={l.id}>{l.id}</option>
                                         ))}

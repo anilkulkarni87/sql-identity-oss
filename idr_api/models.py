@@ -56,7 +56,7 @@ class MetricsSummary(BaseModel):
     total_edges: int
     avg_confidence: float
     last_run_id: Optional[str] = None
-    last_run_duration: Optional[int] = None
+    last_run_duration: Optional[float] = None
     last_run_started_at: Optional[str] = None
 
 
@@ -108,6 +108,7 @@ class ClusterDetail(BaseModel):
     resolved_id: str
     cluster_size: int
     confidence_score: Optional[float] = None
+    confidence_breakdown: Optional[Dict[str, Any]] = None
     super_cluster_id: Optional[str] = None
     entities: List[EntityInfo]
     edges: List[EdgeInfo]
@@ -150,10 +151,13 @@ class RunSummary(BaseModel):
     run_mode: str
     status: str
     started_at: str
-    duration_seconds: Optional[int] = None
+    duration_seconds: Optional[float] = None
     entities_processed: Optional[int] = 0
     edges_created: Optional[int] = 0
     clusters_impacted: Optional[int] = 0
+    clusters_resolved: Optional[int] = 0
+    clusters_changed: Optional[int] = None
+    source_tables_processed: Optional[int] = None
 
 
 class StageMetricInfo(BaseModel):
@@ -161,7 +165,7 @@ class StageMetricInfo(BaseModel):
     stage_order: int
     started_at: Optional[str] = None
     ended_at: Optional[str] = None
-    duration_seconds: Optional[int] = 0
+    duration_seconds: Optional[float] = 0
     rows_out: Optional[int] = 0
 
 
@@ -170,6 +174,7 @@ class RunDetail(RunSummary):
     error_message: Optional[str] = None
     warnings: List[str] = []
     stages: List[StageMetricInfo] = []
+    activation_delta_summary: Optional[Dict[str, int]] = None
 
 
 # ============================================================

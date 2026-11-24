@@ -298,19 +298,15 @@ class TestErrorMessages:
 Tests for idr_core.stages.output.OutputStage and multi-dialect stage SQL generation.
 """
 
-import logging
 import os
 import sys
-from unittest.mock import MagicMock
 
 import pytest
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from idr_core.adapters.base import get_dialect_config
 from idr_core.runner import RunConfig
-from idr_core.stages.base import StageContext
 from idr_core.stages.graph import GraphStage
 from idr_core.stages.output import OutputStage
 from idr_core.stages.preflight import PreflightStage
@@ -378,7 +374,8 @@ def test_confidence_scoring_fidelity_and_corroboration_sql(dialect):
     assert "max_fidelity" in executed_sqls
     assert "connectivity_ratio" in executed_sqls
     assert "SINGLETON_NO_MATCH_REQUIRED" in executed_sqls
-    assert "High Confidence Corroboration" in executed_sqls
+    assert "corroborated by " in executed_sqls
+    assert "subject_fanout" in executed_sqls
 
 
 @pytest.mark.parametrize(
@@ -516,30 +513,34 @@ def databricks_builder():
 class TestColumnSelectionRecency:
     """Tests for RECENCY survivorship strategy across dialects."""
 
-    def test_duckdb_uses_arg_max(self, duckdb_builder):
+    def test_duckdb_uses_stable_arg_min(self, duckdb_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = duckdb_builder._build_column_selection(rule)
-        assert "arg_max" in result
+        assert "arg_min" in result
+        assert "source_record_key" in result
         assert "email" in result
         assert "recency_ts" in result
 
-    def test_snowflake_uses_max_by(self, snowflake_builder):
+    def test_snowflake_uses_ordered_array(self, snowflake_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = snowflake_builder._build_column_selection(rule)
-        assert "MAX_BY" in result
+        assert "ARRAY_AGG" in result
+        assert "source_record_key" in result
         assert "email" in result
 
     def test_databricks_uses_max_by(self, databricks_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = databricks_builder._build_column_selection(rule)
-        assert "MAX_BY" in result
+        assert "MIN_BY" in result
+        assert "source_record_key" in result
         assert "email" in result
 
     def test_bigquery_uses_array_agg(self, bigquery_builder):
         rule = {"attribute_name": "email", "strategy": "RECENCY"}
         result = bigquery_builder._build_column_selection(rule)
         assert "ARRAY_AGG" in result
-        assert "ORDER BY recency_ts DESC" in result
+        assert "COALESCE(recency_ts" in result
+        assert "source_record_key ASC" in result
         assert "SAFE_OFFSET(0)" in result
 
 
@@ -570,7 +571,8 @@ class TestColumnSelectionPriority:
             "source_priority_list": '["crm", "web"]',
         }
         result = snowflake_builder._build_column_selection(rule)
-        assert "MIN_BY" in result
+        assert "ARRAY_AGG" in result
+        assert "source_record_key" in result
         assert "CASE" in result
 
     def test_databricks_uses_min_by(self, databricks_builder):
@@ -787,3 +789,88 @@ class TestIncrementalProfileBuilder:
         assert expected_keyword in executed_sqls
         assert "golden_profiles_delta" in executed_sqls
         assert "DELETE FROM idr_out.golden_profiles" in executed_sqls
+
+
+def test_golden_profiles_match_cluster_cardinality_full_and_incr():
+    """Golden profiles must maintain 1:1 cardinality with identity_clusters_current in FULL and INCR modes."""
+    from idr_core.adapters.duckdb import DuckDBAdapter
+    from idr_core.profile_builder import ProfileBuilder
+    from idr_core.schema_manager import SchemaManager
+
+    adapter = DuckDBAdapter(":memory:")
+    SchemaManager(adapter).initialize(reset=True)
+
+    # Create two source tables: orders (mapped to total_amount) and customers (unmapped)
+    adapter.execute("CREATE TABLE raw_orders (order_id VARCHAR, amount DOUBLE, updated_at TIMESTAMP)")
+    adapter.execute("CREATE TABLE raw_customers (cust_id VARCHAR, name VARCHAR, updated_at TIMESTAMP)")
+    adapter.execute("""
+        INSERT INTO raw_orders VALUES
+            ('o1', 100.0, TIMESTAMP '2026-01-01 00:00:00'),
+            ('o2', 50.0,  TIMESTAMP '2026-01-02 00:00:00')
+    """)
+    adapter.execute("""
+        INSERT INTO raw_customers VALUES
+            ('c1', 'Alice', TIMESTAMP '2026-01-01 00:00:00'),
+            ('c2', 'Bob',   TIMESTAMP '2026-01-01 00:00:00')
+    """)
+
+    adapter.execute("""
+        INSERT INTO idr_meta.source_table (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, is_active)
+        VALUES
+            ('orders', 'raw_orders', 'EVENT', 'order_id', 'updated_at', TRUE),
+            ('customers', 'raw_customers', 'PERSON', 'cust_id', 'updated_at', TRUE)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_meta.survivorship_rule (attribute_name, strategy, is_active)
+        VALUES ('total_amount', 'AGG_SUM', TRUE)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_meta.entity_attribute_mapping (table_id, attribute_name, attribute_expr)
+        VALUES ('orders', 'total_amount', 'amount')
+    """)
+
+    # Cluster C1 has both customer + orders; Cluster C2 has only customer (no orders)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_clusters_current (resolved_id, cluster_size, confidence_score)
+        VALUES ('C1', 3, 0.95), ('C2', 1, 1.0)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id)
+        VALUES
+            ('customers:c1', 'C1'),
+            ('orders:o1', 'C1'),
+            ('orders:o2', 'C1'),
+            ('customers:c2', 'C2')
+    """)
+
+    builder = ProfileBuilder(adapter)
+    builder.build_profiles("run_full_1", run_mode="FULL")
+
+    rows = {
+        r["resolved_id"]: r["total_amount"]
+        for r in adapter.query("SELECT resolved_id, total_amount FROM idr_out.golden_profiles")
+    }
+    assert set(rows.keys()) == {"C1", "C2"}
+    assert rows["C1"] == 150.0
+    assert rows["C2"] is None
+
+    # INCR mode: add a new unmapped cluster C3 and mark it impacted
+    adapter.execute("""
+        INSERT INTO idr_out.identity_clusters_current (resolved_id, cluster_size, confidence_score)
+        VALUES ('C3', 1, 1.0)
+    """)
+    adapter.execute("""
+        INSERT INTO idr_out.identity_resolved_membership_current (entity_key, resolved_id)
+        VALUES ('customers:c3', 'C3')
+    """)
+    adapter.execute("CREATE OR REPLACE TABLE idr_work.impacted_resolved_ids AS SELECT 'C3' AS resolved_id")
+
+    builder.build_profiles("run_incr_2", run_mode="INCR")
+    rows_incr = {
+        r["resolved_id"]: r["total_amount"]
+        for r in adapter.query("SELECT resolved_id, total_amount FROM idr_out.golden_profiles")
+    }
+    assert set(rows_incr.keys()) == {"C1", "C2", "C3"}
+    assert rows_incr["C1"] == 150.0
+    assert rows_incr["C2"] is None
+    assert rows_incr["C3"] is None

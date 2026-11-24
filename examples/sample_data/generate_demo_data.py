@@ -179,28 +179,32 @@ def generate_demo_data(db_path: str, rows: int = 10000, seed: int = 42):
 
     # Register source
     conn.execute("""
-        INSERT INTO idr_meta.source_table VALUES
+        INSERT INTO idr_meta.source_table
+        (table_id, table_fqn, entity_type, entity_key_expr, watermark_column, watermark_lookback_minutes, is_active)
+        VALUES
         ('demo', 'demo_customers', 'PERSON', 'customer_id', 'created_at', 0, TRUE)
     """)
 
-    # Ensure rules exist - 9 columns: rule_id, rule_name, is_active, priority, identifier_type, canonicalize, allow_hashed, require_non_null, max_group_size
+    # Ensure rules exist
     conn.execute("DELETE FROM idr_meta.rule")
     conn.execute("""
         INSERT INTO idr_meta.rule
-        (rule_id, rule_name, is_active, priority, identifier_type, canonicalize, allow_hashed, require_non_null, max_group_size)
+        (rule_id, identifier_type, canonicalize, max_group_size, priority, is_active)
         VALUES
-        ('email_rule', 'Email Match', TRUE, 1, 'EMAIL', 'LOWERCASE', TRUE, TRUE, 10000),
-        ('phone_rule', 'Phone Match', TRUE, 2, 'PHONE', 'NONE', TRUE, TRUE, 5000),
-        ('loyalty_rule', 'Loyalty Match', TRUE, 3, 'LOYALTY', 'NONE', TRUE, TRUE, 100)
+        ('email_rule', 'EMAIL', 'LOWERCASE', 10000, 1, TRUE),
+        ('phone_rule', 'PHONE', 'NONE', 5000, 2, TRUE),
+        ('loyalty_rule', 'LOYALTY', 'NONE', 100, 3, TRUE)
     """)
 
     # Add mappings
     conn.execute("DELETE FROM idr_meta.identifier_mapping WHERE table_id = 'demo'")
     conn.execute("""
-        INSERT INTO idr_meta.identifier_mapping VALUES
-        ('demo', 'EMAIL', 'email', TRUE),
-        ('demo', 'PHONE', 'phone', TRUE),
-        ('demo', 'LOYALTY', 'loyalty_id', TRUE)
+        INSERT INTO idr_meta.identifier_mapping
+        (table_id, identifier_type, identifier_value_expr, is_hashed)
+        VALUES
+        ('demo', 'EMAIL', 'email', FALSE),
+        ('demo', 'PHONE', 'phone', FALSE),
+        ('demo', 'LOYALTY', 'loyalty_id', FALSE)
     """)
 
     print("  ✓ Configured IDR metadata")

@@ -865,11 +865,11 @@ def simulate_rule_impact(rule: Dict[str, Any], dialect: str = None) -> Dict[str,
 
 
 @mcp.tool()
-def resolve_customer_360(identifier_value: str, identifier_type: str = None) -> Dict[str, Any]:
+def resolve_entity_360(identifier_value: str, identifier_type: str = None) -> Dict[str, Any]:
     """
-    Single-call Customer 360 context grounding for AI agents and RAG pipelines (Direction 2).
-    Given any identifier (email, phone, loyalty ID), resolves the person's canonical identity,
-    golden profile attributes, all linked source accounts, and cross-channel identifier graph.
+    Single-call domain-neutral Entity 360 context grounding for AI agents and RAG pipelines.
+    Given any identifier (email, phone, NPI, DUNS, SKU, MRN), resolves the entity's canonical
+    identity, golden profile attributes, linked source records, and cross-system identifier graph.
     """
     adapter = get_adapter()
 
@@ -893,7 +893,7 @@ def resolve_customer_360(identifier_value: str, identifier_type: str = None) -> 
         profile_data = get_golden_profile(resolved_id)
         golden_profile = profile_data.get("attributes") or {}
 
-        # 4. Aggregate all known identifiers for this resolved person
+        # 4. Aggregate all known identifiers for this resolved entity
         known_identifiers = []
         if adapter.table_exists("idr_out.identity_identifiers_current"):
             sql_ids = """
@@ -910,7 +910,7 @@ def resolve_customer_360(identifier_value: str, identifier_type: str = None) -> 
                     "value": mask_value(val) if should_mask_pii() else val,
                 })
 
-        # 5. Extract linked source accounts
+        # 5. Extract linked source accounts / records
         entities = cluster_data.get("entities", [])
         linked_accounts = []
         for ent in entities:
@@ -947,7 +947,16 @@ def resolve_customer_360(identifier_value: str, identifier_type: str = None) -> 
         }
 
     except Exception as e:
-        return {"error": f"Failed to resolve Customer 360 context: {str(e)}"}
+        return {"error": f"Failed to resolve Entity 360 context: {str(e)}"}
+
+
+@mcp.tool()
+def resolve_customer_360(identifier_value: str, identifier_type: str = None) -> Dict[str, Any]:
+    """
+    Backward-compatible alias for `resolve_entity_360`: resolves a person or entity's canonical
+    identity, golden profile attributes, linked source records, and identifier graph.
+    """
+    return resolve_entity_360(identifier_value=identifier_value, identifier_type=identifier_type)
 
 
 @mcp.tool()
@@ -992,7 +1001,7 @@ def export_dbt_seeds(
 
 
 @mcp.tool()
-def forget_customer_identity(
+def forget_entity_identity(
     identifier_value: str = None,
     entity_key: str = None,
     resolved_id: str = None,
@@ -1001,7 +1010,7 @@ def forget_customer_identity(
     reason: str = "GDPR_CCPA_RTBF",
 ) -> Dict[str, Any]:
     """
-    Preview or execute a GDPR / CCPA Right-to-be-Forgotten (RTBF) cascading purge.
+    Preview or execute a domain-neutral GDPR / CCPA Right-to-be-Forgotten (RTBF) cascading purge.
 
     Safety guardrail: defaults to ``dry_run=True``, returning a blast-radius summary
     and a short-lived ``confirmation_token``. Pass ``dry_run=False`` together with that
@@ -1045,6 +1054,28 @@ def forget_customer_identity(
 
 
 @mcp.tool()
+def forget_customer_identity(
+    identifier_value: str = None,
+    entity_key: str = None,
+    resolved_id: str = None,
+    dry_run: bool = True,
+    confirmation_token: str = None,
+    reason: str = "GDPR_CCPA_RTBF",
+) -> Dict[str, Any]:
+    """
+    Backward-compatible alias for `forget_entity_identity` (GDPR / CCPA RTBF cascading purge).
+    """
+    return forget_entity_identity(
+        identifier_value=identifier_value,
+        entity_key=entity_key,
+        resolved_id=resolved_id,
+        dry_run=dry_run,
+        confirmation_token=confirmation_token,
+        reason=reason,
+    )
+
+
+@mcp.tool()
 def manage_identity_override(
     action: str,
     override_type: str = None,
@@ -1075,6 +1106,10 @@ def manage_identity_override(
         otype = override_type.strip().upper()
         if otype not in ("FORCE_LINK", "DO_NOT_LINK", "ISOLATE"):
             return {"status": "ERROR", "error": f"Invalid override_type '{otype}'"}
+        if otype in ("FORCE_LINK", "DO_NOT_LINK") and not (
+            entity_key_b and entity_key_b.strip() and entity_key_b.strip() != "__ISOLATE__"
+        ):
+            return {"status": "ERROR", "error": f"entity_key_b is required for {otype} overrides"}
 
         ek_a = entity_key_a.strip().replace("'", "''")
         ek_b = (entity_key_b.strip() if entity_key_b else "__ISOLATE__").replace("'", "''")
@@ -1133,27 +1168,72 @@ def manage_identity_override(
 
 
 @mcp.tool()
-def get_triage_queue(max_confidence: float = 0.45, limit: int = 20) -> Dict[str, Any]:
+def get_triage_queue(
+    max_confidence: float = 0.75,
+    min_subject_fanout: int = 4,
+    limit: int = 20,
+) -> Dict[str, Any]:
     """
-    Return the highest-risk, lowest-confidence resolved clusters (and any unlabeled
-    evaluation pairs) for agent-driven quality triage and LLM-as-a-judge review.
+    Tier-0 SQL structural triage ($0, zero PII).
+    Returns the highest-risk borderline clusters (low confidence or multi-subject fanout)
+    plus cascade funnel stats and any pending evaluation_sample pairs.
     """
     adapter = get_adapter()
     safe_limit = max(1, min(int(limit), 100))
     threshold = float(max_confidence)
+    safe_fanout = max(2, int(min_subject_fanout))
     try:
         clusters = []
+        cascade_summary = None
         if adapter.table_exists("idr_out.identity_clusters_current"):
+            try:
+                cols = {
+                    str(c.get("name", "")).lower()
+                    for c in adapter.get_table_columns("idr_out.identity_clusters_current")
+                }
+            except Exception:
+                cols = set()
+            has_struct = {"subject_count", "child_count", "subject_fanout"}.issubset(cols)
+            predicate = (
+                f"(confidence_score <= {threshold} OR subject_fanout >= {safe_fanout} OR cluster_size >= 10)"
+                if has_struct
+                else f"(confidence_score <= {threshold} OR cluster_size >= 10)"
+            )
+            funnel_rows = adapter.query(
+                f"""
+                SELECT
+                    COUNT(*) AS total_multi_entity_clusters,
+                    COALESCE(SUM(CASE WHEN {predicate} THEN 1 ELSE 0 END), 0) AS tier0_flagged
+                FROM idr_out.identity_clusters_current
+                WHERE cluster_size > 1
+                """
+            )
+            total_multi = int((funnel_rows[0].get("total_multi_entity_clusters") or 0) if funnel_rows else 0)
+            tier0_flagged = int((funnel_rows[0].get("tier0_flagged") or 0) if funnel_rows else 0)
+            tier0_auto_passed = max(0, total_multi - tier0_flagged)
+            cascade_summary = {
+                "total_multi_entity_clusters": total_multi,
+                "tier0_auto_passed": tier0_auto_passed,
+                "tier0_flagged": tier0_flagged,
+                "sql_filter_savings_pct": round((tier0_auto_passed / total_multi) * 100.0, 1)
+                if total_multi > 0
+                else 100.0,
+            }
+            struct_select = ", subject_count, child_count, subject_fanout" if has_struct else ""
+            order_clause = (
+                "ORDER BY subject_fanout DESC, confidence_score ASC, cluster_size DESC"
+                if has_struct
+                else "ORDER BY confidence_score ASC, cluster_size DESC"
+            )
             clusters = adapter.query(
                 f"""
                 SELECT resolved_id, cluster_size, confidence_score, edge_diversity,
-                       max_fanout, primary_reason, updated_at
+                       max_fanout, primary_reason, updated_at{struct_select}
                 FROM idr_out.identity_clusters_current
-                WHERE confidence_score <= ?
-                ORDER BY confidence_score ASC, cluster_size DESC
+                WHERE cluster_size > 1 AND {predicate}
+                {order_clause}
                 LIMIT {safe_limit}
-                """,
-                params=[threshold],
+                """
             )
 
         samples = []
@@ -1177,12 +1257,52 @@ def get_triage_queue(max_confidence: float = 0.45, limit: int = 20) -> Dict[str,
         return {
             "status": "SUCCESS",
             "max_confidence": threshold,
+            "min_subject_fanout": safe_fanout,
+            "cascade_summary": cascade_summary,
             "low_confidence_clusters": clusters,
             "pending_evaluation_samples": samples,
             "pii_access_level": "masked" if should_mask_pii() else "full",
         }
     except Exception as e:
         return {"status": "ERROR", "error": f"Failed to fetch triage queue: {str(e)}"}
+
+
+@mcp.tool()
+def run_tiered_triage(
+    max_confidence: float = 0.75,
+    limit: int = 8,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    escalate_provider: Optional[str] = None,
+    escalate_model: Optional[str] = None,
+    escalation_threshold: float = 0.80,
+) -> Dict[str, Any]:
+    """
+    Execute the 3-Tier Cascade Judge (SQL Tier 0 -> Tier-1 LLM -> optional Tier-2 escalation).
+    Returns cascade funnel savings and structured override proposals ready for
+    human-confirmed execution via manage_identity_override.
+    """
+    from idr_core.ai_assistant import triage_with_ai
+    from idr_core.llm import LLMClient, LLMConfig
+
+    adapter = get_adapter()
+    cfg = LLMConfig.from_env()
+    if provider:
+        cfg.provider = provider
+    if model:
+        cfg.model = model
+    try:
+        return triage_with_ai(
+            adapter,
+            client=LLMClient(cfg, adapter=adapter),
+            max_confidence=max_confidence,
+            limit=limit,
+            escalate_provider=escalate_provider,
+            escalate_model=escalate_model,
+            escalation_threshold=escalation_threshold,
+        )
+    except Exception as e:
+        return {"status": "ERROR", "error": f"Tiered triage failed: {str(e)}"}
 
 
 @mcp.tool()
@@ -1483,6 +1603,33 @@ def connect_from_env():
 
     except Exception as e:
         print(f"⚠ Failed to connect to {platform}: {e}", file=sys.stderr)
+
+
+@mcp.tool()
+def get_activation_delta(
+    run_id: Optional[str] = None,
+    change_type: Optional[str] = None,
+    lens_id: str = "default",
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """
+    Inspect the opt-in Reverse-ETL / CRM activation changelog (`idr_out.identity_activation_delta`)
+    for a given `run_id` (or the latest run that emitted activation deltas).
+    Returns zero-PII cluster transition counts and rows (`NEW`, `MERGED`, `SPLIT`,
+    `PROFILE_CHANGED`, `RETIRED_MERGED`, `RETIRED_DELETED`).
+    """
+    from idr_core.activation_delta import query_activation_delta
+
+    adapter = get_adapter()
+    if not adapter:
+        return {"error": "Not connected to warehouse"}
+    return query_activation_delta(
+        adapter,
+        run_id=run_id,
+        change_type=change_type,
+        lens_id=lens_id,
+        limit=limit,
+    )
 
 
 @mcp.tool()

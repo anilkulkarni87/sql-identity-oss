@@ -4,13 +4,14 @@ Unit tests for `idr bootstrap` (AutoBootstrapper) and `idr doctor` (IDRDoctor).
 
 import os
 import tempfile
+
 import duckdb
 import pytest
 
 from idr_core.adapters.duckdb import DuckDBAdapter
 from idr_core.bootstrap import AutoBootstrapper
-from idr_core.doctor import CheckStatus, IDRDoctor
 from idr_core.cli import main
+from idr_core.doctor import CheckStatus, IDRDoctor
 
 
 @pytest.fixture

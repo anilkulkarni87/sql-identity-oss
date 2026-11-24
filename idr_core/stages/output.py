@@ -15,6 +15,9 @@ _CURRENT_OUTPUT_TABLES = (
     "identity_edges_current",
     "identity_identifiers_current",
     "identity_clusters_current",
+    "resolved_id_crosswalk",
+    "identity_lens_membership_current",
+    "identity_lens_clusters_current",
 )
 
 
@@ -24,6 +27,8 @@ class OutputStage(BaseStage):
     def __init__(self, ctx: StageContext, config=None):
         super().__init__(ctx)
         self.config = config
+        self.clusters_changed = 0
+        self.activation_delta_summary: Dict[str, int] = {}
 
     def upsert(self, target_table, source_query, key_cols, update_cols, insert_cols):
         """Execute platform-specific upsert (MERGE or ON CONFLICT)."""
@@ -71,100 +76,161 @@ class OutputStage(BaseStage):
             else "SPLIT_PART(entity_key, ':', 1)"
         )
 
-        # 0. Calculate cluster sizes and source diversity for impacted clusters
+        # Structural child roles (engine cardinality contract; zero domain-specific names)
+        child_roles = "('CHILD', 'EVENT', 'BRIDGE', 'EVENT_FACT', 'SUB_ENTITY', 'REFERENCE_LOOKUP')"
+        left_src = source_prefix_expr.replace("entity_key", "e.left_entity_key")
+        right_src = source_prefix_expr.replace("entity_key", "e.right_entity_key")
+
+        # 0. Calculate cluster sizes, subject vs. child counts, and source diversity
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_sizes_updates AS
             SELECT
-                resolved_id,
+                m.resolved_id,
                 COUNT(*) AS cluster_size,
-                COUNT(DISTINCT {source_prefix_expr}) AS source_diversity
-            FROM idr_out.identity_resolved_membership_current
-            WHERE resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
-            GROUP BY resolved_id
+                SUM(
+                    CASE
+                        WHEN UPPER(COALESCE(st.entity_type, '')) IN {child_roles} THEN 0
+                        ELSE 1
+                    END
+                ) AS subject_count,
+                SUM(
+                    CASE
+                        WHEN UPPER(COALESCE(st.entity_type, '')) IN {child_roles} THEN 1
+                        ELSE 0
+                    END
+                ) AS child_count,
+                COUNT(DISTINCT {source_prefix_expr.replace('entity_key', 'm.entity_key')}) AS source_diversity
+            FROM idr_out.identity_resolved_membership_current m
+            LEFT JOIN idr_meta.source_table st
+              ON st.table_id = {source_prefix_expr.replace('entity_key', 'm.entity_key')}
+            WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
+            GROUP BY m.resolved_id
         """)
 
-        # 1. Edge stats per cluster with calibrated identifier fidelity & diversity
-        self.adapter.execute("""
+        # 1. Edge stats per cluster: rule-configured trust weight (defaults from rule priority)
+        self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_edge_stats AS
+            WITH rule_weights AS (
+                SELECT
+                    LOWER(identifier_type) AS id_type_lower,
+                    MAX(
+                        COALESCE(
+                            CAST(confidence_weight AS {float_type}),
+                            CASE
+                                WHEN priority <= 1 THEN 0.80
+                                WHEN priority = 2 THEN 0.76
+                                WHEN priority = 3 THEN 0.70
+                                ELSE 0.60
+                            END
+                        )
+                    ) AS rule_weight
+                FROM idr_meta.rule
+                WHERE is_active = TRUE
+                GROUP BY LOWER(identifier_type)
+            )
             SELECT
                 m.resolved_id,
                 COUNT(DISTINCT e.identifier_type) AS edge_diversity,
                 COUNT(*) AS edge_count,
-                MAX(
-                    CASE
-                        WHEN LOWER(e.identifier_type) IN ('ssn', 'tax_id', 'national_id') THEN 0.85
-                        WHEN LOWER(e.identifier_type) LIKE '%customer%'
-                          OR LOWER(e.identifier_type) LIKE '%account%'
-                          OR LOWER(e.identifier_type) LIKE '%loyalty%' THEN 0.80
-                        WHEN LOWER(e.identifier_type) LIKE '%email%' THEN 0.76
-                        WHEN LOWER(e.identifier_type) LIKE '%phone%' THEN 0.72
-                        WHEN LOWER(e.identifier_type) LIKE '%device%'
-                          OR LOWER(e.identifier_type) LIKE '%cookie%' THEN 0.62
-                        WHEN LOWER(e.identifier_type) LIKE '%address%'
-                          OR LOWER(e.identifier_type) LIKE '%ip%'
-                          OR LOWER(e.identifier_type) LIKE '%session%' THEN 0.45
-                        ELSE 0.55
-                    END
-                ) AS max_fidelity,
-                MAX(
-                    CASE
-                        WHEN LOWER(e.identifier_type) LIKE '%customer%'
-                          OR LOWER(e.identifier_type) LIKE '%account%'
-                          OR LOWER(e.identifier_type) LIKE '%loyalty%'
-                          OR LOWER(e.identifier_type) IN ('ssn', 'tax_id') THEN 1
-                        ELSE 0
-                    END
-                ) AS has_strong_key,
-                MAX(CASE WHEN LOWER(e.identifier_type) LIKE '%email%' THEN 1 ELSE 0 END) AS has_email,
-                MAX(CASE WHEN LOWER(e.identifier_type) LIKE '%phone%' THEN 1 ELSE 0 END) AS has_phone
+                MAX(COALESCE(rw.rule_weight, 0.70)) AS max_fidelity
             FROM idr_out.identity_edges_current e
             JOIN idr_out.identity_resolved_membership_current m
               ON e.left_entity_key = m.entity_key
             JOIN idr_out.identity_resolved_membership_current m2
               ON e.right_entity_key = m2.entity_key
              AND m.resolved_id = m2.resolved_id
+            LEFT JOIN rule_weights rw
+              ON rw.id_type_lower = LOWER(e.identifier_type)
             WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
             GROUP BY m.resolved_id
         """)
 
-        # 1b. Single-value fanout per cluster (detects mega-star hubs regardless of edge_diversity)
-        self.adapter.execute("""
+        # 1b. Structural over-merge fanout per cluster.
+        # Counts distinct subject-role records sharing each identifier value; 1-to-many child/event
+        # records do not inflate subject_fanout. Damping threshold is per-rule configurable (default 4).
+        self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_value_fanout AS
-            SELECT
-                resolved_id,
-                MAX(value_fanout) AS max_fanout
-            FROM (
+            WITH rule_thresholds AS (
+                SELECT
+                    LOWER(identifier_type) AS id_type_lower,
+                    MAX(COALESCE(fanout_threshold, 4)) AS fanout_threshold
+                FROM idr_meta.rule
+                WHERE is_active = TRUE
+                GROUP BY LOWER(identifier_type)
+            ),
+            edge_endpoints AS (
                 SELECT
                     m.resolved_id,
                     e.identifier_type,
                     e.identifier_value_norm,
-                    COUNT(DISTINCT e.left_entity_key) + 1 AS value_fanout
+                    e.left_entity_key AS entity_key,
+                    CASE WHEN UPPER(COALESCE(st_l.entity_type, '')) IN {child_roles} THEN 1 ELSE 0 END AS is_child
                 FROM idr_out.identity_edges_current e
                 JOIN idr_out.identity_resolved_membership_current m
                   ON e.left_entity_key = m.entity_key
                 JOIN idr_out.identity_resolved_membership_current m2
                   ON e.right_entity_key = m2.entity_key
                  AND m.resolved_id = m2.resolved_id
+                LEFT JOIN idr_meta.source_table st_l ON st_l.table_id = {left_src}
                 WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
-                GROUP BY m.resolved_id, e.identifier_type, e.identifier_value_norm
-            ) vf
+                UNION ALL
+                SELECT
+                    m.resolved_id,
+                    e.identifier_type,
+                    e.identifier_value_norm,
+                    e.right_entity_key AS entity_key,
+                    CASE WHEN UPPER(COALESCE(st_r.entity_type, '')) IN {child_roles} THEN 1 ELSE 0 END AS is_child
+                FROM idr_out.identity_edges_current e
+                JOIN idr_out.identity_resolved_membership_current m
+                  ON e.left_entity_key = m.entity_key
+                JOIN idr_out.identity_resolved_membership_current m2
+                  ON e.right_entity_key = m2.entity_key
+                 AND m.resolved_id = m2.resolved_id
+                LEFT JOIN idr_meta.source_table st_r ON st_r.table_id = {right_src}
+                WHERE m.resolved_id IN (SELECT resolved_id FROM idr_work.impacted_resolved_ids)
+            ),
+            value_groups AS (
+                SELECT
+                    ep.resolved_id,
+                    ep.identifier_type,
+                    ep.identifier_value_norm,
+                    COUNT(DISTINCT ep.entity_key) AS raw_fanout,
+                    COUNT(DISTINCT CASE WHEN ep.is_child = 0 THEN ep.entity_key END) AS subj_fanout,
+                    COALESCE(MAX(rt.fanout_threshold), 4) AS fanout_threshold
+                FROM edge_endpoints ep
+                LEFT JOIN rule_thresholds rt ON rt.id_type_lower = LOWER(ep.identifier_type)
+                GROUP BY ep.resolved_id, ep.identifier_type, ep.identifier_value_norm
+            )
+            SELECT
+                resolved_id,
+                MAX(raw_fanout) AS max_fanout,
+                GREATEST(1, COALESCE(MAX(subj_fanout), 1)) AS subject_fanout,
+                MIN(
+                    LEAST(
+                        1.0,
+                        SQRT(CAST(GREATEST(2, fanout_threshold) AS {float_type})) /
+                        SQRT(GREATEST(CAST(GREATEST(2, fanout_threshold) AS {float_type}), CAST(GREATEST(1, subj_fanout) AS {float_type})))
+                    )
+                ) AS fanout_damping
+            FROM value_groups
             GROUP BY resolved_id
         """)
 
-        # 2. Spanning Tree Connectivity, Source Diversity & Max Fanout
+        # 2. Spanning Tree Connectivity, Source Diversity & Structural Fanout
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_density AS
             SELECT
                 c.resolved_id,
                 c.cluster_size,
+                c.subject_count,
+                c.child_count,
                 c.source_diversity,
                 COALESCE(es.edge_diversity, 0) AS edge_diversity,
                 COALESCE(es.edge_count, 0) AS edge_count,
                 LEAST(c.cluster_size, COALESCE(vf.max_fanout, 1)) AS max_fanout,
-                COALESCE(es.max_fidelity, 0.55) AS max_fidelity,
-                COALESCE(es.has_strong_key, 0) AS has_strong_key,
-                COALESCE(es.has_email, 0) AS has_email,
-                COALESCE(es.has_phone, 0) AS has_phone,
+                LEAST(GREATEST(1, c.subject_count), COALESCE(vf.subject_fanout, 1)) AS subject_fanout,
+                COALESCE(vf.fanout_damping, 1.0) AS fanout_damping,
+                COALESCE(es.max_fidelity, 0.70) AS max_fidelity,
                 CASE
                     WHEN c.cluster_size <= 1 THEN 1.0
                     ELSE LEAST(
@@ -178,15 +244,18 @@ class OutputStage(BaseStage):
             LEFT JOIN idr_work.cluster_value_fanout vf ON vf.resolved_id = c.resolved_id
         """)
 
-        # 3. Continuous Confidence Ranking: Corroboration Base (Noisy-OR + Source Diversity) * Fan-out Damping (2/sqrt(max_fanout))
+        # 3. Continuous, Explainable Confidence Ranking (Domain-Agnostic)
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_work.cluster_confidence AS
             SELECT
                 cd.resolved_id,
                 cd.cluster_size,
+                cd.subject_count,
+                cd.child_count,
                 cd.edge_diversity,
                 cd.edge_count,
                 cd.max_fanout,
+                cd.subject_fanout,
                 cd.connectivity_ratio,
                 CASE
                     WHEN cd.cluster_size = 1 THEN 1.0
@@ -208,10 +277,7 @@ class OutputStage(BaseStage):
                                         WHEN cd.edge_count > cd.cluster_size - 1 THEN 0.005
                                         ELSE 0.0
                                     END
-                                ) * LEAST(
-                                    1.0,
-                                    2.0 / SQRT(GREATEST(4.0, CAST(cd.max_fanout AS {float_type})))
-                                )
+                                ) * cd.fanout_damping
                             )
                         ),
                         3
@@ -219,18 +285,13 @@ class OutputStage(BaseStage):
                 END AS confidence_score,
                 CASE
                     WHEN cd.cluster_size = 1 THEN 'SINGLETON_NO_MATCH_REQUIRED'
-                    WHEN cd.max_fanout >= 20 THEN
-                        CONCAT('High fan-out over-merge risk (max_fanout=', CAST(cd.max_fanout AS {str_type}), ', ', CAST(cd.edge_diversity AS {str_type}), ' identifier types)')
+                    WHEN cd.subject_fanout >= 20 THEN
+                        CONCAT('High fan-out over-merge risk (subject_fanout=', CAST(cd.subject_fanout AS {str_type}), ', ', CAST(cd.edge_diversity AS {str_type}), ' corroborating rules)')
                     WHEN cd.edge_diversity >= 2 THEN
-                        CONCAT(CAST(cd.edge_diversity AS {str_type}), ' identifier types across ', CAST(cd.source_diversity AS {str_type}), ' sources (High Confidence Corroboration)')
-                    WHEN cd.has_strong_key = 1 THEN
-                        'Deterministic account/customer key match (Single Key)'
-                    WHEN cd.has_email = 1 THEN
-                        'Deterministic exact email match (Single Key)'
-                    WHEN cd.has_phone = 1 THEN
-                        'Deterministic exact phone match (Single Key)'
-                    ELSE
-                        CONCAT('Deterministic match via ', CAST(cd.edge_diversity AS {str_type}), ' identifier type(s)')
+                        CONCAT(CAST(cd.subject_count AS {str_type}), ' subject + ', CAST(cd.child_count AS {str_type}), ' child records corroborated by ', CAST(cd.edge_diversity AS {str_type}), ' rules across ', CAST(cd.source_diversity AS {str_type}), ' sources')
+                    WHEN cd.edge_diversity = 1 THEN
+                        CONCAT('Single-rule match (', CAST(cd.subject_count AS {str_type}), ' subject + ', CAST(cd.child_count AS {str_type}), ' child records across ', CAST(cd.source_diversity AS {str_type}), ' sources)')
+                    ELSE 'Single-node or fuzzy-only cluster'
                 END AS primary_reason
             FROM idr_work.cluster_density cd
         """)
@@ -242,9 +303,12 @@ class OutputStage(BaseStage):
                 return
             if not self.adapter.table_exists("idr_out.identity_resolved_membership_current"):
                 return
-            prev_cnt = self.adapter.query_one(
-                "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
-            ) or 0
+            prev_cnt = (
+                self.adapter.query_one(
+                    "SELECT COUNT(*) FROM idr_out.identity_resolved_membership_current"
+                )
+                or 0
+            )
             if prev_cnt == 0:
                 return
 
@@ -291,22 +355,58 @@ class OutputStage(BaseStage):
     def _snapshot_current_outputs(self) -> Dict[str, bool]:
         """Snapshot mutable idr_out.*_current tables before Stage 8 writes begin."""
         snapshots: Dict[str, bool] = {}
-        for tbl in _CURRENT_OUTPUT_TABLES:
+        self._partial_profile_backups = set()
+        if self.config and self.config.run_mode == "INCR":
+            deleted = ""
+            if self.adapter.table_exists("idr_work.deleted_no_wm_entities"):
+                deleted = " UNION ALL SELECT m.resolved_id FROM idr_out.identity_resolved_membership_current m JOIN idr_work.deleted_no_wm_entities d ON d.entity_key=m.entity_key"
+            self.adapter.execute(
+                "CREATE OR REPLACE TABLE idr_work.output_affected_profile_ids AS "
+                "SELECT DISTINCT resolved_id FROM ("
+                "SELECT label AS resolved_id FROM idr_work.lp_labels "
+                "UNION ALL SELECT m.resolved_id FROM idr_out.identity_resolved_membership_current m JOIN idr_work.lp_labels l ON m.entity_key=l.entity_key"
+                + deleted
+                + ") affected_ids"
+            )
+        from ..grouped_outputs import definitions_from_warehouse
+        grouped = ["grouped_"+d.id for d in definitions_from_warehouse(self.adapter)]
+        for tbl in (*_CURRENT_OUTPUT_TABLES, "golden_profiles", *grouped):
             exists = bool(self.adapter.table_exists(f"idr_out.{tbl}"))
             if exists:
-                self.adapter.execute(
-                    f"CREATE OR REPLACE TABLE idr_work._backup_{tbl} AS SELECT * FROM idr_out.{tbl}"
-                )
+                predicate = ""
+                if self.config and self.config.run_mode == "INCR" and (tbl == "golden_profiles" or tbl.startswith("grouped_")):
+                    predicate = " WHERE resolved_id IN (SELECT resolved_id FROM idr_work.output_affected_profile_ids)"
+                    self._partial_profile_backups.add(tbl)
+                self.adapter.execute(f"CREATE OR REPLACE TABLE idr_work._backup_{tbl} AS SELECT * FROM idr_out.{tbl}{predicate}")
             snapshots[tbl] = exists
         return snapshots
 
     def _restore_current_outputs(self, snapshots: Dict[str, bool]) -> None:
         """Restore idr_out.*_current tables from pre-Stage-8 snapshots after a failure."""
+        try:
+            if self.adapter.table_exists("idr_out.identity_activation_delta"):
+                safe_run = str(self.run_id).replace("'", "''")
+                self.adapter.execute(
+                    f"DELETE FROM idr_out.identity_activation_delta WHERE run_id = '{safe_run}'"
+                )
+        except Exception as delta_err:
+            self.logger.error(
+                f"Failed to rollback idr_out.identity_activation_delta: {delta_err}",
+                extra={"run_id": self.run_id},
+            )
         for tbl, existed in snapshots.items():
             if not existed:
+                self.adapter.execute(f"DROP TABLE IF EXISTS idr_out.{tbl}")
                 continue
             try:
                 if self.adapter.table_exists(f"idr_work._backup_{tbl}"):
+                    if tbl in self._partial_profile_backups:
+                        self.adapter.execute(f"DELETE FROM idr_out.{tbl} WHERE resolved_id IN (SELECT resolved_id FROM idr_work.output_affected_profile_ids)")
+                        self.adapter.execute(f"INSERT INTO idr_out.{tbl} SELECT * FROM idr_work._backup_{tbl}")
+                        continue
+                    if tbl == "golden_profiles" or tbl.startswith("grouped_"):
+                        self.adapter.execute(f"CREATE OR REPLACE TABLE idr_out.{tbl} AS SELECT * FROM idr_work._backup_{tbl}")
+                        continue
                     # Preserve table DDL constraints (e.g., DuckDB/Postgres PRIMARY KEY) while restoring rows.
                     self.adapter.execute(f"DELETE FROM idr_out.{tbl} WHERE 1=1")
                     self.adapter.execute(
@@ -365,7 +465,9 @@ class OutputStage(BaseStage):
                         f"({moved_pct:.2f}%) exceeds max_moved_entities_pct={float(max_moved_pct):.2f}%"
                     )
 
-        if max_cluster_delta_pct is not None and snapshots.get("identity_resolved_membership_current"):
+        if max_cluster_delta_pct is not None and snapshots.get(
+            "identity_resolved_membership_current"
+        ):
             run_mode = str(getattr(self.config, "run_mode", "FULL")).upper()
             if run_mode == "INCR":
                 prev_clusters = int(
@@ -404,7 +506,7 @@ class OutputStage(BaseStage):
                         f"({cluster_delta_pct:.2f}%) exceeds max_cluster_delta_pct={float(max_cluster_delta_pct):.2f}%"
                     )
 
-    def generate_output(self) -> int:
+    def generate_output(self, prepared_lenses=None) -> int:
         """Update output tables with resolved identities with rollback on mid-stage failure."""
         current_ts = self._dialect["current_timestamp"]
         snapshots = self._snapshot_current_outputs()
@@ -418,7 +520,6 @@ class OutputStage(BaseStage):
             raise
 
         try:
-
             # 1. Identify impacted clusters for confidence scoring
             self.adapter.execute("""
                 CREATE OR REPLACE TABLE idr_work.impacted_resolved_ids AS
@@ -458,7 +559,13 @@ class OutputStage(BaseStage):
                 """,
                 key_cols=["entity_key"],
                 update_cols=["resolved_id", "updated_at", "run_id", "super_cluster_id"],
-                insert_cols=["entity_key", "resolved_id", "updated_at", "run_id", "super_cluster_id"],
+                insert_cols=[
+                    "entity_key",
+                    "resolved_id",
+                    "updated_at",
+                    "run_id",
+                    "super_cluster_id",
+                ],
             )
 
             # 2b. Cleanup stale memberships (FULL run only) so removed/inactive source tables
@@ -562,7 +669,14 @@ class OutputStage(BaseStage):
                     """,
                     key_cols=["entity_key", "identifier_type"],
                     update_cols=["identifier_value_norm", "is_hashed", "updated_at", "run_id"],
-                    insert_cols=["entity_key", "identifier_type", "identifier_value_norm", "is_hashed", "updated_at", "run_id"],
+                    insert_cols=[
+                        "entity_key",
+                        "identifier_type",
+                        "identifier_value_norm",
+                        "is_hashed",
+                        "updated_at",
+                        "run_id",
+                    ],
                 )
                 if self.config and self.config.run_mode == "FULL":
                     self.adapter.execute(f"""
@@ -588,7 +702,10 @@ class OutputStage(BaseStage):
                         COALESCE(cc.edge_count, 0) AS edge_count,
                         COALESCE(cc.max_fanout, 1) AS max_fanout,
                         COALESCE(cc.connectivity_ratio, 1.0) AS match_density,
-                        COALESCE(cc.primary_reason, 'Single-node cluster') AS primary_reason
+                        COALESCE(cc.primary_reason, 'Single-node cluster') AS primary_reason,
+                        COALESCE(cc.subject_count, COUNT(*)) AS subject_count,
+                        COALESCE(cc.child_count, 0) AS child_count,
+                        COALESCE(cc.subject_fanout, 1) AS subject_fanout
                     FROM idr_work.lp_labels l
                     LEFT JOIN idr_work.fuzzy_results fr ON l.label = fr.resolved_id
                     LEFT JOIN idr_work.cluster_confidence cc ON l.label = cc.resolved_id
@@ -600,7 +717,10 @@ class OutputStage(BaseStage):
                         cc.edge_count,
                         cc.max_fanout,
                         cc.connectivity_ratio,
-                        cc.primary_reason
+                        cc.primary_reason,
+                        cc.subject_count,
+                        cc.child_count,
+                        cc.subject_fanout
                 """,
                 key_cols=["resolved_id"],
                 update_cols=[
@@ -614,6 +734,9 @@ class OutputStage(BaseStage):
                     "max_fanout",
                     "match_density",
                     "primary_reason",
+                    "subject_count",
+                    "child_count",
+                    "subject_fanout",
                 ],
                 insert_cols=[
                     "resolved_id",
@@ -627,6 +750,9 @@ class OutputStage(BaseStage):
                     "max_fanout",
                     "match_density",
                     "primary_reason",
+                    "subject_count",
+                    "child_count",
+                    "subject_fanout",
                 ],
             )
 
@@ -656,6 +782,61 @@ class OutputStage(BaseStage):
                 self._warnings.append(f"Profile generation failed: {str(e)}")
                 raise RuntimeError(f"Golden profile generation failed: {e}") from e
 
+            from ..grouped_outputs import materialize_grouped_outputs
+            self.grouped_output_counts = materialize_grouped_outputs(self.adapter, self.run_id, self.config.run_mode if self.config else "FULL")
+
+            # Publish prepared lenses inside the Stage 8 rollback window before advancing watermarks.
+            published_lenses = []
+            for lid, cache in (prepared_lenses or []):
+                self.adapter.execute(
+                    f"CREATE OR REPLACE TABLE idr_work.lp_labels_lens AS SELECT * FROM {cache}"
+                )
+                self.materialize_lens_output(lid)
+                self.adapter.execute(f"DROP TABLE IF EXISTS {cache}")
+                published_lenses.append(lid)
+
+            # Opt-in activation changelog (0.0s overhead when disabled)
+            from ..activation_delta import materialize_activation_delta
+
+            self.activation_delta_summary = materialize_activation_delta(
+                self.adapter,
+                run_id=self.run_id,
+                run_mode=self.config.run_mode if self.config else "FULL",
+                snapshots=snapshots,
+                emit_override=getattr(self.config, "emit_activation_delta", None)
+                if self.config
+                else None,
+                lens_ids=published_lenses,
+            )
+
+            # Count distinct old/new cluster IDs whose memberships actually changed.
+            # Include retired IDs after merges and deleted records, not only this run's labels.
+            if snapshots.get("identity_resolved_membership_current"):
+                self.clusters_changed = int(
+                    self.adapter.query_one("""
+                    WITH changed AS (
+                        SELECT old.resolved_id AS old_id, new.resolved_id AS new_id
+                        FROM idr_work._backup_identity_resolved_membership_current old
+                        FULL OUTER JOIN idr_out.identity_resolved_membership_current new
+                          ON old.entity_key = new.entity_key
+                        WHERE old.resolved_id IS NULL OR new.resolved_id IS NULL
+                           OR old.resolved_id <> new.resolved_id
+                           OR COALESCE(old.super_cluster_id, old.resolved_id) <> COALESCE(new.super_cluster_id, new.resolved_id)
+                    ), ids AS (
+                        SELECT old_id AS resolved_id FROM changed
+                        UNION ALL SELECT new_id AS resolved_id FROM changed
+                    ) SELECT COUNT(DISTINCT resolved_id) FROM ids WHERE resolved_id IS NOT NULL
+                """)
+                    or 0
+                )
+            else:
+                self.clusters_changed = int(
+                    self.adapter.query_one(
+                        "SELECT COUNT(DISTINCT resolved_id) FROM idr_out.identity_resolved_membership_current"
+                    )
+                    or 0
+                )
+
             # 5. Update watermarks (ignore NULL watermark_value rows from candidate expansion / overrides)
             self.upsert(
                 target_table="idr_meta.run_state",
@@ -680,7 +861,9 @@ class OutputStage(BaseStage):
                 return int(res[0]["cnt"]) if res else 0
             except Exception:
                 try:
-                    res = self.adapter.query("SELECT COUNT(*) as cnt FROM idr_out.identity_clusters_current")
+                    res = self.adapter.query(
+                        "SELECT COUNT(*) as cnt FROM idr_out.identity_clusters_current"
+                    )
                     return int(res[0]["cnt"]) if res else 0
                 except Exception:
                     return 0
@@ -697,7 +880,19 @@ class OutputStage(BaseStage):
             if self.adapter.dialect == "bigquery"
             else ""
         )
-        # Analyze what would change
+        lens = (self.config.lens or "default") if self.config else "default"
+        named_lens = lens.lower() not in ("default", "none", "__none__")
+        membership = (
+            "idr_out.identity_lens_membership_current"
+            if named_lens
+            else "idr_out.identity_resolved_membership_current"
+        )
+        lens_pred = (
+            f" AND m.lens_id = '{self._validate_metadata_value(lens, 'identifier', 'lens_id')}'"
+            if named_lens
+            else ""
+        )
+        # Analyze what would change against the same saved graph view.
         self.adapter.execute(f"""
             CREATE OR REPLACE TABLE idr_out.dry_run_results {dry_run_cluster}AS
             SELECT
@@ -711,8 +906,8 @@ class OutputStage(BaseStage):
                 END AS change_type,
                 '{self.run_id}' AS run_id
             FROM idr_work.lp_labels lp
-            LEFT JOIN idr_out.identity_resolved_membership_current m
-                ON lp.entity_key = m.entity_key
+            LEFT JOIN {membership} m
+                ON lp.entity_key = m.entity_key {lens_pred}
         """)
 
         # Summary statistics

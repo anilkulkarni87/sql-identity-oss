@@ -171,7 +171,7 @@ export default function DataModel() {
                                                                         </span>
                                                                     </td>
                                                                     <td className="table-td font-mono text-xs text-accent">
-                                                                        {col.type}
+                                                                        {col.type.replace(/_type$/i, '').toUpperCase()}
                                                                     </td>
                                                                     <td className="table-td text-xs text-ink-secondary">
                                                                         {col.description || (

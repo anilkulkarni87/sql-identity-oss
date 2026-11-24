@@ -5,6 +5,10 @@ This adapter uses Snowpark Python to execute SQL against Snowflake,
 enabling the IDR core to run as a stored procedure.
 """
 
+import math
+import threading
+import time
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from .base import IDRAdapter
@@ -34,6 +38,8 @@ class SnowflakeAdapter(IDRAdapter):
         """
         self.init_schema_mapping(schema_mapping)
         self.conn_obj = session_or_conn
+        self._lock = threading.RLock()
+        self._budget_local = threading.local()
         # Detect mode
         self.is_snowpark = hasattr(session_or_conn, "sql") and hasattr(
             session_or_conn, "create_dataframe"
@@ -43,6 +49,75 @@ class SnowflakeAdapter(IDRAdapter):
     def dialect(self) -> str:
         return "snowflake"
 
+    @contextmanager
+    def query_budget(self, seconds: float, max_bytes_billed: Optional[int] = None):
+        """Enforce statement timeout via Snowflake DBAPI timeout or Snowpark session parameter."""
+        deadline = time.monotonic() + seconds
+
+        def check():
+            if time.monotonic() >= deadline:
+                raise ValueError(
+                    "Profile preview exceeded its time budget; no production outputs were changed"
+                )
+
+        if self.is_snowpark:
+            timeout_sec = max(1, int(math.ceil(seconds)))
+            with self._lock:
+                self._budget_local.deadline = deadline
+                self.conn_obj.sql(
+                    f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {timeout_sec}"
+                ).collect()
+                try:
+                    yield check
+                    check()
+                except Exception as exc:
+                    if time.monotonic() >= deadline or "timeout" in str(exc).lower() or "cancel" in str(exc).lower():
+                        raise ValueError(
+                            "Profile preview exceeded its time budget; no production outputs were changed"
+                        ) from exc
+                    raise
+                finally:
+                    self._budget_local.deadline = None
+                    try:
+                        self.conn_obj.sql(
+                            "ALTER SESSION UNSET STATEMENT_TIMEOUT_IN_SECONDS"
+                        ).collect()
+                    except Exception:
+                        pass
+        else:
+            self._budget_local.deadline = deadline
+            try:
+                yield check
+                check()
+            finally:
+                self._budget_local.deadline = None
+
+    def _cursor_execute(self, cur, sql: str, params: Optional[List[Any]] = None) -> None:
+        deadline = getattr(self._budget_local, "deadline", None)
+        if deadline is None:
+            if params:
+                cur.execute(sql, params)
+            else:
+                cur.execute(sql)
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError(
+                "Profile preview exceeded its time budget; no production outputs were changed"
+            )
+        timeout_sec = max(1, int(math.ceil(remaining)))
+        try:
+            if params:
+                cur.execute(sql, params, timeout=timeout_sec)
+            else:
+                cur.execute(sql, timeout=timeout_sec)
+        except Exception as exc:
+            if time.monotonic() >= deadline or "timeout" in str(exc).lower() or "cancel" in str(exc).lower():
+                raise ValueError(
+                    "Profile preview exceeded its time budget; no production outputs were changed"
+                ) from exc
+            raise
+
     def execute(self, sql: str) -> None:
         """Execute a single SQL statement."""
         sql = self._rewrite_schemas(sql)
@@ -50,7 +125,7 @@ class SnowflakeAdapter(IDRAdapter):
             self.conn_obj.sql(sql).collect()
         else:
             with self.conn_obj.cursor() as cur:
-                cur.execute(sql)
+                self._cursor_execute(cur, sql)
 
     def execute_script(self, sql: str) -> None:
         """Execute multiple SQL statements separated by semicolons."""
@@ -64,7 +139,7 @@ class SnowflakeAdapter(IDRAdapter):
                     self.conn_obj.sql(stmt).collect()
                 else:
                     with self.conn_obj.cursor() as cur:
-                        cur.execute(stmt)
+                        self._cursor_execute(cur, stmt)
 
     def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
         """Execute SQL and return results as list of dicts."""
@@ -81,10 +156,7 @@ class SnowflakeAdapter(IDRAdapter):
                 sql = sql.replace("?", "%s")
 
             with self.conn_obj.cursor() as cur:
-                if params:
-                    cur.execute(sql, params)
-                else:
-                    cur.execute(sql)
+                self._cursor_execute(cur, sql, params)
 
                 # Fetch results and columns
                 cols = [col[0].lower() for col in cur.description]
@@ -106,10 +178,7 @@ class SnowflakeAdapter(IDRAdapter):
                 sql = sql.replace("?", "%s")
 
             with self.conn_obj.cursor() as cur:
-                if params:
-                    cur.execute(sql, params)
-                else:
-                    cur.execute(sql)
+                self._cursor_execute(cur, sql, params)
                 result = cur.fetchone()
                 return result[0] if result else None
 

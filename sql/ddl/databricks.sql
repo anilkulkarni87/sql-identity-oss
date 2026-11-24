@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS idr_meta.source_table (
   table_id STRING,
   table_fqn STRING,
   entity_type STRING,
+  entity_kind STRING,
   entity_key_expr STRING,
   watermark_column STRING,
   watermark_lookback_minutes INT,
@@ -49,15 +50,18 @@ CREATE TABLE IF NOT EXISTS idr_meta.rule (
   canonicalize STRING,
   allow_hashed BOOLEAN,
   require_non_null BOOLEAN,
-  max_group_size INT
+  max_group_size INT,
+  confidence_weight DOUBLE,
+  fanout_threshold INT
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.identifier_mapping (
   table_id STRING,
   identifier_type STRING,
   identifier_value_expr STRING,
-  is_hashed BOOLEAN
-);
+  is_hashed BOOLEAN,
+  source_is_hashed BOOLEAN,
+  issuer_expr STRING);
 
 CREATE TABLE IF NOT EXISTS idr_meta.entity_attribute_mapping (
   table_id STRING,
@@ -69,7 +73,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.survivorship_rule (
   attribute_name STRING,
   strategy STRING,
   source_priority_list STRING,
-  recency_field STRING
+  recency_field STRING,
+  row_group STRING
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.fuzzy_rule (
@@ -139,7 +144,10 @@ CREATE TABLE IF NOT EXISTS idr_out.identity_clusters_current (
   primary_reason STRING,
   updated_ts TIMESTAMP,
   run_id STRING,
-  super_cluster_id STRING  -- Fuzzy merged ID (nullable)
+  super_cluster_id STRING,  -- Fuzzy merged ID (nullable)
+  subject_count INT,
+  child_count INT,
+  subject_fanout INT
 );
 
 CREATE TABLE IF NOT EXISTS idr_out.golden_profile_current (
@@ -190,7 +198,10 @@ CREATE TABLE IF NOT EXISTS idr_out.run_history (
   watermarks_json STRING,
   error_message STRING,
   error_stage STRING,
-  created_at TIMESTAMP
+  created_at TIMESTAMP,
+  duration_seconds_precise DOUBLE,
+  clusters_changed INTEGER,
+  matching_config_hash STRING
 );
 
 CREATE TABLE IF NOT EXISTS idr_out.stage_metrics (
@@ -202,7 +213,8 @@ CREATE TABLE IF NOT EXISTS idr_out.stage_metrics (
   duration_seconds BIGINT,
   rows_in BIGINT,
   rows_out BIGINT,
-  notes STRING
+  notes STRING,
+  duration_seconds_precise DOUBLE
 );
 
 CREATE TABLE IF NOT EXISTS idr_out.dry_run_results (
@@ -306,3 +318,28 @@ USING (
   UNION ALL SELECT 'max_lp_iterations', '30', 'Maximum label propagation iterations'
 ) src ON tgt.config_key = src.config_key
 WHEN NOT MATCHED THEN INSERT (config_key, config_value, description) VALUES (src.config_key, src.config_value, src.description);
+
+
+-- Aggregate review reports; record-level comparison inputs remain in expiring scratch schemas.
+CREATE TABLE IF NOT EXISTS idr_out.ai_review_report (
+  run_id STRING, owner_key STRING, report_json STRING,
+  scratch_token STRING, input_expires_at STRING, expires_at STRING
+);
+
+CREATE TABLE IF NOT EXISTS idr_meta.config_extension (extension_key STRING, value_json STRING);
+
+CREATE TABLE IF NOT EXISTS idr_out.identity_activation_delta (
+  run_id STRING,
+  lens_id STRING,
+  resolved_id STRING,
+  activation_status STRING,
+  change_type STRING,
+  previous_resolved_ids_json STRING,
+  superseded_by_resolved_id STRING,
+  cluster_size INT,
+  entities_added INT,
+  entities_removed INT,
+  profile_changed BOOLEAN,
+  confidence_score DOUBLE,
+  emitted_at TIMESTAMP
+);

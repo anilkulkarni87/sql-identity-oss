@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from idr_core.adapters.duckdb import DuckDBAdapter
+from idr_core.ai_config import AIConfigContext
 from idr_core.config import config_to_sql, validate_config
 from idr_core.llm import LLMClient, LLMConfig
 from idr_core.profiler import IDRDataProfiler
@@ -312,6 +313,7 @@ def test_ai_rule_generator_repair_loop_and_zero_pii_prompts():
     plan = AIRuleGenerator(adapter, client=mock_client, max_repairs=2).generate(
         tables=["raw.crm_customers", "raw.web_orders", "raw.products"],
         goal="Unify retail customers across CRM and web orders",
+        context=AIConfigContext(allowed_matching_identifiers=["email", "phone"]),
         verify_sql=True,
     )
 
@@ -320,6 +322,7 @@ def test_ai_rule_generator_repair_loop_and_zero_pii_prompts():
     assert plan.validation_report.sql_verified is True
     assert plan.validation_report.repair_attempts == 2
     assert len(plan.suggested_config["sources"]) == 2
+    # Shared-phone matching is explicitly approved in this repair-loop fixture.
     assert len(plan.suggested_config["rules"]) == 2
     assert len(plan.explanations.rules) == 2
     assert plan.explanations.rules[1].needs_review is True

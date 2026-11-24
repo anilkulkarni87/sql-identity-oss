@@ -42,6 +42,32 @@ class SchemaManager:
         if seed_default_exclusions:
             self.seed_default_exclusions()
 
+    def ensure_schema(self) -> List[str]:
+        """
+        Declaratively reconcile all SYSTEM_TABLES on an existing warehouse deployment:
+        creates missing schemas, creates missing system tables, and applies additive
+        `ALTER TABLE ... ADD COLUMN` upgrades across DuckDB, Snowflake, BigQuery, and Databricks.
+        Never drops tables or user columns.
+        """
+        applied: List[str] = []
+        for schema in ("idr_meta", "idr_work", "idr_out"):
+            try:
+                self.adapter.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+            except Exception:
+                pass
+
+        for table_def in SYSTEM_TABLES:
+            try:
+                existed = bool(self.adapter.table_exists(table_def.fqn))
+                added = self._create_table(table_def)
+                if not existed:
+                    applied.append(f"CREATE {table_def.fqn}")
+                else:
+                    applied.extend(added)
+            except Exception:
+                pass
+        return applied
+
     def seed_default_exclusions(self) -> int:
         """
         Non-destructively seed DEFAULT_EXCLUSIONS into `idr_meta.identifier_exclusion`.
@@ -149,8 +175,9 @@ class SchemaManager:
             lines.append(f"){cluster_clause};\n")
         return "\n".join(lines)
 
-    def _create_table(self, table_def: TableDef) -> None:
-        """Generate and execute CREATE TABLE DDL, or ALTER TABLE if columns missing."""
+    def _create_table(self, table_def: TableDef) -> List[str]:
+        """Generate and execute CREATE TABLE DDL, or additive ALTER TABLE ADD COLUMN if columns are missing."""
+        added_columns: List[str] = []
 
         # 1. Check if table exists
         exists = self.adapter.table_exists(table_def.fqn)
@@ -193,29 +220,32 @@ class SchemaManager:
                 ){cluster_clause}
             """
             self.adapter.execute(full_ddl)
+            return added_columns
 
-        else:
-            # Table exists: Check for missing columns (Schema Evolution)
-            # Adapters typically return 'name' or 'column_name'
-            cols = self.adapter.get_table_columns(table_def.fqn) or []
-            existing_cols = set()
-            for c in cols:
-                if not isinstance(c, dict):
-                    continue
-                # Handle potential variations in adapter return keys
-                col_name = c.get("name") or c.get("column_name")
-                if col_name:
-                    existing_cols.add(col_name.lower())
+        # Table exists: Check for missing columns (Additive Schema Evolution)
+        # Adapters typically return 'name' or 'column_name'
+        cols = self.adapter.get_table_columns(table_def.fqn) or []
+        if not cols:
+            return added_columns
+        existing_cols = set()
+        for c in cols:
+            if not isinstance(c, dict):
+                continue
+            col_name = c.get("name") or c.get("column_name")
+            if col_name:
+                existing_cols.add(str(col_name).lower())
 
-            for col in table_def.columns:
-                if col.name.lower() not in existing_cols:
-                    print(f"Schema Evolution: Adding column {col.name} to {table_def.fqn}")
-                    sql_type = self._get_sql_type(col.type)
+        if not existing_cols:
+            return added_columns
 
-                    # ALTER TABLE ADD COLUMN
-                    try:
-                        self.adapter.execute(
-                            f"ALTER TABLE {table_def.fqn} ADD COLUMN {col.name} {sql_type}"
-                        )
-                    except Exception as e:
-                        print(f"Warning: Failed to add column {col.name}: {e}")
+        for col in table_def.columns:
+            if col.name.lower() not in existing_cols:
+                sql_type = self._get_sql_type(col.type)
+                try:
+                    self.adapter.execute(
+                        f"ALTER TABLE {table_def.fqn} ADD COLUMN {col.name} {sql_type}"
+                    )
+                    added_columns.append(f"ADD {table_def.fqn}.{col.name}")
+                except Exception as e:
+                    print(f"Warning: Failed to add column {col.name} on {table_def.fqn}: {e}")
+        return added_columns

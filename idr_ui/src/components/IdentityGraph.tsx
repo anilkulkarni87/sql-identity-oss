@@ -76,6 +76,7 @@ export default function IdentityGraph({
         const cytoscapeNodes = nodes.map((n) => {
             const deg = degreeMap[n.id] || 0
             const size = n.isGroup ? 34 : Math.min(42, Math.max(20, 20 + deg * 2.2))
+            const groupWidth = n.isGroup ? Math.max(92, (n.label?.length || 8) * 7 + 24) : size
             const displayLabel = n.isGroup || showAllLabels || !isLargeCluster || deg >= 4 ? n.label : ''
 
             return {
@@ -83,6 +84,7 @@ export default function IdentityGraph({
                     ...n,
                     degree: deg,
                     size,
+                    groupWidth,
                     displayLabel,
                     fullLabel: n.label,
                 },
@@ -144,7 +146,7 @@ export default function IdentityGraph({
                 selector: 'node.group-hub',
                 style: {
                     shape: 'round-rectangle',
-                    width: 'label',
+                    width: 'data(groupWidth)',
                     height: 28,
                     padding: '10px',
                     'border-style': 'dashed',

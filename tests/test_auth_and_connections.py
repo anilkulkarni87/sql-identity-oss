@@ -401,15 +401,16 @@ def test_run_status_and_pipeline_stage_enums():
 # --- Consolidated from test_credential_discovery.py ---
 import os
 from pathlib import Path
+
 from idr_core.credential_discovery import (
+    _mask,
+    _sanitize_host,
     discover_all,
     discover_all_connections,
     discover_from_databrickscfg,
     discover_from_dbt_profiles,
     discover_from_env,
     discover_from_snowflake_config,
-    _mask,
-    _sanitize_host,
 )
 
 

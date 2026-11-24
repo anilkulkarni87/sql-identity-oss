@@ -58,7 +58,14 @@ SYSTEM_TABLES: List[TableDef] = [
                 "table_fqn", ColumnType.STRING, description="Fully qualified name (schema.table)"
             ),
             ColumnDef(
-                "entity_type", ColumnType.STRING, description="Type of entity (e.g., user, account)"
+                "entity_type",
+                ColumnType.STRING,
+                description="Structural graph role: PRIMARY (or legacy alias PERSON/SUBJECT) vs EVENT/CHILD",
+            ),
+            ColumnDef(
+                "entity_kind",
+                ColumnType.STRING,
+                description="Semantic entity domain kind (e.g., person, organization, product, asset); edges only link sources of the same entity_kind (default: person)",
             ),
             ColumnDef(
                 "entity_key_expr",
@@ -127,6 +134,16 @@ SYSTEM_TABLES: List[TableDef] = [
                 default="TRUE",
                 description="Whether this rule is enabled",
             ),
+            ColumnDef(
+                "confidence_weight",
+                ColumnType.DOUBLE,
+                description="Optional per-rule trust weight (0.05-0.99); defaults from rule priority",
+            ),
+            ColumnDef(
+                "fanout_threshold",
+                ColumnType.INT,
+                description="Optional subject fanout threshold before over-merge damping applies (default 4)",
+            ),
         ],
     ),
     TableDef(
@@ -156,6 +173,12 @@ SYSTEM_TABLES: List[TableDef] = [
                 ColumnType.BOOL,
                 default="FALSE",
                 description="Whether the source value is already hashed",
+            ),
+            ColumnDef("source_is_hashed", ColumnType.BOOL, default="FALSE", description="Source already holds a digest; preserve it without hashing again."),
+            ColumnDef(
+                "issuer_expr",
+                ColumnType.STRING,
+                description="Optional SQL expression/column scoping an identifier to an issuing authority or namespace (e.g., facility_id for MRN, vendor_id for SKU)",
             ),
         ],
     ),
@@ -205,6 +228,7 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("source_priority_list", ColumnType.STRING),
             ColumnDef("recency_field", ColumnType.STRING),
             ColumnDef("is_active", ColumnType.BOOL, default="TRUE"),
+            ColumnDef("row_group", ColumnType.STRING),
         ],
     ),
     TableDef(
@@ -297,6 +321,9 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef(
                 "config_hash", ColumnType.STRING
             ),  # Hash of metadata config for reproducibility
+            ColumnDef("duration_seconds_precise", ColumnType.DOUBLE),
+            ColumnDef("clusters_changed", ColumnType.INT),
+            ColumnDef("matching_config_hash", ColumnType.STRING),
         ],
     ),
     TableDef(
@@ -310,6 +337,7 @@ SYSTEM_TABLES: List[TableDef] = [
             ColumnDef("ended_at", ColumnType.TIMESTAMP),
             ColumnDef("duration_seconds", ColumnType.INT),
             ColumnDef("rows_out", ColumnType.INT),
+            ColumnDef("duration_seconds_precise", ColumnType.DOUBLE),
         ],
     ),
     TableDef(
@@ -411,6 +439,24 @@ SYSTEM_TABLES: List[TableDef] = [
                 description="Primary reason for the confidence score",
             ),
             ColumnDef("updated_at", ColumnType.TIMESTAMP),
+            ColumnDef(
+                "subject_count",
+                ColumnType.INT,
+                default="0",
+                description="Number of subject-role records in this cluster",
+            ),
+            ColumnDef(
+                "child_count",
+                ColumnType.INT,
+                default="0",
+                description="Number of child/event-role records attached to this cluster",
+            ),
+            ColumnDef(
+                "subject_fanout",
+                ColumnType.INT,
+                default="1",
+                description="Maximum subject-role records sharing one identifier value in this cluster",
+            ),
         ],
     ),
     TableDef(
@@ -529,6 +575,27 @@ SYSTEM_TABLES: List[TableDef] = [
     ),
     TableDef(
         schema="idr_out",
+        name="identity_activation_delta",
+        description="Opt-in run-watermarked activation changelog (NEW, MERGED, SPLIT, PROFILE_CHANGED, RETIRED_MERGED, RETIRED_DELETED) for Reverse-ETL and CRM sync.",
+        cluster_by=["run_id", "lens_id", "change_type"],
+        columns=[
+            ColumnDef("run_id", ColumnType.STRING, is_pk=True, description="Pipeline run ID that emitted this delta event."),
+            ColumnDef("lens_id", ColumnType.STRING, is_pk=True, description="Identity lens view ('default' or named lens ID)."),
+            ColumnDef("resolved_id", ColumnType.STRING, is_pk=True, description="Active or retired cluster resolved_id."),
+            ColumnDef("activation_status", ColumnType.STRING, description="Downstream lifecycle state: ACTIVE or RETIRED."),
+            ColumnDef("change_type", ColumnType.STRING, description="NEW, MERGED, SPLIT, PROFILE_CHANGED, RETIRED_MERGED, or RETIRED_DELETED."),
+            ColumnDef("previous_resolved_ids_json", ColumnType.STRING, description="Sorted JSON array of absorbed/origin prior resolved_ids."),
+            ColumnDef("superseded_by_resolved_id", ColumnType.STRING, description="Winning active resolved_id when change_type is RETIRED_MERGED."),
+            ColumnDef("cluster_size", ColumnType.INT, description="Current member count (0 for RETIRED tombstones)."),
+            ColumnDef("entities_added", ColumnType.INT, description="Entities newly added or merged into this cluster in this run."),
+            ColumnDef("entities_removed", ColumnType.INT, description="Entities split out or deleted from this cluster in this run."),
+            ColumnDef("profile_changed", ColumnType.BOOL, default="FALSE", description="Whether golden profile attributes changed or were newly created."),
+            ColumnDef("confidence_score", ColumnType.DOUBLE, description="Current cluster confidence score (NULL for RETIRED or non-default lens)."),
+            ColumnDef("emitted_at", ColumnType.TIMESTAMP, description="UTC timestamp when this changelog row was emitted."),
+        ],
+    ),
+    TableDef(
+        schema="idr_out",
         name="evaluation_sample",
         description="Stratified pair sample for precision/recall auditing and human/LLM labeling.",
         columns=[
@@ -642,9 +709,23 @@ _COLUMN_DESCRIPTIONS = {
     "sampled_at": "UTC timestamp when the evaluation pair was sampled.",
 }
 
+SYSTEM_TABLES.append(TableDef(schema="idr_out", name="ai_review_report", columns=[
+    ColumnDef("run_id", ColumnType.STRING, is_pk=True),
+    ColumnDef("owner_key", ColumnType.STRING, is_pk=True),
+    ColumnDef("report_json", ColumnType.STRING),
+    ColumnDef("scratch_token", ColumnType.STRING),
+    ColumnDef("input_expires_at", ColumnType.STRING),
+    ColumnDef("expires_at", ColumnType.STRING),
+], description="Owner-bound aggregate AI preview reports and retained workspace expiry."))
+
 for _tbl in SYSTEM_TABLES:
     if not _tbl.description and _tbl.fqn in _TABLE_DESCRIPTIONS:
         _tbl.description = _TABLE_DESCRIPTIONS[_tbl.fqn]
     for _col in _tbl.columns:
         if not _col.description and _col.name in _COLUMN_DESCRIPTIONS:
             _col.description = _COLUMN_DESCRIPTIONS[_col.name]
+
+SYSTEM_TABLES.append(TableDef(schema="idr_meta", name="config_extension", columns=[
+    ColumnDef("extension_key", ColumnType.STRING, is_pk=True),
+    ColumnDef("value_json", ColumnType.STRING),
+]))

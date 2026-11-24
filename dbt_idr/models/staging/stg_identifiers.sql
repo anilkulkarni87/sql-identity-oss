@@ -69,6 +69,7 @@
             {% set canonicalize = mapping['canonicalize'] %}
             {% set priority = mapping['priority'] %}
             {% set max_group_size = mapping['max_group_size'] %}
+            {% set issuer_expr = mapping['issuer_expr'] if ('issuer_expr' in mapping.keys() and mapping['issuer_expr']) else '' %}
 
             {# Build normalization expression #}
             {% set raw_str = "trim(cast(" ~ column_name ~ " as " ~ dbt.type_string() ~ "))" %}
@@ -100,19 +101,28 @@
                 {% set norm_expr = raw_str %}
             {% endif %}
 
+            {% if issuer_expr and (issuer_expr | string | trim) != '' %}
+                {% set issuer_clean = "upper(trim(cast(" ~ issuer_expr ~ " as " ~ dbt.type_string() ~ ")))" %}
+                {% set final_norm_expr = "concat(" ~ issuer_clean ~ ", '|', " ~ norm_expr ~ ")" %}
+                {% set issuer_where = " and (" ~ issuer_expr ~ ") is not null and length(" ~ issuer_clean ~ ") > 0 and lower(" ~ issuer_clean ~ ") not in ('null', 'none', 'n/a', 'undefined', 'nan', 'unknown', '')" %}
+            {% else %}
+                {% set final_norm_expr = norm_expr %}
+                {% set issuer_where = "" %}
+            {% endif %}
+
             {% set query %}
 select
     '{{ source_id }}' as source_id,
     concat('{{ source_id }}', ':', cast({{ entity_key_col }} as {{ dbt.type_string() }})) as entity_key,
     '{{ identifier_type }}' as identifier_type,
     cast({{ column_name }} as {{ dbt.type_string() }}) as identifier_value_raw,
-    cast({{ norm_expr }} as {{ dbt.type_string() }}) as identifier_value_norm,
+    cast({{ final_norm_expr }} as {{ dbt.type_string() }}) as identifier_value_norm,
     {{ is_hashed }} as is_hashed,
     {{ priority }} as priority,
     {{ max_group_size }} as max_group_size,
     current_timestamp as extracted_at
 from {{ source_fqn }}
-where {{ column_name }} is not null
+where {{ column_name }} is not null{{ issuer_where }}
             {% endset %}
 
             {% do union_queries.append(query) %}

@@ -232,6 +232,10 @@ class PrivacyManager:
                         "idr_out.resolved_id_crosswalk",
                         f"previous_resolved_id IN ({rid_in}) OR current_resolved_id IN ({rid_in})",
                     ),
+                    (
+                        "idr_out.identity_activation_delta",
+                        f"resolved_id IN ({rid_in}) OR superseded_by_resolved_id IN ({rid_in})",
+                    ),
                     # 2. Purge work/staging tables if present
                     (
                         "idr_work.entities_delta",

@@ -9,7 +9,7 @@ Measures true identity resolution quality beyond internal graph consistency:
    buckets written directly to `idr_out.evaluation_sample` for human/LLM review.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from idr_core.adapters.base import get_dialect_config
 from idr_core.config import validate_fqn, validate_identifier
@@ -29,14 +29,27 @@ class IDREvaluator:
         entity_key_col: str = "entity_key",
         truth_id_col: str = "truth_id",
         top_n_errors: int = 10,
+        membership_table: str = "idr_out.identity_resolved_membership_current",
     ) -> Dict[str, Any]:
         """
         Compute exact Pairwise Precision, Recall, F1, Over-Merge & Split diagnostics
         in O(N) using SQL contingency tables without O(N^2) pair materialization.
         """
+        safe_membership = validate_fqn(membership_table, "membership_table")
         safe_table = validate_fqn(ground_truth_table, "ground_truth_table")
         safe_ek = validate_identifier(entity_key_col, "entity_key_col")
         safe_tid = validate_identifier(truth_id_col, "truth_id_col")
+
+        from .evaluation_config import validate_labels
+
+        validate_labels(self.adapter, safe_table, safe_ek, safe_tid)
+        label_count = int(
+            self.adapter.query_one(
+                f"SELECT COUNT(*) FROM {safe_table} WHERE {safe_tid} IS NOT NULL"
+            )
+            or 0
+        )
+        population = int(self.adapter.query_one(f"SELECT COUNT(*) FROM {safe_membership}") or 0)
 
         # 1. Contingency table pairwise counts
         metrics_sql = f"""
@@ -45,7 +58,7 @@ class IDREvaluator:
                     m.entity_key,
                     m.resolved_id,
                     CAST(gt.{safe_tid} AS {self._dialect["string_type"]}) AS truth_id
-                FROM idr_out.identity_resolved_membership_current m
+                FROM {safe_membership} m
                 JOIN {safe_table} gt
                   ON m.entity_key = CAST(gt.{safe_ek} AS {self._dialect["string_type"]})
                 WHERE gt.{safe_tid} IS NOT NULL
@@ -87,7 +100,10 @@ class IDREvaluator:
         """
         rows = self.adapter.query(metrics_sql)
         if not rows:
-            return {"status": "ERROR", "message": "No overlapping entities found with ground truth table."}
+            return {
+                "status": "ERROR",
+                "message": "No overlapping entities found with ground truth table.",
+            }
 
         row = rows[0]
         evaluated_entities = int(row.get("evaluated_entities") or 0)
@@ -97,9 +113,13 @@ class IDREvaluator:
         pred_pairs = int(row.get("pred_pairs") or 0)
         truth_pairs = int(row.get("truth_pairs") or 0)
 
-        precision = (tp / pred_pairs) if pred_pairs > 0 else (1.0 if fp == 0 else 0.0)
-        recall = (tp / truth_pairs) if truth_pairs > 0 else (1.0 if fn == 0 else 0.0)
-        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        precision = (tp / pred_pairs) if pred_pairs > 0 else None
+        recall = (tp / truth_pairs) if truth_pairs > 0 else None
+        f1 = (
+            (2 * precision * recall / (precision + recall) if precision + recall > 0 else 0.0)
+            if precision is not None and recall is not None
+            else None
+        )
 
         # 2. Top Over-Merged Clusters (1 resolved_id spanning multiple truth_ids)
         overmerge_sql = f"""
@@ -107,7 +127,7 @@ class IDREvaluator:
                 m.resolved_id,
                 COUNT(*) AS cluster_entities,
                 COUNT(DISTINCT gt.{safe_tid}) AS distinct_truth_ids
-            FROM idr_out.identity_resolved_membership_current m
+            FROM {safe_membership} m
             JOIN {safe_table} gt
               ON m.entity_key = CAST(gt.{safe_ek} AS {self._dialect["string_type"]})
             WHERE gt.{safe_tid} IS NOT NULL
@@ -124,7 +144,7 @@ class IDREvaluator:
                 CAST(gt.{safe_tid} AS {self._dialect["string_type"]}) AS truth_id,
                 COUNT(*) AS truth_entities,
                 COUNT(DISTINCT m.resolved_id) AS split_into_clusters
-            FROM idr_out.identity_resolved_membership_current m
+            FROM {safe_membership} m
             JOIN {safe_table} gt
               ON m.entity_key = CAST(gt.{safe_ek} AS {self._dialect["string_type"]})
             WHERE gt.{safe_tid} IS NOT NULL
@@ -136,17 +156,22 @@ class IDREvaluator:
         split_entities = [dict(r) for r in self.adapter.query(split_sql)]
 
         return {
-            "status": "SUCCESS",
+            "status": "SUCCESS" if evaluated_entities else "INSUFFICIENT_EVIDENCE",
             "mode": "GROUND_TRUTH",
+            "label_count": label_count,
+            "label_overlap": round(evaluated_entities / max(1, label_count), 6),
+            "population_coverage": round(evaluated_entities / max(1, population), 6),
+            "truth_pairs": truth_pairs,
+            "predicted_pairs": pred_pairs,
             "evaluated_entities": evaluated_entities,
             "predicted_clusters": int(row.get("predicted_clusters") or 0),
             "true_clusters": int(row.get("true_clusters") or 0),
             "tp_pairs": tp,
             "fp_pairs": fp,
             "fn_pairs": fn,
-            "precision": round(precision, 4),
-            "recall": round(recall, 4),
-            "f1": round(f1, 4),
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
             "top_overmerged_clusters": overmerged_clusters,
             "top_split_entities": split_entities,
         }
@@ -186,7 +211,9 @@ class IDREvaluator:
         evidence_count = 0
         try:
             if self.adapter.table_exists("idr_out.edge_evidence"):
-                evidence_count = int(self.adapter.query_one("SELECT COUNT(*) FROM idr_out.edge_evidence") or 0)
+                evidence_count = int(
+                    self.adapter.query_one("SELECT COUNT(*) FROM idr_out.edge_evidence") or 0
+                )
         except Exception:
             pass
         dist["edge_evidence_rows"] = evidence_count
@@ -274,7 +301,10 @@ class IDREvaluator:
         near_miss_count = 0
         try:
             if self.adapter.table_exists("idr_out.golden_profiles"):
-                gp_cols = {c["name"].lower() for c in self.adapter.get_table_columns("idr_out.golden_profiles")}
+                gp_cols = {
+                    c["name"].lower()
+                    for c in self.adapter.get_table_columns("idr_out.golden_profiles")
+                }
                 if {"last_name", "zip_code"}.issubset(gp_cols):
                     nm_sql = f"""
                         WITH singletons AS (
@@ -330,7 +360,7 @@ class IDREvaluator:
                         INSERT INTO idr_out.evaluation_sample
                         (sample_id, stratum, resolved_id_a, resolved_id_b, entity_key_a, entity_key_b,
                          identifier_type, match_value, confidence_score, cluster_size, human_label, sampled_at)
-                        VALUES {', '.join(value_tuples)}
+                        VALUES {", ".join(value_tuples)}
                     """)
                     persisted_count = len(value_tuples)
             except Exception:

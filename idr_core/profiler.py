@@ -310,7 +310,7 @@ def is_system_table(table_name: str) -> bool:
     """Check if table belongs to IDR internal framework or system catalogs."""
     parts = table_name.lower().split(".")
     system_schemas = {"idr_meta", "idr_work", "idr_out", "information_schema", "sys", "system"}
-    return any(p in system_schemas for p in parts)
+    return any(p in system_schemas or re.fullmatch(r"ai_p[0-9a-f]{24}_idr_(meta|work|out)", p) for p in parts)
 
 
 class ColumnProfile:
@@ -559,8 +559,16 @@ class IDRDataProfiler:
         elif (phone_matches / n) >= 0.75 and len(values[0]) >= 7:
             return "phone", round(phone_matches / n, 2)
 
+        # Account and household keys carry a different grain from person IDs.
+        for semantic in ("account_id", "company_id", "organization_id", "organisation_id", "household_id", "address_id"):
+            if semantic in name:
+                return semantic, 0.95
+        if any(k in name for k in ("company_domain", "business_domain", "email_domain")):
+            if sum(bool(re.fullmatch(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", v)) for v in values) / n >= .8:
+                return "company_domain", .90
+
         # C. Cross-table Customer Entity Reference (Foreign Key to Customer)
-        if any(k in name for k in ("customer_id", "user_id", "client_id", "account_id")):
+        if any(k in name for k in ("customer_id", "user_id", "client_id")):
             return "customer_id", 0.95
 
         # D. Loyalty / Membership ID
@@ -896,10 +904,13 @@ class IDRDataProfiler:
 
         # Deterministic pre-annotated hints (grounds small local models like llama3.2)
         name_l = sp.name.lower()
+        _non_watermark_date_tokens = (
+            "birth", "dob", "expir", "due_date", "anniversary", "hire_date", "graduation"
+        )
         if col_prof.is_entity_key:
             sp.hint_role = "entity_key"
             sp.hint_confidence = 0.95
-        elif col_prof.is_temporal:
+        elif col_prof.is_temporal and not any(tok in name_l for tok in _non_watermark_date_tokens):
             sp.hint_role = "watermark"
             sp.hint_confidence = 0.90
         elif col_prof.detected_identifier_type:
@@ -1062,7 +1073,7 @@ class IDRDataProfiler:
                 val in _PLACEHOLDER_EXACT
                 or val.startswith(("test@", "noreply@", "no-reply@", "erased_", "redacted@", "unknown@"))
                 or val.endswith(("@example.com", "@test.com", "@anonymized.local", "@invalid.local"))
-                or (len(val) >= 7 and len(set(re.sub(r"[^0-9]", "", val))) == 1 and re.sub(r"[^0-9]", "", val) != "")
+                or ("phone" in id_type.lower() and re.fullmatch(r"[+()0-9 .-]+", val) is not None and len(re.sub(r"[^0-9]", "", val)) >= 7 and len(set(re.sub(r"[^0-9]", "", val))) == 1)
             )
             if is_placeholder:
                 discovered_excls.append(
@@ -1096,6 +1107,7 @@ class IDRDataProfiler:
         sample_size: int = 2000,
         compute_overlap: bool = True,
         on_progress: Any = None,
+        grain: str = "individual",
     ) -> SafeSchemaProfile:
         """
         Profile candidate warehouse tables and return a strictly zero-PII SafeSchemaProfile
@@ -1193,6 +1205,14 @@ class IDRDataProfiler:
             entity_keys = [c.name for c in safe_cols if c.hint_role == "entity_key"]
             hint_ek = entity_keys[0] if entity_keys else (safe_cols[0].name if safe_cols else None)
             wm_candidates = [c.name for c in safe_cols if c.hint_role == "watermark" and c.name != hint_ek]
+            def _wm_priority(col_name: str) -> int:
+                nl = col_name.lower()
+                if any(k in nl for k in ("updated", "modified", "changed", "last_mod")):
+                    return 0
+                if any(k in nl for k in ("created", "inserted", "ingested", "event_time", "event_ts", "timestamp", "_ts")):
+                    return 1
+                return 2
+            wm_candidates.sort(key=_wm_priority)
             hint_wm = wm_candidates[0] if wm_candidates else None
 
             # Check duplicate/null keys on sample without retaining values
@@ -1230,6 +1250,8 @@ class IDRDataProfiler:
             if anchor_cols and sample_rows:
                 anchor_col = anchor_cols[0]
                 for (_, cand_col) in list(local_join_hashes.keys()):
+                    if grain == "account" and any(k in cand_col for k in ("account", "company", "organization", "organisation", "business")):
+                        continue
                     if cand_col == anchor_col or cand_col == (hint_ek or "").lower():
                         continue
                     key_to_anchors: Dict[str, Set[str]] = {}
@@ -1382,7 +1404,8 @@ class IDRDataProfiler:
                     # Guard 2: Unanchored Dimension PK Guard — if a PK table has zero direct
                     # identity anchors AND the FK side has high fanout (many rows per key),
                     # it is a catalog/reference table (e.g. products, stores, facilities), not a person entity.
-                    if is_pk_pair and anchored_tables:
+                    account_key = grain == "account" and any(k in (col_a + " " + col_b) for k in ("account", "company", "organization", "organisation", "business"))
+                    if is_pk_pair and anchored_tables and not account_key:
                         if sp_a.hint_role == "entity_key" and tbl_a not in anchored_tables:
                             if sp_b.max_frequency_count >= 5 and sp_b.uniqueness_ratio < 0.5:
                                 continue

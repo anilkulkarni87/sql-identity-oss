@@ -45,6 +45,9 @@ That's it! The engine will:
 - **🔒 Ephemeral Dry Run & Config Versioning** - Preview draft YAML/UI rule changes (`--config ... --dry-run`) with hash equi-join `Edges Delta`, `Clusters Delta`, & corroborating-edge shadow attribution without mutating `idr_meta.*`, plus `idr config history` / `idr config rollback`
 - **⚡ Dialect-Optimized Warehouse Engine** - Canonical `CLUSTER BY` table definitions across BigQuery, Snowflake, and Databricks (with zero-downtime BigQuery clustering auto-migration), pointer ping-pong Label Propagation, and single-query metadata joins
 
+See [PII-safe AI configuration and review](docs/ai-configuration-and-review.md) for explicit policy controls, draft proposals, isolated previews, and measured comparisons. See [engine safeguards](docs/engine-safeguards.md) for convergence checks, incremental rebuild requirements, reproducible survivorship and run metrics.
+See [output previews and repeatable acceptance checks](docs/output-previews-and-evaluation.md) for bounded profile previews, generic grouped state outputs and schema-independent reviewed-label mappings.
+
 ## 📊 Architecture
 
 ```mermaid
@@ -77,6 +80,23 @@ graph LR
     API --> UI
 ```
 
+### 🤖 3-Tier Zero-PII Agentic Architecture
+
+Go from raw warehouse tables to a configured, measured identity graph—and audit borderline clusters without shipping raw PII outside your warehouse:
+
+```mermaid
+flowchart LR
+    T["Raw Warehouse Tables<br/>(DuckDB · Snowflake · BigQuery · Databricks)"] --> CFG["Zero-PII AI Config<br/>Schema & overlap profiling"]
+    CFG --> DR["Isolated Dry Run<br/>Counterfactual diff & circuit breakers"]
+    DR --> T0["Tier 0: SQL Structural Filter<br/>$0 · Zero PII<br/>(confidence_score & subject_fanout)"]
+    T0 -->|"90–98% healthy"| OK["Trusted Identity Graph"]
+    T0 -->|"2–10% borderline"| T1["Tier 1: Fast / Local / Warehouse AI<br/>(Cortex · ai_query · BQ ML · Ollama · BYOK)"]
+    T1 -->|"Uncertain verdict"| T2["Tier 2: Optional Frontier Escalation"]
+    T1 --> H["Human / Agent Approval<br/>(UI 1-Click · CLI · MCP Token)"]
+    T2 --> H
+    H --> OVR["idr_meta.identity_override"]
+```
+
 ## 🚀 Getting Started
 
 ### Option 1: CLI (Standard)
@@ -98,8 +118,8 @@ idr run --platform [platform] --db demo.duckdb --mode FULL
 idr config history --platform [platform] --db demo.duckdb
 idr config rollback --platform [platform] --db demo.duckdb
 
-# 4. Launch Interactive Web UI + API
-idr ui --db demo.duckdb
+# 5. Launch Interactive Web UI + API (connect to demo.duckdb in Step 1)
+idr ui
 ```
 
 ### Option 2: AI Agent (MCP) & Local Ollama / BYOK AI Assistant

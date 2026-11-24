@@ -56,6 +56,9 @@ idr ui --db demo.duckdb --port 8000
 - **Enterprise OIDC / JWT Mode (Production)**:
   - Set `IDR_AUTH_ISSUER`, `IDR_AUTH_AUDIENCE`, `VITE_AUTH_AUTHORITY`, and `VITE_AUTH_CLIENT_ID` (e.g., Keycloak, Okta, Auth0, Azure AD) to enforce Bearer JWT validation across all API routes.
 
+For the complete proposal, privacy, policy, preview and comparison workflow, see
+[PII-safe AI configuration and review](ai-configuration-and-review.md).
+
 ### Identity Studio (`/setup`)
 - **Connect Data Warehouse**: Clean 2-column connection workspace with auto-discovered local credentials (**1-Click Connect** for `~/.dbt/profiles.yml`, `~/.databrickscfg`, `gcloud` ADC, and local DuckDB files) and segmented auth selectors:
   - **Snowflake**: Switch cleanly between `Password` and `RSA Key-Pair (JWT)` (`private_key_path` / inline PEM + optional passphrase).

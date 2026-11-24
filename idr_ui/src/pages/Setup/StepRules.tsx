@@ -1,6 +1,9 @@
+import AIConfigPolicy from '../../components/AIConfigPolicy'
+import AIProposalReview from '../../components/AIProposalReview'
+import { defaultAIContext, localGoalObjectives } from '../../types'
 import { useEffect, useRef, useState } from 'react'
 import {
-    GitGraph, ArrowUp, ArrowDown, Trash2, Plus, Wand2,
+    GitGraph, ArrowUp, ArrowDown, Trash2, Wand2,
     ShieldAlert, Link2, AlertCircle, Bot, Loader2
 } from 'lucide-react'
 import { ExclusionRule, IDRConfig, LensRule, MatchingRule, OverrideRule } from '../../types'
@@ -75,6 +78,10 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
 
     // AI Rule Generation state directly inside Rules tab
     const [aiRuleGoal, setAiRuleGoal] = useState('')
+    const [proposalBase, setProposalBase] = useState('')
+    const [aiContext, setAiContext] = useState(config.ai_assistance || {...defaultAIContext})
+    const generationContext = {...aiContext, objectives: Array.from(new Set([...(aiContext.objectives || []), ...localGoalObjectives(aiRuleGoal)]))}
+    useEffect(() => { if (config.ai_assistance) setAiContext(config.ai_assistance) }, [config.ai_assistance])
     const [aiGenerating, setAiGenerating] = useState(false)
     const [aiProgress, setAiProgress] = useState<AiProgressEvent | null>(null)
     const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null)
@@ -186,30 +193,13 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
         })
         setValidationError(null)
         try {
-            const goalPrompt =
-                aiRuleGoal.trim() ||
-                'Suggest deterministic exact rules, probabilistic fuzzy rules, survivorship, and multi-lens views (strict_person vs household) for these tables.'
-            const res = await api.suggestConfigAiStream(tables, goalPrompt, (evt) => {
-                setAiProgress(evt)
+            const base = latestConfigRef.current
+            setProposalBase(JSON.stringify({config:base, context:generationContext}))
+            const res = await api.suggestConfigAiStream(tables, '', setAiProgress, {
+                mode: 'rules', current_config: base,
+                context: generationContext,
             })
             setAiReport(res)
-            const suggested = res.suggested_config as unknown as IDRConfig
-            if (suggested) {
-                const nextRules = combineFromConfig({
-                    ...config,
-                    rules: suggested.rules?.length ? suggested.rules : config.rules,
-                    fuzzy_rules: suggested.fuzzy_rules ?? config.fuzzy_rules,
-                })
-                const nextLenses = suggested.lenses?.length ? suggested.lenses : lenses
-                setRules(nextRules)
-                setLenses(nextLenses)
-                emitChange(nextRules, exclusions, overrides, useDefaultExclusions, nextLenses)
-                toast(
-                    'success',
-                    'AI rules generated',
-                    `${res.provider}:${res.model} proposed ${(suggested.rules || []).length} exact and ${(suggested.fuzzy_rules || []).length} fuzzy rules.`
-                )
-            }
         } catch (err: any) {
             setValidationError(`AI Rule Generator failed: ${err?.message || err}`)
         } finally {
@@ -243,7 +233,18 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
         updatePriorities(rules.filter((_, i) => i !== idx))
     }
 
-    const generateId = () => Math.floor(Math.random() * 1000000)
+    const buildReadableRuleId = (prefix: string, name: string) => {
+        const slug = name
+            .toLowerCase()
+            .replace(/[^a-z0-9_]+/g, '_')
+            .replace(/^_+|_+$/g, '') || 'rule'
+        const base = `${prefix}_${slug}`
+        const taken = new Set(rules.map((r) => String(r.id).toLowerCase()))
+        if (!taken.has(base)) return base
+        let n = 2
+        while (taken.has(`${base}_${n}`)) n += 1
+        return `${base}_${n}`
+    }
 
     const addExactRule = (type: string) => {
         const lowerType = type.toLowerCase()
@@ -253,7 +254,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             ? 'PHONE_US_10'
             : 'LOWERCASE'
         const newRule: MatchingRule = {
-            id: generateId(),
+            id: buildReadableRuleId('exact', type),
             type: 'EXACT',
             match_keys: [type],
             priority: rules.length + 1,
@@ -270,7 +271,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
             default_threshold: 0.85,
         }
         const newRule: MatchingRule = {
-            id: generateId(),
+            id: buildReadableRuleId('fuzzy', defaultAttr),
             type: 'FUZZY',
             match_keys: [],
             priority: rules.length + 1,
@@ -485,6 +486,18 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                 </p>
             </div>
 
+            <AIConfigPolicy context={aiContext} tables={config.sources.map(s => s.table)} onChange={setAiContext} showBasics />
+            {aiReport && <AIProposalReview proposal={aiReport}
+                stale={proposalBase !== JSON.stringify({config, context:generationContext})}
+                onApply={(candidate) => {
+                    const nextRules = combineFromConfig(candidate)
+                    setRules(nextRules)
+                    lastEmittedSigRef.current = serializeRuleSlice(candidate.rules || [], candidate.fuzzy_rules || [],
+                        exclusions, overrides, useDefaultExclusions, lenses)
+                    onChange?.(candidate)
+                    setAiReport(null)
+                    toast('success', 'Rules applied to draft', 'Mappings are preserved. Run a preview to evaluate changes.')
+                }} />}
             {validationError && (
                 <div role="alert" className="p-3 rounded-md bg-status-warning-soft border border-status-warning-border text-xs text-status-warning flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />
@@ -533,10 +546,10 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                         </div>
                         <input
                             type="text"
-                            aria-label="AI rule generation goal"
+                            aria-label="Local objective hints: precision, coverage, cross-source, auditability"
                             value={aiRuleGoal}
                             onChange={(e) => setAiRuleGoal(e.target.value)}
-                            placeholder="Optional goal: e.g. Strict B2C person matching on email & phone, household lens…"
+                            placeholder="Precision, coverage, cross-source matching, auditability; other text stays local."
                             className="input-field flex-1 text-xs py-1"
                         />
                         <button
@@ -620,13 +633,13 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                             <ArrowUp className="w-3.5 h-3.5" />
                                         </button>
                                         <span className="text-[11px] font-mono tabular-nums font-semibold text-ink-muted">
-                                            #{rule.priority}
+                                            #{idx + 1}
                                         </span>
                                         <button
                                             type="button"
                                             onClick={() => moveRule(idx, 'down')}
                                             disabled={idx === rules.length - 1}
-                                            aria-label={`Move rule ${rule.priority} down`}
+                                            aria-label={`Move rule ${idx + 1} down`}
                                             className="p-1 hover:bg-hover rounded text-ink-muted hover:text-ink disabled:opacity-30"
                                         >
                                             <ArrowDown className="w-3.5 h-3.5" />
@@ -664,7 +677,7 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                                             <button
                                                 type="button"
                                                 onClick={() => deleteRule(idx)}
-                                                aria-label={`Delete rule ${rule.priority}`}
+                                                aria-label={`Delete rule ${idx + 1}`}
                                                 className="p-1.5 hover:bg-status-danger-soft text-ink-muted hover:text-status-danger rounded transition-colors"
                                             >
                                                 <Trash2 className="w-3.5 h-3.5" />
@@ -808,16 +821,32 @@ export default function StepRules({ config, onChange, onNext, onBack }: StepRule
                     </div>
 
                     <div className="pt-3 border-t border-line flex flex-wrap items-center gap-2">
-                        {availableTypes.map((type) => (
-                            <button
-                                key={type}
-                                type="button"
-                                onClick={() => addExactRule(type)}
-                                className="btn-secondary text-xs"
-                            >
-                                <Plus className="w-3.5 h-3.5" /> Exact: <span className="font-mono">{type}</span>
-                            </button>
-                        ))}
+                        {(() => {
+                            const existingKeys = new Set(
+                                rules
+                                    .filter((r) => r.type !== 'FUZZY')
+                                    .flatMap((r) => (r.match_keys || []).map((k) => k.toLowerCase()))
+                            )
+                            const unconfigured = availableTypes.filter((t) => !existingKeys.has(t.toLowerCase()))
+                            if (unconfigured.length === 0) return null
+                            return (
+                                <select
+                                    aria-label="Add exact matching rule"
+                                    value=""
+                                    onChange={(e) => {
+                                        if (e.target.value) addExactRule(e.target.value)
+                                    }}
+                                    className="btn-secondary text-xs pr-7 cursor-pointer"
+                                >
+                                    <option value="">+ Add Exact Rule ({unconfigured.length} available)…</option>
+                                    {unconfigured.map((type) => (
+                                        <option key={type} value={type}>
+                                            Exact: {type}
+                                        </option>
+                                    ))}
+                                </select>
+                            )
+                        })()}
                         <button type="button" onClick={addFuzzyRule} className="btn-secondary text-xs">
                             <Wand2 className="w-3.5 h-3.5 text-status-warning" /> Add Fuzzy Rule
                         </button>

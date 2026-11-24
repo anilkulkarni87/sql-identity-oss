@@ -14,12 +14,12 @@
 - Agent Skill (`SKILL.md`): https://github.com/anilkulkarni87/sql-identity-oss/blob/main/skills/sql-identity-resolution/SKILL.md
 
 ## Headless Interfaces
-- **CLI**: `idr init`, `idr doctor`, `idr bootstrap`, `idr config apply|history|rollback` (`idr apply-config`), `idr run --mode FULL|INCR [--config <file> --dry-run]`, `idr evaluate`, `idr privacy forget`, `idr plugins list`, `idr ai test|models|ask`, `idr explain`, `idr triage`
-- **AI Assistant (Ollama-first + BYOK)**: `IDR_LLM_PROVIDER` (`ollama` | `openai` | `anthropic` | `gemini` | `openai_compatible`), `IDR_LLM_MODEL`, `IDR_LLM_BASE_URL`, `IDR_LLM_API_KEY`, `IDR_LLM_MASK_PII` (auto-enabled for non-local endpoints)
+- **CLI**: `idr init`, `idr doctor`, `idr bootstrap`, `idr config apply|history|rollback` (`idr apply-config`), `idr run --mode FULL|INCR [--config <file> --dry-run [--critique]]`, `idr evaluate`, `idr privacy forget`, `idr plugins list`, `idr ai test|models|ask|generate-config|review|compare|profile-preview`, `idr explain`, `idr triage`
+- **AI Assistant (Warehouse-Native + Ollama + BYOK)**: `IDR_LLM_PROVIDER` (`warehouse` | `ollama` | `openai` | `anthropic` | `gemini` | `openai_compatible`), `IDR_LLM_MODEL`, `IDR_LLM_BASE_URL`, `IDR_LLM_API_KEY`, `IDR_LLM_MASK_PII` (auto-enabled for non-local endpoints; `warehouse` uses Snowflake Cortex, Databricks `ai_query`, BigQuery ML, or local Ollama on DuckDB)
 - **Python SDK**: `from idr_core.runner import IDRRunner, RunConfig`
 - **Plugin Entry Points**: `idr.canonicalizers`, `idr.survivorship_strategies`, `idr.adapters`
-- **dbt Package**: `dbt_idr`
-- **MCP Server**: `idr-mcp` (`stdio`) or FastAPI `POST /mcp` (`streamable-http`)
+- **dbt Package**: `dbt_idr` (7 seed CSVs via `idr dbt export`)
+- **MCP Server**: `idr-mcp` (`stdio`) or FastAPI `POST /mcp` (`streamable-http`) — includes `run_tiered_triage`, `get_triage_queue`, `resolve_customer_360`, `generate_idr_rules`, `explain_cluster_bridge`
 - **Webhooks**: set `IDR_WEBHOOK_URL` (+ optional `IDR_WEBHOOK_SECRET`) for `run.completed`, `run.failed`, `guardrail.skipped_groups_spike`, `crosswalk.cluster_changes`, `privacy.erasure_completed`
 
 ## Config Modeling Workflow for Agents

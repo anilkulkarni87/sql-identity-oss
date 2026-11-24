@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS idr_meta.source_table (
   table_id VARCHAR,
   table_fqn VARCHAR,
   entity_type VARCHAR,
+  entity_kind VARCHAR,
   entity_key_expr VARCHAR,
   watermark_column VARCHAR,
   watermark_lookback_minutes INTEGER,
@@ -44,15 +45,18 @@ CREATE TABLE IF NOT EXISTS idr_meta.rule (
   canonicalize VARCHAR,
   allow_hashed BOOLEAN,
   require_non_null BOOLEAN,
-  max_group_size INTEGER DEFAULT 10000  -- Skip identifier groups larger than this
+  max_group_size INTEGER DEFAULT 10000, -- Skip identifier groups larger than this
+  confidence_weight DOUBLE,
+  fanout_threshold INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.identifier_mapping (
   table_id VARCHAR,
   identifier_type VARCHAR,
   identifier_value_expr VARCHAR,
-  is_hashed BOOLEAN
-);
+  is_hashed BOOLEAN,
+  source_is_hashed BOOLEAN DEFAULT FALSE,
+  issuer_expr VARCHAR);
 
 CREATE TABLE IF NOT EXISTS idr_meta.entity_attribute_mapping (
   table_id VARCHAR,
@@ -64,7 +68,8 @@ CREATE TABLE IF NOT EXISTS idr_meta.survivorship_rule (
   attribute_name VARCHAR,
   strategy VARCHAR,
   source_priority_list VARCHAR,
-  recency_field VARCHAR
+  recency_field VARCHAR,
+  row_group VARCHAR
 );
 
 CREATE TABLE IF NOT EXISTS idr_meta.fuzzy_rule (
@@ -128,7 +133,10 @@ CREATE TABLE IF NOT EXISTS idr_out.identity_clusters_current (
   primary_reason VARCHAR,
   updated_ts TIMESTAMP,
   run_id VARCHAR,
-  super_cluster_id VARCHAR -- Fuzzy merged ID (nullable)
+  super_cluster_id VARCHAR, -- Fuzzy merged ID (nullable)
+  subject_count INTEGER DEFAULT 0,
+  child_count INTEGER DEFAULT 0,
+  subject_fanout INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS idr_out.golden_profile_current (
@@ -184,7 +192,10 @@ CREATE TABLE IF NOT EXISTS idr_out.run_history (
   watermarks_json VARCHAR,
   error_message VARCHAR,
   error_stage VARCHAR,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  duration_seconds_precise DOUBLE,
+  clusters_changed INTEGER,
+  matching_config_hash VARCHAR
 );
 
 CREATE TABLE IF NOT EXISTS idr_out.stage_metrics (
@@ -196,7 +207,8 @@ CREATE TABLE IF NOT EXISTS idr_out.stage_metrics (
   duration_seconds BIGINT,
   rows_in BIGINT,
   rows_out BIGINT,
-  notes VARCHAR
+  notes VARCHAR,
+  duration_seconds_precise DOUBLE
 );
 
 -- ============================================
@@ -314,4 +326,30 @@ CREATE TABLE IF NOT EXISTS idr_out.resolved_id_crosswalk (
   run_id VARCHAR,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (previous_resolved_id, current_resolved_id)
+);
+
+
+-- Aggregate review reports; record-level comparison inputs remain in expiring scratch schemas.
+CREATE TABLE IF NOT EXISTS idr_out.ai_review_report (
+  run_id VARCHAR, owner_key VARCHAR, report_json VARCHAR,
+  scratch_token VARCHAR, input_expires_at VARCHAR, expires_at VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS idr_meta.config_extension (extension_key VARCHAR, value_json VARCHAR);
+
+CREATE TABLE IF NOT EXISTS idr_out.identity_activation_delta (
+  run_id VARCHAR,
+  lens_id VARCHAR,
+  resolved_id VARCHAR,
+  activation_status VARCHAR,
+  change_type VARCHAR,
+  previous_resolved_ids_json VARCHAR,
+  superseded_by_resolved_id VARCHAR,
+  cluster_size INTEGER,
+  entities_added INTEGER,
+  entities_removed INTEGER,
+  profile_changed BOOLEAN DEFAULT FALSE,
+  confidence_score DOUBLE,
+  emitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (run_id, lens_id, resolved_id)
 );

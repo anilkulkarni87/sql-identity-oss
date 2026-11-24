@@ -55,21 +55,21 @@ export default function StepDiscover({ onNext, onBack, connectionData }: StepDis
         });
     };
 
-    const inputClass = "bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500";
-    const btnClass = "px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center";
-    const btnOutlineClass = "px-4 py-2 border border-gray-600 text-gray-300 rounded-md text-sm font-medium hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500";
+    const inputClass = "input-field";
+    const btnClass = "btn-primary text-xs";
+    const btnOutlineClass = "btn-secondary text-xs";
 
     return (
-        <div className="space-y-6 h-full flex flex-col">
-            <div className="flex justify-between items-start">
+        <div className="space-y-4 h-full flex flex-col">
+            <div className="flex justify-between items-start gap-3">
                 <div>
-                    <h2 className="text-xl font-semibold text-white">Discover Sources</h2>
-                    <p className="text-sm text-gray-400">Scan your warehouse for tables to use as identity sources.</p>
+                    <h2 className="text-[15px] font-semibold text-ink">Discover Sources</h2>
+                    <p className="text-xs text-ink-muted">Scan your warehouse for tables to use as identity sources.</p>
                 </div>
 
                 <form onSubmit={handleScan} className="flex gap-2 items-end">
                     <div className="space-y-1">
-                        <label htmlFor="schema" className="block text-sm font-medium text-gray-300">Schema / Dataset</label>
+                        <label htmlFor="schema" className="block text-xs font-medium text-ink-secondary">Schema / Dataset</label>
                         <input
                             id="schema"
                             placeholder="e.g. raw_data"
@@ -85,26 +85,26 @@ export default function StepDiscover({ onNext, onBack, connectionData }: StepDis
             </div>
 
             {error && (
-                <div className="bg-red-500/10 border border-red-500/50 rounded-md p-3">
-                    <h4 className="text-red-400 font-semibold text-sm">Error</h4>
-                    <p className="text-red-300 text-sm mt-1">{error}</p>
+                <div className="bg-status-danger-soft border border-status-danger-border rounded-md p-3">
+                    <h4 className="text-status-danger font-semibold text-xs">Error</h4>
+                    <p className="text-ink-secondary text-xs mt-1">{error}</p>
                 </div>
             )}
 
             {/* Table Selection Area */}
-            <div className="border border-gray-700 rounded-md flex-1 flex flex-col min-h-[300px] bg-gray-900/50">
-                <div className="p-2 border-b border-gray-700 bg-gray-800/50 flex gap-2 items-center">
-                    <Search className="w-4 h-4 text-gray-400 ml-2" />
+            <div className="surface-panel flex-1 flex flex-col min-h-[300px] overflow-hidden">
+                <div className="p-2 border-b border-line bg-subtle flex gap-2 items-center">
+                    <Search className="w-4 h-4 text-ink-subtle ml-2" />
                     <input
                         placeholder="Filter tables..."
-                        className="flex-1 bg-transparent border-none text-sm text-gray-200 focus:ring-0 placeholder-gray-500"
+                        className="flex-1 bg-transparent border-none text-xs text-ink focus:outline-none placeholder:text-ink-subtle"
                         value={search}
                         onChange={e => setSearch(e.target.value)}
                     />
                 </div>
                 <div className="flex-1 overflow-y-auto p-2">
                     {filteredTables.length === 0 && !loading && (
-                        <div className="text-center text-gray-500 p-8">
+                        <div className="text-center text-ink-muted text-xs p-8">
                             {tables.length > 0 ? "No matches found." : "No tables found. Enter a schema and click Scan."}
                         </div>
                     )}
@@ -113,7 +113,7 @@ export default function StepDiscover({ onNext, onBack, connectionData }: StepDis
                         {filteredTables.map(fqn => (
                             <div
                                 key={fqn}
-                                className="flex items-center space-x-3 p-2 hover:bg-gray-800 rounded cursor-pointer transition-colors"
+                                className="flex items-center space-x-3 p-2 hover:bg-subtle rounded cursor-pointer transition-colors"
                                 onClick={() => toggleTable(fqn)}
                             >
                                 <input
@@ -121,23 +121,23 @@ export default function StepDiscover({ onNext, onBack, connectionData }: StepDis
                                     id={fqn}
                                     checked={selectedTables.includes(fqn)}
                                     onChange={() => toggleTable(fqn)}
-                                    className="h-4 w-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700"
+                                    className="h-4 w-4 rounded border-line-strong text-accent"
                                 />
-                                <label htmlFor={fqn} className="cursor-pointer flex-1 flex items-center gap-2 text-sm text-gray-200">
-                                    <TableIcon className="w-4 h-4 text-blue-400" />
+                                <label htmlFor={fqn} className="cursor-pointer flex-1 flex items-center gap-2 text-xs font-mono text-ink">
+                                    <TableIcon className="w-4 h-4 text-accent" />
                                     {fqn}
                                 </label>
                             </div>
                         ))}
                     </div>
                 </div>
-                <div className="p-2 border-t border-gray-700 bg-gray-800/50 text-xs text-gray-400 flex justify-between">
+                <div className="p-2 border-t border-line bg-subtle text-xs text-ink-muted flex justify-between tabular-nums">
                     <span>{selectedTables.length} selected</span>
                     <span>{tables.length} total</span>
                 </div>
             </div>
 
-            <div className="flex justify-between pt-4">
+            <div className="flex justify-between pt-3 border-t border-line">
                 <button className={btnOutlineClass} onClick={onBack}>Back</button>
                 <button className={btnClass} onClick={() => onNext(selectedTables)} disabled={selectedTables.length === 0}>
                     Next: Map Columns

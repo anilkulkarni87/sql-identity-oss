@@ -179,14 +179,17 @@ def test_p0_p1_p2_end_to_end_pipeline(ecommerce_audit_db):
     for stmt in config_to_sql(cfg, dialect="duckdb"):
         adapter.execute(stmt)
 
-    # 1. Run Pipeline
+    # 1. Run Pipeline (default: edge_evidence is opt-in -> 0 rows)
     runner = IDRRunner(adapter)
     res = runner.run(RunConfig(run_mode="FULL", strict=True))
     assert res.status == "SUCCESS"
+    assert adapter.query_one("SELECT COUNT(*) FROM idr_out.edge_evidence") == 0
 
-    # 2. [P0] Verify edge_evidence was populated!
+    # 2. [P0] Verify opt-in edge_evidence populates when generate_evidence=True!
+    res = runner.run(RunConfig(run_mode="FULL", strict=True, generate_evidence=True))
+    assert res.status == "SUCCESS"
     ev_cnt = adapter.query_one("SELECT COUNT(*) FROM idr_out.edge_evidence")
-    assert ev_cnt > 0, "idr_out.edge_evidence should never be empty when table exists!"
+    assert ev_cnt > 0, "idr_out.edge_evidence should populate when generate_evidence=True!"
 
     # 3. [P0] Verify un-watermarked 'city' attribute survived into golden_profiles under RECENCY!
     cities = adapter.query("SELECT resolved_id, city FROM idr_out.golden_profiles WHERE city IS NOT NULL")
@@ -272,7 +275,7 @@ def test_recency_sql_handles_null_watermark_across_all_dialects(dialect):
     pb = ProfileBuilder(adapter=mock_adapter)
     sql = pb._build_column_selection({"attribute_name": "city", "strategy": "RECENCY"})
     if dialect == "bigquery":
-        assert "ARRAY_AGG(city IGNORE NULLS ORDER BY recency_ts DESC" in sql
+        assert "ARRAY_AGG(city IGNORE NULLS ORDER BY COALESCE(recency_ts" in sql
     else:
         assert "COALESCE(recency_ts, TIMESTAMP '1970-01-01 00:00:00')" in sql
     assert "city" in sql
@@ -350,6 +353,128 @@ def test_fanout_damping_separates_giant_hub_from_healthy_clusters(tmp_path):
     ad.close()
 
 
+def test_repeat_customer_orders_and_events_do_not_penalize_confidence(tmp_path):
+    """1 customer linked to 15 orders/events via customer_id is legitimate 1-to-many activity, not an over-merge."""
+    db_file = str(tmp_path / "repeat_customer.duckdb")
+    conn = duckdb.connect(db_file)
+    conn.execute("CREATE TABLE customers (customer_id VARCHAR, email VARCHAR)")
+    conn.execute("CREATE TABLE orders (order_id VARCHAR, customer_id VARCHAR)")
+    conn.execute("CREATE TABLE events (event_id VARCHAR, customer_id VARCHAR)")
+    conn.execute("INSERT INTO customers VALUES ('c1', 'loyal@acme.test')")
+    conn.executemany("INSERT INTO orders VALUES (?, 'c1')", [(f"o{i}",) for i in range(10)])
+    conn.executemany("INSERT INTO events VALUES (?, 'c1')", [(f"e{i}",) for i in range(10)])
+    conn.close()
+
+    ad = DuckDBAdapter(db_file)
+    SchemaManager(ad).initialize(reset=True)
+    cfg = {
+        "sources": [
+            {
+                "id": "customers",
+                "table": "customers",
+                "entity_type": "MASTER_ENTITY",
+                "entity_key": "customer_id",
+                "identifiers": [
+                    {"type": "customer_id", "expr": "customer_id"},
+                    {"type": "email", "expr": "email"},
+                ],
+            },
+            {
+                "id": "orders",
+                "table": "orders",
+                "role": "child",
+                "entity_key": "order_id",
+                "identifiers": [{"type": "customer_id", "expr": "customer_id"}],
+            },
+            {
+                "id": "events",
+                "table": "events",
+                "role": "child",
+                "entity_key": "event_id",
+                "identifiers": [{"type": "customer_id", "expr": "customer_id"}],
+            },
+        ],
+        "rules": [
+            {"id": "r_cid", "match_keys": ["customer_id"], "priority": 1, "confidence_weight": 0.85, "fanout_threshold": 10},
+            {"id": "r_email", "match_keys": ["email"], "priority": 2},
+        ],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        ad.execute(stmt)
+    res = IDRRunner(ad).run(RunConfig(run_mode="FULL", strict=True))
+    assert res.status == "SUCCESS"
+    row = ad.query(
+        "SELECT cluster_size, subject_count, child_count, subject_fanout, confidence_score, primary_reason FROM idr_out.identity_clusters_current"
+    )[0]
+    assert row["cluster_size"] == 21
+    assert row["subject_count"] == 1
+    assert row["child_count"] == 20
+    assert row["subject_fanout"] == 1
+    assert row["confidence_score"] >= 0.84
+    assert "High fan-out over-merge risk" not in row["primary_reason"]
+    ad.close()
+
+
+def test_healthcare_patient_encounters_and_claims_high_confidence(tmp_path):
+    """Domain-agnostic scoring: 1 healthcare patient linked to many encounters/claims via mrn/patient_id."""
+    db_file = str(tmp_path / "healthcare.duckdb")
+    conn = duckdb.connect(db_file)
+    conn.execute("CREATE TABLE patients (patient_id VARCHAR, mrn VARCHAR)")
+    conn.execute("CREATE TABLE encounters (encounter_id VARCHAR, mrn VARCHAR)")
+    conn.execute("CREATE TABLE claims (claim_id VARCHAR, patient_id VARCHAR)")
+    conn.execute("INSERT INTO patients VALUES ('p1', 'MRN-1001')")
+    conn.executemany("INSERT INTO encounters VALUES (?, 'MRN-1001')", [(f"enc{i}",) for i in range(12)])
+    conn.executemany("INSERT INTO claims VALUES (?, 'p1')", [(f"clm{i}",) for i in range(10)])
+    conn.close()
+
+    ad = DuckDBAdapter(db_file)
+    SchemaManager(ad).initialize(reset=True)
+    cfg = {
+        "sources": [
+            {
+                "id": "patients",
+                "table": "patients",
+                "entity_type": "MASTER_ENTITY",
+                "entity_key": "patient_id",
+                "identifiers": [
+                    {"type": "patient_id", "expr": "patient_id"},
+                    {"type": "mrn", "expr": "mrn"},
+                ],
+            },
+            {
+                "id": "encounters",
+                "table": "encounters",
+                "entity_type": "EVENT_FACT",
+                "entity_key": "encounter_id",
+                "identifiers": [{"type": "mrn", "expr": "mrn"}],
+            },
+            {
+                "id": "claims",
+                "table": "claims",
+                "entity_type": "EVENT_FACT",
+                "entity_key": "claim_id",
+                "identifiers": [{"type": "patient_id", "expr": "patient_id"}],
+            },
+        ],
+        "rules": [
+            {"id": "r_mrn", "match_keys": ["mrn"], "priority": 1},
+            {"id": "r_pid", "match_keys": ["patient_id"], "priority": 2},
+        ],
+    }
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        ad.execute(stmt)
+    res = IDRRunner(ad).run(RunConfig(run_mode="FULL", strict=True))
+    assert res.status == "SUCCESS"
+    row = ad.query(
+        "SELECT cluster_size, edge_diversity, confidence_score, primary_reason FROM idr_out.identity_clusters_current"
+    )[0]
+    assert row["cluster_size"] == 23
+    assert row["edge_diversity"] == 2
+    assert row["confidence_score"] >= 0.85
+    assert "High fan-out over-merge risk" not in row["primary_reason"]
+    ad.close()
+
+
 # --- Consolidated from test_scale_and_invariants.py ---
 """
 Phase 10 tests for:
@@ -362,16 +487,12 @@ Phase 10 tests for:
 3. API dry_run_summary accurate breakdown (proposed_changes = new_entities + moved_entities)
 """
 
-import duckdb
 from fastapi.testclient import TestClient
 
 import idr_api.dependencies as deps
 from idr_api.main import app
-from idr_core.adapters.duckdb import DuckDBAdapter
 from idr_core.connection_manager import ConnectionManager
 from idr_core.quickstart import configure_metadata, generate_demo_data
-from idr_core.runner import IDRRunner, RunConfig
-from idr_core.schema_manager import SchemaManager
 from idr_mcp.server import explain_cluster
 
 
@@ -461,6 +582,7 @@ def test_50k_scale_benchmark_with_incr_and_mcp(tmp_path):
     - Exercises the full MCP server tool suite against the 52,000-entity graph
     """
     import time
+
     from idr_mcp import server as mcp_server
 
     conn = duckdb.connect(":memory:")

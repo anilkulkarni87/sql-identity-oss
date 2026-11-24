@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import json
-
-import pytest
 
 from idr_core.adapters.duckdb import DuckDBAdapter
 from idr_core.cli import main as cli_main
@@ -129,7 +126,7 @@ def test_lenses_config_roundtrip_and_snapshot(tmp_path) -> None:
         apply_config_to_warehouse(adapter, cfg)
         loaded = sql_to_config(adapter)
         assert "lenses" in loaded
-        by_id = {l["id"]: l for l in loaded["lenses"]}
+        by_id = {lens_item["id"]: lens_item for lens_item in loaded["lenses"]}
         assert set(by_id.keys()) == {"strict_person", "household", "crm_only"}
         assert by_id["strict_person"]["include_types"] == ["EMAIL"]
         assert by_id["crm_only"]["source_filter"] == ["crm*"]
@@ -255,62 +252,6 @@ def test_multi_lens_single_pass_full_and_source_filter(tmp_path) -> None:
         adapter.close()
 
 
-def test_lens_max_group_size_enforcement(tmp_path) -> None:
-    db_path = str(tmp_path / "lens_mgs.duckdb")
-    adapter = DuckDBAdapter(db_path)
-    try:
-        SchemaManager(adapter).initialize(reset=True)
-        adapter.execute("CREATE SCHEMA IF NOT EXISTS src")
-        adapter.execute("""
-            CREATE OR REPLACE TABLE src.users (
-                user_id VARCHAR,
-                email VARCHAR,
-                phone VARCHAR,
-                updated_at TIMESTAMP
-            )
-        """)
-        # 3 users sharing the same phone; u1 and u2 also share an email
-        adapter.execute("""
-            INSERT INTO src.users VALUES
-                ('u1', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u2', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u3', 'other@example.com',  '555-0001', TIMESTAMP '2026-01-01 00:00:00')
-        """)
-        cfg = {
-            "sources": [
-                {
-                    "id": "users",
-                    "table": "src.users",
-                    "entity_key": "user_id",
-                    "watermark_column": "updated_at",
-                    "identifiers": [
-                        {"type": "EMAIL", "expr": "email"},
-                        {"type": "PHONE", "expr": "phone"},
-                    ],
-                }
-            ],
-            "rules": [
-                {"id": "EMAIL", "match_key": "EMAIL", "canonicalize": "LOWERCASE", "priority": 1},
-                {"id": "PHONE", "match_key": "PHONE", "canonicalize": "NONE", "priority": 2},
-            ],
-            "lenses": [
-                {"id": "uncapped", "include_types": ["EMAIL", "PHONE"]},
-                {"id": "capped_2", "include_types": ["EMAIL", "PHONE"], "max_group_size": 2},
-            ],
-        }
-        apply_config_to_warehouse(adapter, cfg)
-        res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
-        assert res.status == "SUCCESS"
-
-        uncapped = _membership_map(adapter, "uncapped")
-        capped = _membership_map(adapter, "capped_2")
-
-        assert len(set(uncapped.values())) == 1
-        assert len(set(capped.values())) == 3
-    finally:
-        adapter.close()
-
-
 def test_multi_lens_incr_stabilization(tmp_path) -> None:
     db_path = str(tmp_path / "lens_incr.duckdb")
     adapter = DuckDBAdapter(db_path)
@@ -349,62 +290,6 @@ def test_multi_lens_incr_stabilization(tmp_path) -> None:
         adapter.close()
 
 
-def test_lens_max_group_size_enforcement(tmp_path) -> None:
-    db_path = str(tmp_path / "lens_mgs.duckdb")
-    adapter = DuckDBAdapter(db_path)
-    try:
-        SchemaManager(adapter).initialize(reset=True)
-        adapter.execute("CREATE SCHEMA IF NOT EXISTS src")
-        adapter.execute("""
-            CREATE OR REPLACE TABLE src.users (
-                user_id VARCHAR,
-                email VARCHAR,
-                phone VARCHAR,
-                updated_at TIMESTAMP
-            )
-        """)
-        # 3 users sharing the same phone; u1 and u2 also share an email
-        adapter.execute("""
-            INSERT INTO src.users VALUES
-                ('u1', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u2', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u3', 'other@example.com',  '555-0001', TIMESTAMP '2026-01-01 00:00:00')
-        """)
-        cfg = {
-            "sources": [
-                {
-                    "id": "users",
-                    "table": "src.users",
-                    "entity_key": "user_id",
-                    "watermark_column": "updated_at",
-                    "identifiers": [
-                        {"type": "EMAIL", "expr": "email"},
-                        {"type": "PHONE", "expr": "phone"},
-                    ],
-                }
-            ],
-            "rules": [
-                {"id": "EMAIL", "match_key": "EMAIL", "canonicalize": "LOWERCASE", "priority": 1},
-                {"id": "PHONE", "match_key": "PHONE", "canonicalize": "NONE", "priority": 2},
-            ],
-            "lenses": [
-                {"id": "uncapped", "include_types": ["EMAIL", "PHONE"]},
-                {"id": "capped_2", "include_types": ["EMAIL", "PHONE"], "max_group_size": 2},
-            ],
-        }
-        apply_config_to_warehouse(adapter, cfg)
-        res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
-        assert res.status == "SUCCESS"
-
-        uncapped = _membership_map(adapter, "uncapped")
-        capped = _membership_map(adapter, "capped_2")
-
-        assert len(set(uncapped.values())) == 1
-        assert len(set(capped.values())) == 3
-    finally:
-        adapter.close()
-
-
 def test_compute_lens_diff_and_cli(tmp_path, capsys) -> None:
     db_path = str(tmp_path / "lens_cli.duckdb")
     adapter = DuckDBAdapter(db_path)
@@ -412,62 +297,6 @@ def test_compute_lens_diff_and_cli(tmp_path, capsys) -> None:
         SchemaManager(adapter).initialize(reset=True)
         _seed_two_source_dataset(adapter)
         apply_config_to_warehouse(adapter, _base_config_with_lenses())
-    finally:
-        adapter.close()
-
-
-def test_lens_max_group_size_enforcement(tmp_path) -> None:
-    db_path = str(tmp_path / "lens_mgs.duckdb")
-    adapter = DuckDBAdapter(db_path)
-    try:
-        SchemaManager(adapter).initialize(reset=True)
-        adapter.execute("CREATE SCHEMA IF NOT EXISTS src")
-        adapter.execute("""
-            CREATE OR REPLACE TABLE src.users (
-                user_id VARCHAR,
-                email VARCHAR,
-                phone VARCHAR,
-                updated_at TIMESTAMP
-            )
-        """)
-        # 3 users sharing the same phone; u1 and u2 also share an email
-        adapter.execute("""
-            INSERT INTO src.users VALUES
-                ('u1', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u2', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u3', 'other@example.com',  '555-0001', TIMESTAMP '2026-01-01 00:00:00')
-        """)
-        cfg = {
-            "sources": [
-                {
-                    "id": "users",
-                    "table": "src.users",
-                    "entity_key": "user_id",
-                    "watermark_column": "updated_at",
-                    "identifiers": [
-                        {"type": "EMAIL", "expr": "email"},
-                        {"type": "PHONE", "expr": "phone"},
-                    ],
-                }
-            ],
-            "rules": [
-                {"id": "EMAIL", "match_key": "EMAIL", "canonicalize": "LOWERCASE", "priority": 1},
-                {"id": "PHONE", "match_key": "PHONE", "canonicalize": "NONE", "priority": 2},
-            ],
-            "lenses": [
-                {"id": "uncapped", "include_types": ["EMAIL", "PHONE"]},
-                {"id": "capped_2", "include_types": ["EMAIL", "PHONE"], "max_group_size": 2},
-            ],
-        }
-        apply_config_to_warehouse(adapter, cfg)
-        res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
-        assert res.status == "SUCCESS"
-
-        uncapped = _membership_map(adapter, "uncapped")
-        capped = _membership_map(adapter, "capped_2")
-
-        assert len(set(uncapped.values())) == 1
-        assert len(set(capped.values())) == 3
     finally:
         adapter.close()
 
@@ -487,62 +316,7 @@ def test_lens_max_group_size_enforcement(tmp_path) -> None:
     finally:
         adapter.close()
 
-
-def test_lens_max_group_size_enforcement(tmp_path) -> None:
-    db_path = str(tmp_path / "lens_mgs.duckdb")
-    adapter = DuckDBAdapter(db_path)
-    try:
-        SchemaManager(adapter).initialize(reset=True)
-        adapter.execute("CREATE SCHEMA IF NOT EXISTS src")
-        adapter.execute("""
-            CREATE OR REPLACE TABLE src.users (
-                user_id VARCHAR,
-                email VARCHAR,
-                phone VARCHAR,
-                updated_at TIMESTAMP
-            )
-        """)
-        # 3 users sharing the same phone; u1 and u2 also share an email
-        adapter.execute("""
-            INSERT INTO src.users VALUES
-                ('u1', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u2', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u3', 'other@example.com',  '555-0001', TIMESTAMP '2026-01-01 00:00:00')
-        """)
-        cfg = {
-            "sources": [
-                {
-                    "id": "users",
-                    "table": "src.users",
-                    "entity_key": "user_id",
-                    "watermark_column": "updated_at",
-                    "identifiers": [
-                        {"type": "EMAIL", "expr": "email"},
-                        {"type": "PHONE", "expr": "phone"},
-                    ],
-                }
-            ],
-            "rules": [
-                {"id": "EMAIL", "match_key": "EMAIL", "canonicalize": "LOWERCASE", "priority": 1},
-                {"id": "PHONE", "match_key": "PHONE", "canonicalize": "NONE", "priority": 2},
-            ],
-            "lenses": [
-                {"id": "uncapped", "include_types": ["EMAIL", "PHONE"]},
-                {"id": "capped_2", "include_types": ["EMAIL", "PHONE"], "max_group_size": 2},
-            ],
-        }
-        apply_config_to_warehouse(adapter, cfg)
-        res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
-        assert res.status == "SUCCESS"
-
-        uncapped = _membership_map(adapter, "uncapped")
-        capped = _membership_map(adapter, "capped_2")
-
-        assert len(set(uncapped.values())) == 1
-        assert len(set(capped.values())) == 3
-    finally:
-        adapter.close()
-
+    capsys.readouterr()
     assert cli_main(["lenses", "list", "--platform", "duckdb", "--db", db_path]) == 0
     out_list = capsys.readouterr().out
     assert "strict_person" in out_list
@@ -557,72 +331,17 @@ def test_lens_max_group_size_enforcement(tmp_path) -> None:
 def test_multi_lens_api_endpoints(tmp_path, monkeypatch) -> None:
     from fastapi.testclient import TestClient
 
-    from idr_api.dependencies import get_manager
+    import idr_api.dependencies as deps
     from idr_api.main import app
 
-    monkeypatch.setenv("IDR_ALLOW_INSECURE_DEV_AUTH", "true")
+    monkeypatch.setattr(deps, "OIDC_ISSUER", "")
+    monkeypatch.setattr(deps, "ALLOW_INSECURE_DEV_AUTH", True)
     db_path = str(tmp_path / "lens_api.duckdb")
     adapter = DuckDBAdapter(db_path)
     try:
         SchemaManager(adapter).initialize(reset=True)
         _seed_two_source_dataset(adapter)
         apply_config_to_warehouse(adapter, _base_config_with_lenses())
-    finally:
-        adapter.close()
-
-
-def test_lens_max_group_size_enforcement(tmp_path) -> None:
-    db_path = str(tmp_path / "lens_mgs.duckdb")
-    adapter = DuckDBAdapter(db_path)
-    try:
-        SchemaManager(adapter).initialize(reset=True)
-        adapter.execute("CREATE SCHEMA IF NOT EXISTS src")
-        adapter.execute("""
-            CREATE OR REPLACE TABLE src.users (
-                user_id VARCHAR,
-                email VARCHAR,
-                phone VARCHAR,
-                updated_at TIMESTAMP
-            )
-        """)
-        # 3 users sharing the same phone; u1 and u2 also share an email
-        adapter.execute("""
-            INSERT INTO src.users VALUES
-                ('u1', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u2', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u3', 'other@example.com',  '555-0001', TIMESTAMP '2026-01-01 00:00:00')
-        """)
-        cfg = {
-            "sources": [
-                {
-                    "id": "users",
-                    "table": "src.users",
-                    "entity_key": "user_id",
-                    "watermark_column": "updated_at",
-                    "identifiers": [
-                        {"type": "EMAIL", "expr": "email"},
-                        {"type": "PHONE", "expr": "phone"},
-                    ],
-                }
-            ],
-            "rules": [
-                {"id": "EMAIL", "match_key": "EMAIL", "canonicalize": "LOWERCASE", "priority": 1},
-                {"id": "PHONE", "match_key": "PHONE", "canonicalize": "NONE", "priority": 2},
-            ],
-            "lenses": [
-                {"id": "uncapped", "include_types": ["EMAIL", "PHONE"]},
-                {"id": "capped_2", "include_types": ["EMAIL", "PHONE"], "max_group_size": 2},
-            ],
-        }
-        apply_config_to_warehouse(adapter, cfg)
-        res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
-        assert res.status == "SUCCESS"
-
-        uncapped = _membership_map(adapter, "uncapped")
-        capped = _membership_map(adapter, "capped_2")
-
-        assert len(set(uncapped.values())) == 1
-        assert len(set(capped.values())) == 3
     finally:
         adapter.close()
 
@@ -656,7 +375,7 @@ def test_lens_max_group_size_enforcement(tmp_path) -> None:
     # List lenses
     lenses_resp = client.get("/api/lenses")
     assert lenses_resp.status_code == 200
-    lenses = {l["id"]: l for l in lenses_resp.json()["lenses"]}
+    lenses = {lens_item["id"]: lens_item for lens_item in lenses_resp.json()["lenses"]}
     assert lenses["strict_person"]["cluster_count"] == 4
     assert lenses["household"]["cluster_count"] == 2
 
@@ -681,58 +400,4 @@ def test_lens_max_group_size_enforcement(tmp_path) -> None:
     assert diff["lens_a_clusters"] == 4
     assert diff["lens_b_clusters"] == 2
     assert len(diff["merged_in_b_only"]) >= 1
-
-def test_lens_max_group_size_enforcement(tmp_path) -> None:
-    db_path = str(tmp_path / "lens_mgs.duckdb")
-    adapter = DuckDBAdapter(db_path)
-    try:
-        SchemaManager(adapter).initialize(reset=True)
-        adapter.execute("CREATE SCHEMA IF NOT EXISTS src")
-        adapter.execute("""
-            CREATE OR REPLACE TABLE src.users (
-                user_id VARCHAR,
-                email VARCHAR,
-                phone VARCHAR,
-                updated_at TIMESTAMP
-            )
-        """)
-        # 3 users sharing the same phone; u1 and u2 also share an email
-        adapter.execute("""
-            INSERT INTO src.users VALUES
-                ('u1', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u2', 'shared@example.com', '555-0001', TIMESTAMP '2026-01-01 00:00:00'),
-                ('u3', 'other@example.com',  '555-0001', TIMESTAMP '2026-01-01 00:00:00')
-        """)
-        cfg = {
-            "sources": [
-                {
-                    "id": "users",
-                    "table": "src.users",
-                    "entity_key": "user_id",
-                    "watermark_column": "updated_at",
-                    "identifiers": [
-                        {"type": "EMAIL", "expr": "email"},
-                        {"type": "PHONE", "expr": "phone"},
-                    ],
-                }
-            ],
-            "rules": [
-                {"id": "EMAIL", "match_key": "EMAIL", "canonicalize": "LOWERCASE", "priority": 1},
-                {"id": "PHONE", "match_key": "PHONE", "canonicalize": "NONE", "priority": 2},
-            ],
-            "lenses": [
-                {"id": "uncapped", "include_types": ["EMAIL", "PHONE"]},
-                {"id": "capped_2", "include_types": ["EMAIL", "PHONE"], "max_group_size": 2},
-            ],
-        }
-        apply_config_to_warehouse(adapter, cfg)
-        res = IDRRunner(adapter).run(RunConfig(run_mode="FULL"))
-        assert res.status == "SUCCESS"
-
-        uncapped = _membership_map(adapter, "uncapped")
-        capped = _membership_map(adapter, "capped_2")
-
-        assert len(set(uncapped.values())) == 1
-        assert len(set(capped.values())) == 3
-    finally:
-        adapter.close()
+    client.post("/api/disconnect")

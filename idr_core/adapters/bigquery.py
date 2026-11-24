@@ -5,7 +5,11 @@ Provides SQL execution capabilities for Google BigQuery,
 supporting both Python client library and direct execution.
 """
 
+import concurrent.futures
 import re
+import threading
+import time
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from .base import IDRAdapter
@@ -38,6 +42,64 @@ class BigQueryAdapter(IDRAdapter):
         self.location = location
         self.init_schema_mapping(dataset_mapping)
         self.dataset_mapping = dict(self.schema_mapping)
+        self._budget_local = threading.local()
+
+    supports_scan_cost_cap = True
+
+    @contextmanager
+    def query_budget(self, seconds: float, max_bytes_billed: Optional[int] = None):
+        """Enforce per-job timeout + job.cancel() and optional maximum_bytes_billed."""
+        deadline = time.monotonic() + seconds
+        self._budget_local.deadline = deadline
+        self._budget_local.max_bytes_billed = int(max_bytes_billed) if max_bytes_billed else None
+
+        def check():
+            if time.monotonic() >= deadline:
+                raise ValueError(
+                    "Profile preview exceeded its time budget; no production outputs were changed"
+                )
+
+        try:
+            yield check
+            check()
+        finally:
+            self._budget_local.deadline = None
+            self._budget_local.max_bytes_billed = None
+
+    def _apply_budget_config(self, job_config: Any = None) -> Any:
+        max_bytes = getattr(self._budget_local, "max_bytes_billed", None)
+        if max_bytes is None:
+            return job_config
+        if job_config is None:
+            from google.cloud import bigquery
+
+            job_config = bigquery.QueryJobConfig()
+        job_config.maximum_bytes_billed = max_bytes
+        return job_config
+
+    def _wait_job(self, job: Any) -> Any:
+        deadline = getattr(self._budget_local, "deadline", None)
+        if deadline is None:
+            return job.result()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            try:
+                job.cancel()
+            except Exception:
+                pass
+            raise ValueError(
+                "Profile preview exceeded its time budget; no production outputs were changed"
+            )
+        try:
+            return job.result(timeout=remaining)
+        except (TimeoutError, concurrent.futures.TimeoutError) as exc:
+            try:
+                job.cancel()
+            except Exception:
+                pass
+            raise ValueError(
+                "Profile preview exceeded its time budget; no production outputs were changed"
+            ) from exc
 
     @property
     def dialect(self) -> str:
@@ -75,9 +137,10 @@ class BigQueryAdapter(IDRAdapter):
     def execute(self, sql: str) -> None:
         """Execute a single SQL statement, auto-migrating clustering spec on CREATE OR REPLACE TABLE."""
         prepared = self._prepare_sql_simple(sql)
+        job_config = self._apply_budget_config()
         try:
-            job = self.client.query(prepared, location=self.location)
-            job.result()  # Wait for completion
+            job = self.client.query(prepared, location=self.location, job_config=job_config)
+            self._wait_job(job)  # Wait for completion
         except Exception as exc:
             if "Cannot replace a table with a different partitioning spec" in str(exc):
                 m = re.search(
@@ -90,9 +153,11 @@ class BigQueryAdapter(IDRAdapter):
                     drop_job = self.client.query(
                         f"DROP TABLE IF EXISTS {target_table}", location=self.location
                     )
-                    drop_job.result()
-                    retry_job = self.client.query(prepared, location=self.location)
-                    retry_job.result()
+                    self._wait_job(drop_job)
+                    retry_job = self.client.query(
+                        prepared, location=self.location, job_config=job_config
+                    )
+                    self._wait_job(retry_job)
                     return
             raise
 
@@ -100,8 +165,10 @@ class BigQueryAdapter(IDRAdapter):
         """Execute multiple SQL statements as a script."""
         # BigQuery supports multi-statement scripts
         sql = self._prepare_sql_simple(sql)
-        job = self.client.query(sql, location=self.location)
-        job.result()
+        job = self.client.query(
+            sql, location=self.location, job_config=self._apply_budget_config()
+        )
+        self._wait_job(job)
 
     def _prepare_sql_simple(self, sql: str) -> str:
         """Replace canonical schema references with `project`.dataset using word boundaries."""
@@ -150,8 +217,9 @@ class BigQueryAdapter(IDRAdapter):
                 ]
             )
 
+        job_config = self._apply_budget_config(job_config)
         job = self.client.query(sql, location=self.location, job_config=job_config)
-        res_iter = job.result()
+        res_iter = self._wait_job(job)
         rows_list = list(res_iter)
         if rows_list and hasattr(rows_list[0], "keys"):
             return [{str(k).lower(): row[k] for k in row.keys()} for row in rows_list]
@@ -184,8 +252,9 @@ class BigQueryAdapter(IDRAdapter):
                 ]
             )
 
+        job_config = self._apply_budget_config(job_config)
         job = self.client.query(sql, location=self.location, job_config=job_config)
-        result = list(job.result())
+        result = list(self._wait_job(job))
         if result and len(result) > 0:
             # BigQuery Row objects are subscriptable by index
             return result[0][0]
@@ -202,7 +271,7 @@ class BigQueryAdapter(IDRAdapter):
                 dataset = self.dataset_mapping.get(schema, schema)
                 table_ref = f"{self.project}.{dataset}.{table}"
             else:
-                table_ref = table_fqn
+                table_ref = ".".join(parts)
 
             self.client.get_table(table_ref)
             return True
@@ -217,7 +286,7 @@ class BigQueryAdapter(IDRAdapter):
             dataset = self.dataset_mapping.get(parts[0], parts[0])
             table_ref = f"{self.project}.{dataset}.{parts[1]}"
         else:
-            table_ref = table_fqn
+            table_ref = ".".join(parts)
 
         try:
             table = self.client.get_table(table_ref)
@@ -258,6 +327,7 @@ class BigQueryAdapter(IDRAdapter):
                         d.dataset_id.startswith("idr_meta")
                         or d.dataset_id.startswith("idr_work")
                         or d.dataset_id.startswith("idr_out")
+                        or re.fullmatch(r"ai_p[0-9a-f]{24}_idr_(meta|work|out)", d.dataset_id)
                     )
                 ]
             except Exception:

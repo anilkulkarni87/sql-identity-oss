@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -8,13 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from idr_core.ai_review import PreviewValidationError
 from idr_core.config import (
     apply_config_to_warehouse,
-    compute_dry_run_summary,
     get_config_snapshots,
     parse_config_snapshot_row,
-    restore_meta_tables,
-    snapshot_meta_tables,
 )
 
 from ..dependencies import get_current_user, get_manager, get_user_key, require_write_access
@@ -217,6 +216,10 @@ class IDRConfig(BaseModel):
     exclusions: Optional[List[Dict[str, Any]]] = None
     overrides: Optional[List[Dict[str, Any]]] = None
     lenses: Optional[List[Dict[str, Any]]] = None
+    ai_assistance: Optional[Dict[str, Any]] = None
+    grouped_outputs: Optional[List[Dict[str, Any]]] = None
+    evaluation: Optional[Dict[str, Any]] = None
+    activation_delta: Optional[Dict[str, Any]] = None
     use_default_exclusions: Optional[bool] = False
 
 
@@ -427,7 +430,9 @@ class RunRequest(BaseModel):
     max_cluster_delta_pct: Optional[float] = None
     lens: Optional[str] = None
     skip_lenses: bool = False
+    emit_activation_delta: Optional[bool] = None
     config: Optional[Dict[str, Any]] = None
+    ground_truth: Optional[Dict[str, Any]] = None
 
 
 _ACTIVE_RUN_PROGRESS: Dict[str, Dict[str, Any]] = {}
@@ -435,17 +440,14 @@ _RUN_EVENT_QUEUES: Dict[str, List[asyncio.Queue]] = {}
 
 
 def _get_active_progress(user_key: str) -> Optional[Dict[str, Any]]:
-    """Return active run progress for user_key, with fallback to default scope or latest active run."""
-    return (
-        _ACTIVE_RUN_PROGRESS.get(user_key)
-        or _ACTIVE_RUN_PROGRESS.get("__default__")
-        or (next(reversed(list(_ACTIVE_RUN_PROGRESS.values())), None) if _ACTIVE_RUN_PROGRESS else None)
-    )
+    """Return only this authenticated user's active or most recent run progress."""
+    return _ACTIVE_RUN_PROGRESS.get(user_key)
+
 
 
 def _broadcast_progress_event(user_key: str, event_data: Dict[str, Any]) -> None:
-    """Broadcast progress event to all active SSE queues for this user, default scope, or global listeners."""
-    targets = {user_key, "__default__", "*"}
+    """Broadcast progress only to this authenticated user's SSE listeners."""
+    targets = {user_key}
     for key in targets:
         for q in list(_RUN_EVENT_QUEUES.get(key, [])):
             try:
@@ -467,15 +469,15 @@ def _build_initial_progress(
         {"name": "edge_building", "label": "Edge Building"},
         {"name": "label_propagation", "label": "Label Propagation (Graph)"},
         *([] if strict else [{"name": "fuzzy_matching", "label": "Fuzzy Matching"}]),
+        *(
+            [{"name": "lens_resolution", "label": "Validate Multi-Lens Views"}]
+            if (has_lenses and not dry_run)
+            else []
+        ),
         {
             "name": "dry_run_analysis" if dry_run else "output_generation",
             "label": "Dry Run Analysis" if dry_run else "Output & Golden Profiles",
         },
-        *(
-            [{"name": "lens_resolution", "label": "Multi-Lens Views"}]
-            if (has_lenses and not dry_run)
-            else []
-        ),
     ]
     return {
         "run_id": None,
@@ -581,17 +583,11 @@ async def run_pipeline(
 
     adapter, user_key = _require_user_adapter(current_user)
     _invalidate_setup_cache(user_key)
-    meta_snapshots: Dict[str, bool] = {}
 
     try:
         from dataclasses import asdict
 
         from idr_core.runner import IDRRunner, RunConfig
-
-        if request.dry_run and request.config is not None:
-            IDRRunner.check_no_active_run_lock(adapter)
-            meta_snapshots = snapshot_meta_tables(adapter)
-            _execute_save_config(adapter, request.config, record_snapshot=False)
 
         config = RunConfig(
             run_mode=request.mode,
@@ -603,6 +599,7 @@ async def run_pipeline(
             max_cluster_delta_pct=request.max_cluster_delta_pct,
             lens=request.lens,
             skip_lenses=request.skip_lenses,
+            emit_activation_delta=request.emit_activation_delta,
         )
 
         skip_lenses = request.skip_lenses or (request.lens or "").strip().lower() in ("__none__", "none")
@@ -621,8 +618,9 @@ async def run_pipeline(
             config.run_mode, config.dry_run, config.strict, has_lenses=has_lenses
         )
         _ACTIVE_RUN_PROGRESS[user_key] = progress_state
-        _ACTIVE_RUN_PROGRESS["__default__"] = progress_state
         _broadcast_progress_event(user_key, {"event": "run_start", "progress": copy.deepcopy(progress_state)})
+
+        event_loop = asyncio.get_running_loop()
 
         def _on_progress(evt: Dict[str, Any]) -> None:
             etype = evt.get("event")
@@ -668,15 +666,18 @@ async def run_pipeline(
                         st["status"] = "skipped"
 
             # Broadcast event with full progress snapshot to SSE listeners
-            _broadcast_progress_event(
-                user_key,
-                {
-                    "event": etype,
-                    "stage": evt.get("stage"),
-                    "progress": copy.deepcopy(progress_state),
-                },
-            )
+            event_loop.call_soon_threadsafe(_broadcast_progress_event, user_key,
+                {"event": etype, "stage": evt.get("stage"), "progress": copy.deepcopy(progress_state)})
 
+        if request.dry_run:
+            from idr_core.ai_review import AIReviewService
+            from idr_core.config import sql_to_config
+            draft = request.config if request.config is not None else sql_to_config(adapter)
+            return await asyncio.to_thread(
+                AIReviewService(adapter, user_key).preview, draft,
+                {"run_mode": request.mode, "strict": request.strict, "max_iters": request.max_iterations,
+                 "max_group_size": request.max_group_size, "lens": request.lens or "default"},
+                _on_progress, request.ground_truth)
         runner = IDRRunner(adapter, progress_callback=_on_progress)
         result = await asyncio.to_thread(runner.run, config)
         res_dict = asdict(result)
@@ -701,30 +702,18 @@ async def run_pipeline(
         except Exception:
             pass
 
-        # If dry run, fetch summary metrics to return to UI
-        if request.dry_run and result.status == "DRY_RUN_COMPLETE":
-            try:
-                res_dict["dry_run_summary"] = compute_dry_run_summary(
-                    adapter,
-                    result.run_id,
-                    config.run_mode,
-                    edges_created=getattr(result, "edges_created", 0),
-                    clusters_impacted=getattr(result, "clusters_impacted", 0),
-                )
-            except Exception as e:
-                print(f"Failed to fetch dry run summary: {e}")
-                res_dict["dry_run_summary"] = {"error": str(e)}
-
         return res_dict
 
     except Exception as e:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(500, f"Pipeline run failed: {str(e)}")
-    finally:
-        if meta_snapshots:
-            restore_meta_tables(adapter, meta_snapshots)
+        if user_key in _ACTIVE_RUN_PROGRESS:
+            _ACTIVE_RUN_PROGRESS[user_key]["status"] = "FAILED"
+            _ACTIVE_RUN_PROGRESS[user_key]["current_stage"] = None
+            _ACTIVE_RUN_PROGRESS[user_key]["current_detail"] = "Run failed"
+            _broadcast_progress_event(user_key, {"event": "run_complete", "progress": copy.deepcopy(_ACTIVE_RUN_PROGRESS[user_key])})
+        if isinstance(e, PreviewValidationError):
+            raise HTTPException(422, str(e)) from e
+        logging.getLogger(__name__).exception("Pipeline run failed")
+        raise HTTPException(422 if isinstance(e, ValueError) else 500, "Pipeline run failed; inspect local server diagnostics.") from e
 
 
 @router.get("/fuzzy-templates")
@@ -809,3 +798,33 @@ async def get_fuzzy_templates(current_user: Dict[str, Any] = Depends(get_current
         ]
 
     return {"templates": templates}
+
+
+class ProfilePreviewRequest(BaseModel):
+    config: Dict[str, Any]
+    run_id: Optional[str] = None
+    draft_hash: Optional[str] = None
+    lens: str = 'default'
+    options: Dict[str, Any] = {}
+
+
+@router.post('/profile-preview')
+def profile_preview(request: ProfilePreviewRequest, current_user: Dict[str, Any] = Depends(require_write_access)):
+    """Validate without scanning rows, or explicitly preview bounded complete clusters."""
+    from idr_core.ai_config import draft_hash
+    from idr_core.ai_review import AIReviewService, StaleReview
+    from idr_core.profile_preview import ProfilePreviewOptions, preview_profiles
+    adapter, user_key = _require_user_adapter(current_user)
+    try:
+        options = ProfilePreviewOptions.model_validate(request.options)
+        if options.mode != 'validate' and (not request.run_id or request.draft_hash != draft_hash(request.config)):
+            raise StaleReview('Run a graph preview of this exact draft before previewing profile values')
+        return preview_profiles(AIReviewService(adapter, user_key), request.config, request.run_id,
+                                request.draft_hash, request.lens, options)
+    except StaleReview as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        logging.getLogger(__name__).exception('Profile preview failed')
+        raise HTTPException(400, 'Profile preview failed; inspect local diagnostics for expression/type errors') from exc

@@ -1,3 +1,6 @@
+import AIConfigPolicy from '../../components/AIConfigPolicy';
+import AIProposalReview from '../../components/AIProposalReview';
+import { defaultAIContext, localGoalObjectives } from '../../types';
 import { useState, useEffect, useRef } from 'react';
 import {
     Loader2, Key, Tag, Fingerprint, Clock, CheckSquare, Square,
@@ -119,11 +122,26 @@ export default function StepMap({
     const [aiProgress, setAiProgress] = useState<AiProgressEvent | null>(null);
     const [aiNotice, setAiNotice] = useState<string | null>(null);
     const [aiGoal, setAiGoal] = useState<string>('');
-    const [aiGrain, setAiGrain] = useState<'individual' | 'household' | 'account'>('individual');
-    const [aiEventPolicy, setAiEventPolicy] = useState<'bridge' | 'include' | 'exclude'>('bridge');
-    const [aiSystemOfRecord, setAiSystemOfRecord] = useState<string>('');
+    const [aiGrain, setAiGrain] = useState<'individual' | 'household' | 'account'>(initialConfig?.ai_assistance?.grain || 'individual');
+    const [aiEventPolicy, setAiEventPolicy] = useState<'bridge' | 'include' | 'exclude'>(initialConfig?.ai_assistance?.event_policy || 'bridge');
+    const [aiSystemOfRecord, setAiSystemOfRecord] = useState<string>(initialConfig?.ai_assistance?.system_of_record || '');
+    const [aiFuzzy, setAiFuzzy] = useState(initialConfig?.ai_assistance?.fuzzy || false);
+    const [proposalBase, setProposalBase] = useState('');
+    const [advancedPolicy, setAdvancedPolicy] = useState(initialConfig?.ai_assistance || {...defaultAIContext});
     const [aiReport, setAiReport] = useState<Awaited<ReturnType<typeof api.suggestConfigAi>> | null>(null);
     const [aiReportOpen, setAiReportOpen] = useState<boolean>(true);
+
+    const generationContext = {...advancedPolicy, grain: aiGrain, event_policy: aiEventPolicy,
+        system_of_record: aiSystemOfRecord || null, fuzzy: aiFuzzy,
+        objectives: Array.from(new Set([...(advancedPolicy.objectives || []), ...localGoalObjectives(aiGoal)]))};
+
+    useEffect(() => {
+        const next = initialConfig?.ai_assistance;
+        if (next) {
+            setAiGrain(next.grain); setAiEventPolicy(next.event_policy);
+            setAiSystemOfRecord(next.system_of_record || ''); setAiFuzzy(next.fuzzy); setAdvancedPolicy(next);
+        }
+    }, [initialConfig?.ai_assistance]);
 
     const latestInitialConfigRef = useRef<IDRConfig | undefined>(initialConfig);
     latestInitialConfigRef.current = initialConfig;
@@ -197,6 +215,7 @@ export default function StepMap({
             .map(t => {
                 const s = srcMap[t];
                 return {
+                    ...s,
                     id: s.id || t.replace(/\./g, '_'),
                     table: t,
                     entity_key: s.entity_key,
@@ -206,6 +225,7 @@ export default function StepMap({
                     watermark_column: s.watermark_column,
                     watermark_lookback_minutes: s.watermark_lookback_minutes || 0,
                     identifiers: (s.identifiers || []).map(i => ({
+                        ...i,
                         type: i.type,
                         column: i.column || i.expr || '',
                         expr: i.column || i.expr || '',
@@ -398,11 +418,10 @@ export default function StepMap({
         const newAttrs: Attribute[] = exists
             ? currentAttrs.filter(a => (a.column || a.expr || a.name) !== colName)
             : [...currentAttrs, { name: colName, column: colName, expr: colName, data_type: colMeta?.type }];
-        const newIds = exists ? (curr.identifiers || []) : (curr.identifiers || []).filter(i => i.column !== colName);
 
         commitUpdate({
             ...config,
-            [table]: { ...curr, attributes: newAttrs, identifiers: newIds },
+            [table]: { ...curr, attributes: newAttrs },
         });
     };
 
@@ -420,21 +439,20 @@ export default function StepMap({
         const curr = config[table];
         if (!curr) return;
         const currentIds = curr.identifiers || [];
-        const exists = currentIds.find(i => i.column === colName);
+        const exists = currentIds.find(i => (i.column || i.expr) === colName);
 
         let newIds: Identifier[];
         if (exists) {
-            newIds = currentIds.filter(i => i.column !== colName);
+            newIds = currentIds.filter(i => (i.column || i.expr) !== colName);
         } else {
             const matchedPattern = IDENTIFIER_PATTERNS.find(p => p.pattern.test(colName));
             const defaultType = matchedPattern ? matchedPattern.type : colName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
             newIds = [...currentIds, { column: colName, type: defaultType, expr: colName, is_match_key: true }];
         }
-        const newAttrs = exists ? (curr.attributes || []) : (curr.attributes || []).filter(a => (a.column || a.expr || a.name) !== colName);
 
         commitUpdate({
             ...config,
-            [table]: { ...curr, identifiers: newIds, attributes: newAttrs },
+            [table]: { ...curr, identifiers: newIds },
         });
     };
 
@@ -443,7 +461,7 @@ export default function StepMap({
         if (!curr) return;
         const safeType = newType.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
         const newIds = (curr.identifiers || []).map(i =>
-            i.column === colName ? { ...i, type: safeType } : i
+            (i.column || i.expr) === colName ? { ...i, type: safeType } : i
         );
         commitUpdate({ ...config, [table]: { ...curr, identifiers: newIds } });
     };
@@ -452,21 +470,19 @@ export default function StepMap({
         const curr = config[table];
         if (!curr) return;
         const newIds = (curr.identifiers || []).map(i =>
-            i.column === colName ? { ...i, is_match_key: i.is_match_key === false } : i
+            (i.column || i.expr) === colName ? { ...i, is_match_key: i.is_match_key === false } : i
         );
         commitUpdate({ ...config, [table]: { ...curr, identifiers: newIds } });
     };
 
     const getColumnState = (table: string, colName: string) => {
-        const attrs = config[table]?.attributes || [];
-        const attrMatch = attrs.find(a => (a.column || a.expr || a.name) === colName);
-        if (attrMatch) return { isAttr: true, attrName: attrMatch.name };
-
-        const ids = config[table]?.identifiers || [];
-        const idMatch = ids.find(i => (i.column || i.expr) === colName);
-        if (idMatch) return { isId: true, type: idMatch.type, isMatch: idMatch.is_match_key !== false };
-
-        return {};
+        const attrMatch = (config[table]?.attributes || []).find(a => (a.column || a.expr || a.name) === colName);
+        const idMatch = (config[table]?.identifiers || []).find(i => (i.column || i.expr) === colName);
+        return {
+            isAttr: Boolean(attrMatch), attrName: attrMatch?.name,
+            isId: Boolean(idMatch), type: idMatch?.type,
+            isMatch: idMatch ? idMatch.is_match_key !== false : false,
+        };
     };
 
     // Track which target attribute names appear on multiple tables so we can flag homonym collisions
@@ -503,106 +519,64 @@ export default function StepMap({
         : activeCols;
 
     return (
-        <div className="space-y-5 flex flex-col">
+        <div className="space-y-4 flex flex-col">
             {/* Section Title & Inline Actions */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                    <h2 className="text-xl font-bold tracking-tight text-white">Sources &amp; Column Mappings</h2>
-                    <p className="text-sm text-slate-400">
+                    <h2 className="text-[15px] font-semibold text-ink">Sources &amp; Column Mappings</h2>
+                    <p className="text-xs text-ink-muted mt-0.5">
                         Add tables across one or more warehouse schemas, assign Entity Keys, and map Identifiers &amp; Profile Attributes.
                     </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                     {tables.length > 0 && (
-                        <>
-                            <button
-                                type="button"
-                                disabled={aiSuggesting}
-                                onClick={async () => {
-                                    setAiSuggesting(true);
-                                    setAiProgress({
-                                        stage: 'profiling',
-                                        step: 1,
-                                        total_steps: 5,
-                                        message: `Connecting to warehouse to profile ${tables.length} table(s)…`,
-                                    });
-                                    setValidationError(null);
-                                    setAiNotice(null);
-                                    try {
-                                        const policyParts: string[] = [];
-                                        if (aiGrain === 'individual') {
-                                            policyParts.push('Primary resolution grain: Strict Individual (person-level; keep household/shared identifiers in a separate household lens).');
-                                        } else if (aiGrain === 'household') {
-                                            policyParts.push('Primary resolution grain: Household (include shared phone/address identifiers in primary matching).');
-                                        } else {
-                                            policyParts.push('Primary resolution grain: B2B Account / Organization (prioritize company/account/domain identifiers).');
-                                        }
-                                        if (aiEventPolicy === 'bridge') {
-                                            policyParts.push('Event/fact tables: include only for cross-channel bridging without mapping transactional attributes into golden_profile.');
-                                        } else if (aiEventPolicy === 'exclude') {
-                                            policyParts.push('Event/fact tables: set include_in_idr=false for high-volume clickstream/telemetry/event tables.');
-                                        } else {
-                                            policyParts.push('Event/fact tables: include fully in IDR.');
-                                        }
-                                        if (aiSystemOfRecord) {
-                                            policyParts.push(`System of Record for Survivorship source_priority #1: ${aiSystemOfRecord}.`);
-                                        }
-                                        const baseGoal = aiGoal.trim() || 'Suggest entity keys, identifier mappings, matching rules, survivorship rules, and multi-lens views.';
-                                        const goalPrompt = `${baseGoal} ${policyParts.join(' ')}`;
-                                        const res = await api.suggestConfigAiStream(tables, goalPrompt, (evt) => {
-                                            setAiProgress(evt);
-                                        });
-                                        setAiReport(res);
-                                        setAiReportOpen(true);
-                                        const suggested = res.suggested_config as unknown as IDRConfig;
-                                        if (suggested && Array.isArray(suggested.sources) && suggested.sources.length > 0) {
-                                            const merged: IDRConfig = {
-                                                ...latestInitialConfigRef.current,
-                                                ...suggested,
-                                            };
-                                            const nextTables = suggested.sources
-                                                .map(s => s.table)
-                                                .filter((t): t is string => Boolean(t));
-                                            if (nextTables.length > 0) {
-                                                onTablesChange?.(nextTables);
-                                            }
-                                            onChange?.(merged);
-                                            const modeLabel = res.generation_mode === 'deterministic_fallback'
-                                                ? 'Deterministic Fallback'
-                                                : `AI (${res.provider}:${res.model})`;
-                                            setAiNotice(`${modeLabel} proposed mappings, rules, and survivorship. Review reasoning below and click Save Config.`);
-                                        } else {
-                                            setValidationError('AI did not return any source mappings.');
-                                        }
-                                    } catch (err: any) {
-                                        setValidationError(`AI Suggest failed: ${err?.message || err}`);
-                                    } finally {
-                                        setAiSuggesting(false);
-                                        setAiProgress(null);
-                                    }
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs font-medium transition-colors"
-                                title="Profiles selected tables with zero PII, discovers cross-table join keys & table roles, and drafts mappings, rules, survivorship, and lenses"
-                            >
-                                {aiSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
-                                {aiSuggesting ? 'AI Suggesting...' : 'AI Suggest Config'}
-                                {!aiSuggesting && (
-                                    <span className="px-1.5 py-0.2 rounded bg-white/20 text-[10px] font-semibold uppercase tracking-wide">
-                                        Beta
-                                    </span>
-                                )}
-                            </button>
-                        </>
+                        <button
+                            type="button"
+                            disabled={aiSuggesting}
+                            onClick={async () => {
+                                setAiSuggesting(true);
+                                setAiProgress({
+                                    stage: 'profiling',
+                                    step: 1,
+                                    total_steps: 5,
+                                    message: `Connecting to warehouse to profile ${tables.length} table(s)…`,
+                                });
+                                setValidationError(null);
+                                setAiNotice(null);
+                                try {
+                                    const base = latestInitialConfigRef.current || { sources: [] };
+                                    const context = generationContext;
+                                    setProposalBase(JSON.stringify({config:base, context}));
+                                    const res = await api.suggestConfigAiStream(tables, '', (evt) => {
+                                        setAiProgress(evt);
+                                    }, {mode: 'config', current_config: base, context});
+                                    setAiReport(res);
+                                    setAiReportOpen(true);
+                                    setAiNotice('Proposal generated. Review the diff and apply it to your draft before starting a preview.');
+                                } catch (err: any) {
+                                    setValidationError(`AI Suggest failed: ${err?.message || err}`);
+                                } finally {
+                                    setAiSuggesting(false);
+                                    setAiProgress(null);
+                                }
+                            }}
+                            className="btn-secondary text-xs"
+                            title="Profiles selected tables with zero PII, discovers cross-table join keys & table roles, and drafts mappings, rules, survivorship, and lenses"
+                        >
+                            {aiSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5 text-accent" />}
+                            {aiSuggesting ? 'AI Suggesting...' : 'AI Suggest Config'}
+                            {!aiSuggesting && (
+                                <span className="px-1.5 py-0.2 rounded bg-accent/15 text-accent border border-accent/30 text-[10px] font-semibold uppercase tracking-wide">
+                                    Beta
+                                </span>
+                            )}
+                        </button>
                     )}
                     <button
                         type="button"
                         onClick={() => setDiscoveryOpen(prev => !prev)}
-                        className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                            discoveryOpen
-                                ? 'bg-accent text-white border-accent'
-                                : 'bg-surface hover:bg-hover text-ink-primary border-line-default'
-                        }`}
+                        className={discoveryOpen ? 'btn-primary text-xs' : 'btn-secondary text-xs'}
                     >
                         <Plus className="w-3.5 h-3.5" />
                         {discoveryOpen ? 'Hide Table Browser' : 'Add / Manage Source Tables'}
@@ -612,71 +586,76 @@ export default function StepMap({
             </div>
 
             {tables.length > 0 && (
-                <div className="bg-subtle border border-line-default rounded-md px-3 py-2.5 space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-muted">
-                        <span className="inline-flex items-center gap-1.5">
+                <details className="surface-subtle px-3 py-2 text-xs">
+                    <summary className="cursor-pointer select-none flex flex-wrap items-center justify-between gap-2 text-ink-secondary hover:text-ink">
+                        <span className="inline-flex items-center gap-1.5 font-medium">
                             <Bot className="w-3.5 h-3.5 text-accent shrink-0" />
-                            <strong className="text-ink-primary font-semibold">AI-Assisted Configuration</strong>
-                            <span className="px-1.5 py-0.2 rounded bg-accent/15 text-accent border border-accent/30 text-[10px] font-semibold uppercase">
-                                Beta
-                            </span>
-                            <span className="hidden md:inline">
-                                — Profiles column shapes &amp; cross-table overlaps (zero raw PII sent), detects table roles, and drafts mappings, rules, survivorship &amp; lenses for review.
+                            AI Options (Optional)
+                            <span className="text-[11px] font-normal text-ink-muted">
+                                — Zero-PII profiling · {aiFuzzy ? 'Fuzzy ON' : 'Exact only'} · {aiEventPolicy === 'bridge' ? 'Bridge events' : aiEventPolicy === 'include' ? 'Include events' : 'Exclude events'}
                             </span>
                         </span>
+                        <span className="text-[11px] text-ink-muted">Customize goal, system of record, or constraints</span>
+                    </summary>
+                    <div className="mt-3 pt-2.5 border-t border-line space-y-2.5">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <span className="text-[11px] font-semibold text-ink-secondary shrink-0">
+                                Goal (optional)
+                            </span>
+                            <input
+                                type="text"
+                                value={aiGoal}
+                                onChange={e => setAiGoal(e.target.value)}
+                                placeholder="e.g., High precision, maximize coverage, or prefer CRM as system of record"
+                                className="input-field flex-1 text-xs py-1"
+                            />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                            <label className="inline-flex items-center gap-1.5 text-ink-secondary cursor-pointer">
+                                <input type="checkbox" checked={aiFuzzy} onChange={e => setAiFuzzy(e.target.checked)} className="rounded border-line-strong text-accent" />
+                                Allow fuzzy matching proposals
+                            </label>
+                            <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                                <span className="font-medium">Event Tables:</span>
+                                <select
+                                    value={aiEventPolicy}
+                                    onChange={e => setAiEventPolicy(e.target.value as 'bridge' | 'include' | 'exclude')}
+                                    className="bg-surface border border-line-strong rounded px-2 py-0.5 text-xs text-ink focus:outline-none focus:border-accent"
+                                >
+                                    <option value="bridge">Bridge Only</option>
+                                    <option value="include">Include Fully</option>
+                                    <option value="exclude">Exclude Event Tables</option>
+                                </select>
+                            </label>
+                            <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                                <span className="font-medium">System of Record:</span>
+                                <select
+                                    value={aiSystemOfRecord}
+                                    onChange={e => setAiSystemOfRecord(e.target.value)}
+                                    className="bg-surface border border-line-strong rounded px-2 py-0.5 text-xs text-ink focus:outline-none focus:border-accent max-w-[200px]"
+                                >
+                                    <option value="">Auto (Master Entity)</option>
+                                    {tables.map(t => (
+                                        <option key={t} value={t}>{t}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                                <span className="font-medium">Grain:</span>
+                                <select
+                                    value={aiGrain}
+                                    onChange={e => setAiGrain(e.target.value as 'individual' | 'household' | 'account')}
+                                    className="bg-surface border border-line-strong rounded px-2 py-0.5 text-xs text-ink focus:outline-none focus:border-accent"
+                                >
+                                    <option value="individual">Strict Individual</option>
+                                    <option value="household">Household</option>
+                                    <option value="account">Account / B2B</option>
+                                </select>
+                            </label>
+                        </div>
+                        <AIConfigPolicy context={advancedPolicy} tables={tables} onChange={setAdvancedPolicy} />
                     </div>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                        <span className="text-[11px] font-semibold text-accent uppercase tracking-wider shrink-0">
-                            AI Goal (Optional)
-                        </span>
-                        <input
-                            type="text"
-                            value={aiGoal}
-                            onChange={e => setAiGoal(e.target.value)}
-                            placeholder="e.g. Strict B2C person matching on email & loyalty, prioritize CRM over web for names..."
-                            className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
-                        />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-line-default/60 text-[11px]">
-                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
-                            <span className="font-medium">Grain:</span>
-                            <select
-                                value={aiGrain}
-                                onChange={e => setAiGrain(e.target.value as 'individual' | 'household' | 'account')}
-                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
-                            >
-                                <option value="individual">Strict Individual</option>
-                                <option value="household">Household</option>
-                                <option value="account">Account / B2B</option>
-                            </select>
-                        </label>
-                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
-                            <span className="font-medium">Event Tables:</span>
-                            <select
-                                value={aiEventPolicy}
-                                onChange={e => setAiEventPolicy(e.target.value as 'bridge' | 'include' | 'exclude')}
-                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
-                            >
-                                <option value="bridge">Bridge Only (Clean Profile)</option>
-                                <option value="include">Include Fully</option>
-                                <option value="exclude">Exclude Event Tables</option>
-                            </select>
-                        </label>
-                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
-                            <span className="font-medium">System of Record:</span>
-                            <select
-                                value={aiSystemOfRecord}
-                                onChange={e => setAiSystemOfRecord(e.target.value)}
-                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent max-w-[200px]"
-                            >
-                                <option value="">Auto (Master Entity)</option>
-                                {tables.map(t => (
-                                    <option key={t} value={t}>{t}</option>
-                                ))}
-                            </select>
-                        </label>
-                    </div>
-                </div>
+                </details>
             )}
 
             {aiSuggesting && (
@@ -684,7 +663,7 @@ export default function StepMap({
             )}
 
             {aiNotice && (
-                <div className="bg-selected border border-accent/40 rounded-md p-3 text-xs text-ink-primary flex items-center justify-between gap-2">
+                <div className="bg-selected border border-accent-border rounded-md p-3 text-xs text-ink flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2">
                         <Bot className="w-4 h-4 shrink-0 text-accent" />
                         {aiNotice}
@@ -694,35 +673,40 @@ export default function StepMap({
                             <button
                                 type="button"
                                 onClick={() => setAiReportOpen(prev => !prev)}
-                                className="px-2 py-0.5 rounded bg-surface hover:bg-hover border border-line-default text-ink-primary text-[11px] font-medium"
+                                className="btn-secondary text-[11px] py-0.5 px-2 min-h-[24px]"
                             >
                                 {aiReportOpen ? 'Hide Reasoning' : 'Show Reasoning'}
                             </button>
                         )}
-                        <button type="button" onClick={() => { setAiNotice(null); setAiReport(null); }} className="text-ink-muted hover:text-ink-primary">✕</button>
+                        <button type="button" onClick={() => { setAiNotice(null); setAiReport(null); }} className="text-ink-muted hover:text-ink">✕</button>
                     </div>
                 </div>
             )}
 
             {aiReport && aiReportOpen && (
-                <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-4 space-y-3 text-xs">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                <div className="surface-panel border-accent-border p-4 space-y-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-2.5">
                         <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-semibold text-white">AI Proposal &amp; Reasoning</span>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                                aiReport.generation_mode === 'deterministic_fallback'
-                                    ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-                                    : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
-                            }`}>
-                                {aiReport.generation_mode === 'deterministic_fallback'
+                            <span className="font-semibold text-ink">AI Proposal &amp; Reasoning</span>
+                            <span className="text-ink-muted">Decisions are proposals; confidence is not measured accuracy.</span>
+                            <span className={
+                                aiReport.status === 'invalid'
+                                    ? 'badge-danger'
+                                    : aiReport.generation_mode === 'deterministic_fallback'
+                                    ? 'badge-warning'
+                                    : 'badge-success'
+                            }>
+                                {aiReport.status === 'invalid'
+                                    ? 'Validation failed'
+                                    : aiReport.generation_mode === 'deterministic_fallback'
                                     ? 'Deterministic Fallback'
                                     : `${aiReport.generation_mode === 'ai_repaired' ? 'AI Repaired' : 'AI Validated'} (${aiReport.provider}:${aiReport.model})`}
                             </span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                            <span className="badge-neutral">
                                 Zero-PII Profile
                             </span>
                             {aiReport.validation_report?.sql_verified && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-950/60 text-blue-300 border border-blue-500/40">
+                                <span className="badge-accent">
                                     SQL Verified
                                 </span>
                             )}
@@ -730,14 +714,23 @@ export default function StepMap({
                         <button
                             type="button"
                             onClick={() => setAiReportOpen(false)}
-                            className="text-slate-400 hover:text-white text-[11px]"
+                            className="text-ink-muted hover:text-ink text-[11px]"
                         >
                             Collapse
                         </button>
                     </div>
 
+                    <AIProposalReview proposal={aiReport}
+                        stale={proposalBase !== JSON.stringify({config:initialConfig || {sources: []}, context:generationContext})}
+                        onApply={(candidate) => {
+                            onTablesChange?.(candidate.sources.map(source => source.table));
+                            onChange?.(candidate);
+                            setAiNotice('Proposal applied to draft. Start a Dry Run to evaluate it.');
+                            setAiReport(null);
+                        }} />
+
                     {aiReport.validation_report?.warnings && aiReport.validation_report.warnings.length > 0 && (
-                        <div className="bg-amber-950/30 border border-amber-500/30 rounded-lg p-2.5 text-amber-200 space-y-1">
+                        <div className="bg-status-warning-soft border border-status-warning-border rounded-md p-2.5 text-status-warning space-y-1">
                             {aiReport.validation_report.warnings.map((w, idx) => (
                                 <div key={idx}>⚠ {w}</div>
                             ))}
@@ -745,17 +738,20 @@ export default function StepMap({
                     )}
 
                     {aiReport.profile_summary?.cross_table_overlaps && aiReport.profile_summary.cross_table_overlaps.length > 0 && (
-                        <div className="space-y-1">
-                            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Cross-Table Key Overlaps</div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {aiReport.profile_summary.cross_table_overlaps.slice(0, 8).map((ov, idx) => (
-                                    <span key={idx} className="px-2 py-1 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">
-                                        <span className="text-purple-300 font-semibold">{ov.identifier_type}</span>: {ov.table_a.split('.').pop()}.{ov.column_a} ↔ {ov.table_b.split('.').pop()}.{ov.column_b}{' '}
-                                        <span className="text-emerald-300 font-mono">{Math.round(ov.overlap_a_in_b * 100)}% / {Math.round(ov.overlap_b_in_a * 100)}%</span>
+                        <details className="surface-subtle px-3 py-2">
+                            <summary className="cursor-pointer select-none text-[11px] font-semibold text-ink-secondary uppercase tracking-[0.04em] flex items-center justify-between">
+                                <span>Cross-Table Key Overlaps ({aiReport.profile_summary.cross_table_overlaps.length} detected)</span>
+                                <span className="text-[10px] font-normal normal-case text-ink-muted">Expand to inspect</span>
+                            </summary>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                {aiReport.profile_summary.cross_table_overlaps.slice(0, 12).map((ov, idx) => (
+                                    <span key={idx} className="px-2 py-1 rounded bg-surface border border-line text-ink-secondary text-[11px]">
+                                        <span className="text-accent font-semibold">{ov.identifier_type}</span>: {ov.table_a.split('.').pop()}.{ov.column_a} ↔ {ov.table_b.split('.').pop()}.{ov.column_b}{' '}
+                                        <span className="text-status-success font-mono tabular-nums">{Math.round(ov.overlap_a_in_b * 100)}% / {Math.round(ov.overlap_b_in_a * 100)}%</span>
                                     </span>
                                 ))}
                             </div>
-                        </div>
+                        </details>
                     )}
 
                     {aiReport.explanations && (
@@ -768,34 +764,34 @@ export default function StepMap({
                             ]
                                 .filter(sec => sec.items.length > 0)
                                 .map(sec => (
-                                    <div key={sec.title} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3 space-y-2">
-                                        <div className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">{sec.title}</div>
+                                    <div key={sec.title} className="surface-subtle p-3 space-y-2">
+                                        <div className="text-[11px] font-semibold text-ink-muted uppercase tracking-[0.04em]">{sec.title}</div>
                                         <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                                             {sec.items.map((item, idx) => (
-                                                <div key={`${item.target}-${idx}`} className="border-b border-slate-800/70 last:border-0 pb-1.5 last:pb-0 space-y-0.5">
+                                                <div key={`${item.target}-${idx}`} className="border-b border-line last:border-0 pb-1.5 last:pb-0 space-y-0.5">
                                                     <div className="flex items-center justify-between gap-2">
-                                                        <span className="font-mono font-semibold text-slate-100">{item.target}</span>
+                                                        <span className="font-mono font-semibold text-ink">{item.target}</span>
                                                         <div className="flex items-center gap-1">
                                                             {item.needs_review && (
-                                                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-semibold">
+                                                                <span className="badge-warning">
                                                                     Needs Review
                                                                 </span>
                                                             )}
                                                             {item.confidence && (
-                                                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]">
+                                                                <span className="badge-neutral">
                                                                     {item.confidence}
                                                                 </span>
                                                             )}
                                                         </div>
                                                     </div>
-                                                    <p className="text-slate-300 leading-relaxed">{item.summary}</p>
+                                                    <p className="text-ink-secondary leading-relaxed">{item.summary}</p>
                                                     {item.evidence && item.evidence.length > 0 && (
-                                                        <div className="text-[10px] text-slate-400 font-mono">
+                                                        <div className="text-[10px] text-ink-muted font-mono">
                                                             Evidence: {item.evidence.join(' · ')}
                                                         </div>
                                                     )}
                                                     {item.risks && item.risks.length > 0 && (
-                                                        <div className="text-[10px] text-amber-300">
+                                                        <div className="text-[10px] text-status-warning">
                                                             Risk: {item.risks.join(' ')}
                                                         </div>
                                                     )}
@@ -810,22 +806,22 @@ export default function StepMap({
             )}
 
             {validationError && (
-                <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 text-xs text-amber-200 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <div className="bg-status-warning-soft border border-status-warning-border rounded-md p-3 text-xs text-status-warning flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
                     <span>{validationError}</span>
                 </div>
             )}
 
             {/* Integrated Multi-Schema Discovery Drawer */}
             {discoveryOpen && (
-                <div className="bg-slate-900/90 border border-blue-500/30 rounded-xl p-4 space-y-3.5 shadow-lg">
+                <div className="surface-subtle p-4 space-y-3">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                         <div>
-                            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                                <Search className="w-4 h-4 text-blue-400" />
+                            <h3 className="text-[13px] font-semibold text-ink flex items-center gap-1.5">
+                                <Search className="w-3.5 h-3.5 text-accent" />
                                 Discover Warehouse Tables
                             </h3>
-                            <p className="text-xs text-slate-400 mt-0.5">
+                            <p className="text-xs text-ink-muted mt-0.5">
                                 Scan any schema/dataset sequentially — selected tables from previous schemas stay selected below.
                             </p>
                         </div>
@@ -842,12 +838,12 @@ export default function StepMap({
                                 value={schemaInput}
                                 onChange={(e) => setSchemaInput(e.target.value)}
                                 placeholder="Schema / Dataset (e.g. raw)"
-                                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 w-48 focus:outline-none focus:border-blue-500"
+                                className="input-field w-48 text-xs py-1"
                             />
                             <button
                                 type="submit"
                                 disabled={scanLoading}
-                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                                className="btn-primary text-xs"
                             >
                                 {scanLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
                                 Scan Schema
@@ -856,25 +852,25 @@ export default function StepMap({
                     </div>
 
                     {scanError && (
-                        <div className="p-2.5 rounded-lg bg-rose-950/50 border border-rose-500/40 text-xs text-rose-300">
+                        <div className="p-2.5 rounded-md bg-status-danger-soft border border-status-danger-border text-xs text-status-danger">
                             {scanError}
                         </div>
                     )}
 
                     {/* Filter + Table Picker Grid */}
-                    <div className="border border-slate-800 rounded-xl bg-slate-950/70 overflow-hidden">
-                        <div className="px-3 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-slate-900/60">
+                    <div className="surface-panel overflow-hidden">
+                        <div className="px-3 py-2 border-b border-line flex flex-wrap items-center justify-between gap-2 bg-subtle">
                             <div className="flex items-center gap-2 flex-1 min-w-[180px]">
-                                <Search className="w-3.5 h-3.5 text-slate-500" />
+                                <Search className="w-3.5 h-3.5 text-ink-subtle" />
                                 <input
                                     type="text"
                                     value={tableFilter}
                                     onChange={(e) => setTableFilter(e.target.value)}
                                     placeholder="Filter scanned tables..."
-                                    className="bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none flex-1"
+                                    className="bg-transparent text-xs text-ink placeholder:text-ink-subtle focus:outline-none flex-1"
                                 />
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5">
                                 <input
                                     type="text"
                                     value={customTableFqn}
@@ -886,13 +882,13 @@ export default function StepMap({
                                         }
                                     }}
                                     placeholder="Or add FQN: schema.table"
-                                    className="bg-slate-900 border border-slate-700 rounded-md px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 w-44 focus:outline-none focus:border-blue-500"
+                                    className="input-field w-44 text-xs py-1 font-mono"
                                 />
                                 <button
                                     type="button"
                                     onClick={handleAddCustomTable}
                                     disabled={!customTableFqn.trim()}
-                                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-md text-xs border border-slate-700"
+                                    className="btn-secondary text-xs py-1 px-2.5 min-h-[28px]"
                                 >
                                     Add FQN
                                 </button>
@@ -901,7 +897,7 @@ export default function StepMap({
 
                         <div className="max-h-52 overflow-y-auto p-2.5">
                             {filteredDiscovered.length === 0 && !scanLoading ? (
-                                <div className="text-center text-xs text-slate-500 py-6">
+                                <div className="text-center text-xs text-ink-muted py-6">
                                     {discoveredTables.length > 0
                                         ? 'No scanned tables match your filter.'
                                         : 'Enter a schema/dataset name above and click Scan Schema (leave blank on DuckDB).'}
@@ -915,18 +911,18 @@ export default function StepMap({
                                                 key={fqn}
                                                 type="button"
                                                 onClick={() => handleToggleDiscoveredTable(fqn)}
-                                                className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left text-xs transition-all ${
+                                                className={`flex items-center justify-between gap-2 px-3 py-2 rounded-md border text-left text-xs transition-colors ${
                                                     isSelected
-                                                        ? 'bg-blue-600/15 border-blue-500/60 text-blue-200 font-medium'
-                                                        : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-800/80'
+                                                        ? 'bg-selected border-accent-border text-ink font-medium'
+                                                        : 'bg-surface border-line text-ink-secondary hover:border-line-strong hover:bg-subtle'
                                                 }`}
                                             >
                                                 <span className="flex items-center gap-2 truncate font-mono">
-                                                    <TableIcon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-blue-400' : 'text-slate-500'}`} />
+                                                    <TableIcon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-accent' : 'text-ink-muted'}`} />
                                                     <span className="truncate">{fqn}</span>
                                                 </span>
                                                 <span className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${
-                                                    isSelected ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-700 bg-slate-950'
+                                                    isSelected ? 'bg-accent border-accent text-accent-fg' : 'border-line-strong bg-surface'
                                                 }`}>
                                                     {isSelected && <Check className="w-3 h-3" />}
                                                 </span>
@@ -942,26 +938,26 @@ export default function StepMap({
 
             {/* Master-Detail Sources & Column Mapper */}
             {tables.length === 0 ? (
-                <div className="border border-dashed border-slate-700 rounded-xl p-10 text-center space-y-2 bg-slate-900/30">
-                    <TableIcon className="w-8 h-8 text-slate-600 mx-auto" />
-                    <p className="text-sm font-medium text-slate-300">No source tables selected yet</p>
-                    <p className="text-xs text-slate-500">
+                <div className="border border-dashed border-line-strong rounded-md p-10 text-center space-y-2 bg-subtle/40">
+                    <TableIcon className="w-7 h-7 text-ink-subtle mx-auto" />
+                    <p className="text-sm font-medium text-ink">No source tables selected yet</p>
+                    <p className="text-xs text-ink-muted">
                         Use the table discovery browser above to scan a schema and select one or more source tables.
                     </p>
                 </div>
             ) : loadingCols && Object.keys(columns).length === 0 ? (
                 <div className="flex justify-center p-16">
-                    <Loader2 className="animate-spin w-7 h-7 text-blue-500" />
+                    <Loader2 className="animate-spin w-6 h-6 text-accent" />
                 </div>
             ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
                     {/* Left Rail: Selected Source Tables */}
-                    <div className="lg:col-span-4 space-y-2.5 bg-slate-900/60 border border-slate-800 rounded-xl p-3">
-                        <div className="flex items-center justify-between px-1 pb-1 border-b border-slate-800/80">
-                            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    <div className="lg:col-span-4 space-y-2.5 surface-subtle p-3">
+                        <div className="flex items-center justify-between px-1 pb-1.5 border-b border-line">
+                            <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted tabular-nums">
                                 Source Tables ({tables.length})
                             </span>
-                            {loadingCols && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />}
+                            {loadingCols && <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />}
                         </div>
 
                         <div className="space-y-1.5 max-h-[540px] overflow-y-auto pr-0.5">
@@ -975,18 +971,18 @@ export default function StepMap({
                                     <div
                                         key={table}
                                         onClick={() => setActiveTable(table)}
-                                        className={`group p-3 rounded-xl border cursor-pointer transition-all space-y-2 ${
+                                        className={`group p-3 rounded-md border cursor-pointer transition-colors space-y-2 ${
                                             isActive
-                                                ? 'bg-blue-600/15 border-blue-500/60 shadow-sm'
-                                                : 'bg-slate-950/60 border-slate-800/90 hover:border-slate-700'
+                                                ? 'bg-selected border-accent-border'
+                                                : 'bg-surface border-line hover:border-line-strong'
                                         }`}
                                     >
                                         <div className="flex items-start justify-between gap-2">
                                             <div className="min-w-0">
-                                                <div className={`text-xs font-mono font-semibold truncate ${isActive ? 'text-white' : 'text-slate-200'}`}>
+                                                <div className={`text-xs font-mono font-semibold truncate ${isActive ? 'text-accent' : 'text-ink'}`}>
                                                     {table}
                                                 </div>
-                                                <div className="text-[11px] text-slate-500 font-mono truncate mt-0.5">
+                                                <div className="text-[11px] text-ink-muted font-mono truncate mt-0.5">
                                                     id: {cfg.id || table.replace(/\./g, '_')}
                                                 </div>
                                             </div>
@@ -997,28 +993,24 @@ export default function StepMap({
                                                     handleToggleDiscoveredTable(table);
                                                 }}
                                                 title="Remove source table"
-                                                className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 opacity-70 group-hover:opacity-100 transition-colors"
+                                                className="p-1 rounded text-ink-muted hover:text-status-danger hover:bg-status-danger-soft opacity-75 group-hover:opacity-100 transition-colors"
                                             >
                                                 <Trash2 className="w-3.5 h-3.5" />
                                             </button>
                                         </div>
 
-                                        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums">
                                             {cfg.entity_key && (
-                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono max-w-[120px] truncate">
-                                                    <Key className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                                                <span className="badge-neutral font-mono max-w-[120px] truncate">
+                                                    <Key className="w-2.5 h-2.5 text-status-warning shrink-0" />
                                                     {cfg.entity_key}
                                                 </span>
                                             )}
-                                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${
-                                                idCount > 0
-                                                    ? 'bg-blue-950/60 text-blue-300 border-blue-800/60'
-                                                    : 'bg-amber-950/50 text-amber-300 border-amber-700/60'
-                                            }`}>
+                                            <span className={idCount > 0 ? 'badge-accent' : 'badge-warning'}>
                                                 <Fingerprint className="w-2.5 h-2.5" />
                                                 {idCount} IDs
                                             </span>
-                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/50 text-emerald-300 border border-emerald-800/50">
+                                            <span className="badge-success">
                                                 <Tag className="w-2.5 h-2.5" />
                                                 {attrCount} Attrs
                                             </span>
@@ -1031,19 +1023,19 @@ export default function StepMap({
 
                     {/* Right Detail Pane: Active Source Config & Columns */}
                     {activeTable && activeConfig && (
-                        <div className="lg:col-span-8 bg-slate-900/60 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-5">
-                            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-                                <div>
-                                    <span className="text-[11px] uppercase tracking-wider font-semibold text-blue-400">Active Source Table</span>
-                                    <h3 className="text-base font-bold font-mono text-white">{activeTable}</h3>
-                                </div>
+                        <div className="lg:col-span-8 surface-panel p-4 space-y-4">
+                            <div className="flex flex-wrap items-center justify-between gap-3 pb-2.5 border-b border-line">
+                                <h3 className="text-[14px] font-semibold font-mono text-ink">{activeTable}</h3>
+                                <span className="badge-neutral font-mono">
+                                    source_id: {activeConfig.id || activeTable.replace(/\./g, '_')}
+                                </span>
                             </div>
 
                             {/* Source Extraction Settings */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                                 <div className="space-y-1.5">
-                                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
-                                        <Key className="w-3.5 h-3.5 text-amber-400" /> Entity Key (Primary ID)
+                                    <label className="flex items-center gap-1.5 text-xs font-medium text-ink-secondary">
+                                        <Key className="w-3.5 h-3.5 text-status-warning" /> Entity Key (Primary ID)
                                     </label>
                                     <CustomSelect
                                         value={activeConfig.entity_key || ''}
@@ -1053,14 +1045,14 @@ export default function StepMap({
                                             ...activeCols.map(c => ({ value: c.name, label: `${c.name} (${c.type})` })),
                                         ]}
                                         className="w-full"
-                                        buttonClassName="text-xs py-2 bg-slate-950"
+                                        buttonClassName="text-xs py-1.5"
                                         menuClassName="left-0 right-0"
                                     />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
-                                        <Clock className="w-3.5 h-3.5 text-blue-400" /> Watermark Column
+                                    <label className="flex items-center gap-1.5 text-xs font-medium text-ink-secondary">
+                                        <Clock className="w-3.5 h-3.5 text-accent" /> Watermark Column
                                     </label>
                                     <CustomSelect
                                         value={activeConfig.watermark_column || ''}
@@ -1070,31 +1062,33 @@ export default function StepMap({
                                             ...activeCols.map(c => ({ value: c.name, label: `${c.name} (${c.type})` })),
                                         ]}
                                         className="w-full"
-                                        buttonClassName="text-xs py-2 bg-slate-950"
+                                        buttonClassName="text-xs py-1.5"
                                         menuClassName="left-0 right-0"
                                     />
                                 </div>
 
+                                {Boolean(activeConfig.watermark_column) && (
                                 <div className="space-y-1.5">
-                                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
-                                        <Clock className="w-3.5 h-3.5 text-slate-400" /> Lookback Window (Minutes)
+                                    <label className="flex items-center gap-1.5 text-xs font-medium text-ink-secondary">
+                                        <Clock className="w-3.5 h-3.5 text-ink-muted" /> Lookback Window (Minutes)
                                     </label>
                                     <input
                                         type="number"
                                         min="0"
                                         value={activeConfig.watermark_lookback_minutes || 0}
                                         onChange={e => updateSourceField(activeTable, 'watermark_lookback_minutes', parseInt(e.target.value, 10) || 0)}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                                        className="input-field font-mono tabular-nums text-xs py-1.5"
                                     />
                                 </div>
+                                )}
 
                                 <div className="space-y-1.5">
-                                    <label className="flex items-center gap-2 text-xs font-medium text-slate-300 cursor-pointer pt-1">
+                                    <label className="flex items-center gap-2 text-xs font-medium text-ink-secondary cursor-pointer pt-1">
                                         <input
                                             type="checkbox"
                                             checked={Boolean(activeConfig.deduplicate)}
                                             onChange={e => updateSourceField(activeTable, 'deduplicate', e.target.checked)}
-                                            className="rounded border-slate-700 bg-slate-950 text-blue-500 focus:ring-blue-500"
+                                            className="rounded border-line-strong text-accent"
                                         />
                                         Deduplicate duplicate entity_key rows in batch
                                     </label>
@@ -1107,7 +1101,7 @@ export default function StepMap({
                                                 ...activeCols.map(c => ({ value: `${c.name} DESC`, label: `${c.name} DESC` })),
                                             ]}
                                             className="w-full"
-                                            buttonClassName="text-xs py-1.5 bg-slate-950"
+                                            buttonClassName="text-xs py-1.5"
                                             menuClassName="left-0 right-0"
                                         />
                                     )}
@@ -1115,29 +1109,30 @@ export default function StepMap({
                             </div>
 
                             {/* Column Role Classification Table */}
-                            <div className="space-y-2.5">
+                            <div className="space-y-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                                        <Fingerprint className="w-3.5 h-3.5 text-purple-400" /> Column Classification ({activeCols.length})
+                                    <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted tabular-nums">
+                                        <Fingerprint className="w-3.5 h-3.5 text-accent" /> Column Classification ({activeCols.length})
                                     </label>
                                     <div className="relative w-56">
-                                        <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                        <Search className="w-3.5 h-3.5 text-ink-subtle absolute left-2.5 top-1/2 -translate-y-1/2" />
                                         <input
                                             type="text"
                                             value={colSearch}
                                             onChange={e => setColSearch(e.target.value)}
                                             placeholder="Filter columns..."
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                                            className="input-field pl-8 pr-2.5 py-1 text-xs"
                                         />
                                     </div>
                                 </div>
 
-                                <div className="border border-slate-800 rounded-xl bg-slate-950/80 max-h-[340px] overflow-y-auto">
-                                    <div className="grid grid-cols-12 gap-2 px-3.5 py-2 border-b border-slate-800 text-[11px] font-semibold text-slate-500 uppercase sticky top-0 bg-slate-900/95 backdrop-blur z-10">
+                                <div className="border border-line rounded-md bg-surface max-h-[340px] overflow-y-auto">
+                                    <p className="px-3.5 py-2 text-xs text-ink-muted border-b border-line">A column can be both an Identifier and an Attribute. Select Attribute to make it available in Survivorship for the golden profile.</p>
+                                    <div className="grid grid-cols-12 gap-2 px-3.5 py-2 border-b border-line text-[11px] font-semibold text-ink-muted uppercase tracking-[0.04em] sticky top-0 bg-subtle z-10">
                                         <div className="col-span-4">Column</div>
                                         <div className="col-span-2">SQL Type</div>
                                         <div className="col-span-1 text-center" title="Include in matching rules">Match</div>
-                                        <div className="col-span-5 text-right">Role &amp; Type</div>
+                                        <div className="col-span-5 text-right">Roles &amp; Types</div>
                                     </div>
 
                                     {filteredActiveCols.map(c => {
@@ -1152,11 +1147,11 @@ export default function StepMap({
                                             ? suggestAliasedAttrName(activeTable, state.attrName || c.name)
                                             : '';
                                         return (
-                                            <div key={c.name} className="grid grid-cols-12 gap-2 px-3.5 py-2 items-center hover:bg-slate-900/80 border-b border-slate-800/50 last:border-0">
-                                                <div className="col-span-4 text-xs font-mono font-medium text-slate-200 truncate" title={c.name}>
+                                            <div key={c.name} className="grid grid-cols-12 gap-2 px-3.5 py-2 items-center hover:bg-subtle border-b border-line last:border-0">
+                                                <div className="col-span-4 text-xs font-mono font-medium text-ink truncate" title={c.name}>
                                                     {c.name}
                                                 </div>
-                                                <div className="col-span-2 text-[11px] font-mono text-slate-500 truncate" title={c.type}>
+                                                <div className="col-span-2 text-[11px] font-mono text-ink-muted truncate" title={c.type}>
                                                     {c.type}
                                                 </div>
                                                 <div className="col-span-1 flex justify-center">
@@ -1164,7 +1159,7 @@ export default function StepMap({
                                                         <button
                                                             type="button"
                                                             onClick={() => toggleMatchKey(activeTable, c.name)}
-                                                            className={`p-1 rounded hover:bg-slate-800 ${state.isMatch ? 'text-blue-400' : 'text-slate-600'}`}
+                                                            className={`p-1 rounded hover:bg-hover ${state.isMatch ? 'text-accent' : 'text-ink-subtle'}`}
                                                             title={state.isMatch ? 'Included in matching rules' : 'Stored only (excluded from matching)'}
                                                         >
                                                             {state.isMatch ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
@@ -1177,7 +1172,7 @@ export default function StepMap({
                                                             type="text"
                                                             value={state.type || ''}
                                                             onChange={(e) => updateIdentifierType(activeTable, c.name, e.target.value)}
-                                                            className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs font-mono text-blue-300 w-24 focus:outline-none focus:border-blue-500"
+                                                            className="bg-surface border border-accent-border rounded px-2 py-1 text-xs font-mono text-accent w-24 focus:outline-none focus:border-accent"
                                                             placeholder="id type"
                                                         />
                                                     )}
@@ -1187,10 +1182,10 @@ export default function StepMap({
                                                                 type="text"
                                                                 value={state.attrName || ''}
                                                                 onChange={(e) => updateAttributeName(activeTable, c.name, e.target.value)}
-                                                                className={`bg-slate-900 border rounded-md px-2 py-1 text-xs font-mono w-28 focus:outline-none ${
+                                                                className={`bg-surface border rounded px-2 py-1 text-xs font-mono w-28 focus:outline-none ${
                                                                     isHomonymCollision
-                                                                        ? 'border-amber-500/70 text-amber-300 focus:border-amber-400'
-                                                                        : 'border-slate-700 text-emerald-300 focus:border-emerald-500'
+                                                                        ? 'border-status-warning-border text-status-warning focus:border-status-warning'
+                                                                        : 'border-status-success-border text-status-success focus:border-status-success'
                                                                 }`}
                                                                 placeholder="attr name"
                                                                 title="Target attribute name in golden_profile_current (rename to alias colliding columns)"
@@ -1200,7 +1195,7 @@ export default function StepMap({
                                                                     type="button"
                                                                     onClick={() => updateAttributeName(activeTable, c.name, suggestedAlias)}
                                                                     title={`'${attrKey}' is mapped on ${collidingTables.length} tables (${collidingTables.join(', ')}). Click to alias as '${suggestedAlias}'.`}
-                                                                    className="px-1.5 py-1 text-[10px] font-mono rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 whitespace-nowrap"
+                                                                    className="badge-warning font-mono whitespace-nowrap cursor-pointer"
                                                                 >
                                                                     → {suggestedAlias}
                                                                 </button>
@@ -1210,10 +1205,13 @@ export default function StepMap({
                                                     <button
                                                         type="button"
                                                         onClick={() => toggleIdentifier(activeTable, c.name)}
-                                                        className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                                                        aria-pressed={state.isId}
+                                                        aria-label={`${c.name}: identifier`}
+                                                        title="Use for identity matching; can also be a profile attribute"
+                                                        className={`px-2.5 py-1 text-xs rounded border transition-colors ${
                                                             state.isId
-                                                                ? 'bg-blue-600 border-blue-500 text-white font-medium'
-                                                                : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                                                                ? 'bg-accent border-accent text-accent-fg font-medium'
+                                                                : 'bg-surface border-line-strong text-ink-secondary hover:bg-subtle'
                                                         }`}
                                                     >
                                                         Identifier
@@ -1221,10 +1219,13 @@ export default function StepMap({
                                                     <button
                                                         type="button"
                                                         onClick={() => toggleAttribute(activeTable, c.name)}
-                                                        className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                                                        aria-pressed={state.isAttr}
+                                                        aria-label={`${c.name}: profile attribute`}
+                                                        title="Make available in Survivorship and the golden profile; keeps identifier mapping"
+                                                        className={`px-2.5 py-1 text-xs rounded border transition-colors ${
                                                             state.isAttr
-                                                                ? 'bg-emerald-600/20 border-emerald-500/70 text-emerald-300 font-medium'
-                                                                : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                                                                ? 'bg-status-success-soft border-status-success-border text-status-success font-medium'
+                                                                : 'bg-surface border-line-strong text-ink-secondary hover:bg-subtle'
                                                         }`}
                                                     >
                                                         Attribute
@@ -1241,12 +1242,12 @@ export default function StepMap({
             )}
 
             {/* Bottom Navigation Helper */}
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+            <div className="flex items-center justify-between pt-3 border-t border-line">
                 {onBack ? (
                     <button
                         type="button"
                         onClick={onBack}
-                        className="px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-xs font-medium hover:bg-slate-800"
+                        className="btn-secondary text-xs"
                     >
                         Switch Warehouse
                     </button>
@@ -1256,7 +1257,7 @@ export default function StepMap({
                     type="button"
                     onClick={handleNext}
                     disabled={tables.length === 0}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition-colors"
+                    className="btn-primary text-xs"
                 >
                     Continue to Matching Rules →
                 </button>

@@ -249,12 +249,12 @@ export default function SetupWizard() {
     const platformLabel = (machine.connectionData?.platform || '').toString().toUpperCase();
 
     return (
-        <div className="container mx-auto max-w-6xl py-6 space-y-6 text-slate-100">
-            {/* Sticky Identity Studio Header */}
-            <header className="sticky top-2 z-30 bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-2xl px-5 py-4 shadow-xl flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2.5">
-                        <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white">
+        <div className="space-y-4">
+            {/* Sticky Identity Studio Header (offset below AppShell h-12 sticky bar) */}
+            <header className="sticky top-14 z-20 surface-panel px-4 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <h1 className="text-[18px] font-semibold tracking-[-0.015em] text-ink">
                             Identity Studio
                         </h1>
 
@@ -262,41 +262,41 @@ export default function SetupWizard() {
                             <button
                                 type="button"
                                 onClick={() => machine.goToStage(machine.stage === 'connect' ? 'map' : 'connect')}
-                                className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/30 text-xs font-medium text-emerald-300 transition-colors"
+                                className="badge-success hover:opacity-90 transition-opacity cursor-pointer font-mono"
                                 title="Switch or inspect warehouse connection"
                             >
-                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                                <span className="w-1.5 h-1.5 rounded-full bg-status-success" />
                                 <Database className="w-3 h-3" />
                                 <span>{platformLabel || 'WAREHOUSE'}</span>
-                                <ArrowLeftRight className="w-3 h-3 text-emerald-400/70" />
+                                <ArrowLeftRight className="w-3 h-3 opacity-75" />
                             </button>
                         ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs text-slate-400">
-                                <span className="w-2 h-2 rounded-full bg-slate-500" />
+                            <span className="badge-neutral">
+                                <span className="w-1.5 h-1.5 rounded-full bg-ink-subtle" />
                                 Not Connected
                             </span>
                         )}
 
                         {machine.isConnected && machine.stage !== 'connect' && (
                             machine.hasUnsavedChanges ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-950/60 border border-amber-500/40 text-[11px] font-medium text-amber-300">
+                                <span className="badge-warning">
                                     Unsaved Changes
                                 </span>
                             ) : machine.isConfigured ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-800/80 border border-slate-700 text-[11px] font-medium text-slate-300">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                <span className="badge-neutral">
+                                    <CheckCircle2 className="w-3 h-3 text-status-success" />
                                     Saved
                                 </span>
                             ) : null
                         )}
                     </div>
-                    <p className="text-slate-400 text-xs">
+                    <p className="text-ink-muted text-xs">
                         Discover sources, model matching rules &amp; golden record survivorship, and execute pipeline runs.
                     </p>
                 </div>
 
                 {/* Studio Action Bar */}
-                <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-2">
                     <button
                         type="button"
                         onClick={() => {
@@ -304,9 +304,9 @@ export default function SetupWizard() {
                             setImportError(null);
                             setIsImportModalOpen(true);
                         }}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                        className="btn-secondary text-xs"
                     >
-                        <FileCode2 className="w-3.5 h-3.5 text-blue-400" />
+                        <FileCode2 className="w-3.5 h-3.5 text-accent" />
                         JSON
                     </button>
 
@@ -316,10 +316,10 @@ export default function SetupWizard() {
                                 <button
                                     type="button"
                                     onClick={openHistoryModal}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                                    className="btn-secondary text-xs"
                                     title="View saved configuration versions & rollback"
                                 >
-                                    <History className="w-3.5 h-3.5 text-purple-400" />
+                                    <History className="w-3.5 h-3.5 text-ink-muted" />
                                     History
                                 </button>
                             )}
@@ -329,7 +329,7 @@ export default function SetupWizard() {
                                     type="button"
                                     onClick={handleDiscardDraft}
                                     disabled={saving}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-950/50 hover:bg-amber-900/50 text-amber-200 border border-amber-700/60 rounded-xl text-xs font-semibold transition-colors"
+                                    className="btn-ghost text-xs text-status-warning"
                                     title="Discard unsaved draft changes and reload saved config"
                                 >
                                     <RotateCcw className="w-3.5 h-3.5" />
@@ -342,11 +342,13 @@ export default function SetupWizard() {
                                 onClick={handleSaveFromHeader}
                                 disabled={saving || !!machine.initWarning || sourceCount === 0}
                                 title={machine.initWarning ? 'Read-only mode' : 'Persist configuration to idr_meta'}
-                                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all disabled:opacity-45 disabled:cursor-not-allowed ${
-                                    machine.hasUnsavedChanges
-                                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-950/30'
-                                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                                }`}
+                                className={
+                                    machine.hasUnsavedChanges && machine.stage === 'review'
+                                        ? 'btn-primary text-xs'
+                                        : machine.hasUnsavedChanges
+                                        ? 'btn-secondary text-xs border-accent text-accent'
+                                        : 'btn-secondary text-xs'
+                                }
                             >
                                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                                 {saving ? `Saving (${saveProgress?.percent ?? 0}%)` : 'Save Config'}
@@ -357,7 +359,7 @@ export default function SetupWizard() {
                                     type="button"
                                     onClick={() => machine.goToStage('review')}
                                     disabled={sourceCount === 0}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-45 disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-700 text-white shadow-md"
+                                    className="btn-primary text-xs"
                                 >
                                     <Play className="w-3.5 h-3.5" />
                                     Run Pipeline
@@ -370,17 +372,17 @@ export default function SetupWizard() {
 
             {/* Studio Header Save Progress Banner (when saving from Tabs 1–3) */}
             {saving && saveProgress && machine.stage !== 'review' && (
-                <div className="bg-blue-950/35 border border-blue-500/40 rounded-xl p-3.5 space-y-2">
+                <div className="surface-panel bg-accent-soft/40 border-accent-border p-3.5 space-y-2">
                     <div className="flex items-center justify-between text-xs">
-                        <span className="text-blue-300 font-medium flex items-center gap-2">
+                        <span className="text-accent font-medium flex items-center gap-2">
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             {saveProgress.label || 'Saving configuration...'}
                         </span>
-                        <span className="font-mono text-blue-200">{saveProgress.percent}%</span>
+                        <span className="font-mono tabular-nums text-ink">{saveProgress.percent}%</span>
                     </div>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-subtle rounded-full overflow-hidden">
                         <div
-                            className="h-full bg-gradient-to-r from-blue-500 to-indigo-400 transition-all duration-300"
+                            className="h-full bg-accent transition-all duration-300"
                             style={{ width: `${Math.min(100, Math.max(5, saveProgress.percent || 5))}%` }}
                         />
                     </div>
@@ -388,9 +390,9 @@ export default function SetupWizard() {
             )}
 
             {saveError && machine.stage !== 'review' && (
-                <div className="p-3 bg-rose-950/50 border border-rose-500/40 rounded-xl text-xs text-rose-300 flex items-center justify-between gap-2">
+                <div className="p-3 bg-status-danger-soft border border-status-danger-border rounded-md text-xs text-status-danger flex items-center justify-between gap-2">
                     <span>{saveError}</span>
-                    <button type="button" onClick={() => setSaveError(null)} className="text-rose-400 hover:text-white">
+                    <button type="button" onClick={() => setSaveError(null)} className="text-status-danger hover:opacity-80">
                         ×
                     </button>
                 </div>
@@ -398,31 +400,31 @@ export default function SetupWizard() {
 
             {/* Configuration Version History & Rollback Modal */}
             {isHistoryModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-                    <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-4">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40">
+                    <div className="bg-surface border border-line-strong rounded-md shadow-popover max-w-2xl w-full p-5 space-y-4">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <History className="w-5 h-5 text-purple-400" />
-                                <h3 className="text-lg font-bold text-white">Configuration History &amp; Rollback</h3>
+                                <History className="w-4 h-4 text-accent" />
+                                <h3 className="text-[15px] font-semibold text-ink">Configuration History &amp; Rollback</h3>
                             </div>
                             <button
                                 onClick={() => setIsHistoryModalOpen(false)}
-                                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                                className="p-1 hover:bg-hover rounded text-ink-muted hover:text-ink"
                             >
-                                <X className="w-5 h-5" />
+                                <X className="w-4 h-4" />
                             </button>
                         </div>
-                        <p className="text-xs text-slate-400">
-                            Restore any previously saved configuration snapshot from <code>idr_out.config_snapshot</code>. You can load it as a draft (for Dry Run preview) or restore &amp; save immediately.
+                        <p className="text-xs text-ink-muted">
+                            Restore any previously saved configuration snapshot from <code className="font-mono">idr_out.config_snapshot</code>. You can load it as a draft (for Dry Run preview) or restore &amp; save immediately.
                         </p>
 
                         <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
                             {historyLoading ? (
                                 <div className="flex justify-center py-10">
-                                    <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
+                                    <Loader2 className="w-6 h-6 animate-spin text-accent" />
                                 </div>
                             ) : historySnapshots.length === 0 ? (
-                                <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+                                <div className="text-center py-8 text-xs text-ink-muted border border-dashed border-line-strong rounded-md">
                                     No saved configuration snapshots found yet.
                                 </div>
                             ) : (
@@ -431,26 +433,26 @@ export default function SetupWizard() {
                                     return (
                                         <div
                                             key={`${snap.config_hash}-${snap.created_at}-${idx}`}
-                                            className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                                            className="p-3 surface-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                                         >
                                             <div className="space-y-1 min-w-0">
                                                 <div className="flex items-center gap-2">
-                                                    <span className="font-mono text-xs font-semibold text-blue-300">
+                                                    <span className="font-mono text-xs font-semibold text-accent">
                                                         {snap.config_hash.slice(0, 10)}
                                                     </span>
                                                     {idx === 0 && (
-                                                        <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-700/50 text-[10px] font-semibold text-emerald-300">
+                                                        <span className="badge-success">
                                                             Latest Saved
                                                         </span>
                                                     )}
-                                                    <span className="text-[11px] text-slate-500 font-mono truncate">
+                                                    <span className="text-[11px] text-ink-muted font-mono tabular-nums truncate">
                                                         {snap.created_at}
                                                     </span>
                                                 </div>
-                                                <div className="flex flex-wrap gap-3 text-xs text-slate-400">
-                                                    <span><strong className="text-slate-200">{snap.sources_count}</strong> sources</span>
-                                                    <span><strong className="text-slate-200">{snap.rules_count}</strong> rules</span>
-                                                    <span><strong className="text-slate-200">{snap.exclusions_count}</strong> exclusions</span>
+                                                <div className="flex flex-wrap gap-3 text-xs text-ink-secondary tabular-nums">
+                                                    <span><strong className="text-ink">{snap.sources_count}</strong> sources</span>
+                                                    <span><strong className="text-ink">{snap.rules_count}</strong> rules</span>
+                                                    <span><strong className="text-ink">{snap.exclusions_count}</strong> exclusions</span>
                                                 </div>
                                             </div>
 
@@ -458,7 +460,7 @@ export default function SetupWizard() {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleRestoreSnapshot(snap, false)}
-                                                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium"
+                                                    className="btn-secondary text-xs"
                                                 >
                                                     Load Draft
                                                 </button>
@@ -466,7 +468,7 @@ export default function SetupWizard() {
                                                     type="button"
                                                     disabled={isRestoring || !!machine.initWarning}
                                                     onClick={() => handleRestoreSnapshot(snap, true)}
-                                                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5"
+                                                    className="btn-primary text-xs"
                                                 >
                                                     {isRestoring ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
                                                     Restore &amp; Save
@@ -487,29 +489,29 @@ export default function SetupWizard() {
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="import-json-modal-title"
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40"
                 >
-                    <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-4">
+                    <div className="bg-surface border border-line-strong rounded-md shadow-popover max-w-2xl w-full p-5 space-y-4">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <FileCode2 className="w-5 h-5 text-blue-400" />
-                                <h3 id="import-json-modal-title" className="text-lg font-bold text-white">Import / Export Configuration JSON</h3>
+                                <FileCode2 className="w-4 h-4 text-accent" />
+                                <h3 id="import-json-modal-title" className="text-[15px] font-semibold text-ink">Import / Export Configuration JSON</h3>
                             </div>
                             <button
                                 onClick={() => setIsImportModalOpen(false)}
                                 aria-label="Close Import/Export Configuration JSON modal"
-                                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                                className="p-1 hover:bg-hover rounded text-ink-muted hover:text-ink"
                             >
-                                <X className="w-5 h-5" />
+                                <X className="w-4 h-4" />
                             </button>
                         </div>
-                        <p className="text-xs text-slate-400">
+                        <p className="text-xs text-ink-muted">
                             Paste an IDR JSON configuration manifest (sources, matching rules, exclusions, survivorship) or copy your current manifest.
                         </p>
 
                         {importError && (
-                            <div className="p-3 bg-rose-950/60 border border-rose-800 text-rose-300 rounded-lg text-xs flex items-center gap-2">
-                                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                            <div className="p-3 bg-status-danger-soft border border-status-danger-border text-status-danger rounded-md text-xs flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4 shrink-0" />
                                 <span>{importError}</span>
                             </div>
                         )}
@@ -518,14 +520,14 @@ export default function SetupWizard() {
                             value={importText}
                             onChange={(e) => setImportText(e.target.value)}
                             rows={15}
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 font-mono text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                            className="input-field font-mono text-xs p-3"
                             placeholder='{"sources": [{"id": "...", "table": "...", "entity_key": "...", "identifiers": [...]}], "rules": [...]}'
                         />
 
-                        <div className="flex justify-end gap-3 pt-2">
+                        <div className="flex justify-end gap-2 pt-1">
                             <button
                                 onClick={() => setIsImportModalOpen(false)}
-                                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium"
+                                className="btn-secondary text-xs"
                             >
                                 Cancel
                             </button>
@@ -553,7 +555,7 @@ export default function SetupWizard() {
                                         setImportError(`Invalid JSON: ${err.message}`);
                                     }
                                 }}
-                                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-md transition-colors"
+                                className="btn-primary text-xs"
                             >
                                 Apply Configuration
                             </button>
@@ -564,7 +566,7 @@ export default function SetupWizard() {
 
             {/* Persistent 4-Tab Studio Bar */}
             {machine.isConnected && machine.stage !== 'connect' && (
-                <nav className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800">
+                <nav className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 surface-subtle p-1">
                     {STUDIO_TABS.map(tab => {
                         const isActive = machine.stage === tab.id;
                         const isClickable = machine.canNavigateTo(tab.id);
@@ -575,16 +577,16 @@ export default function SetupWizard() {
                                 type="button"
                                 disabled={!isClickable}
                                 onClick={() => isClickable && machine.goToStage(tab.id)}
-                                className={`flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                                className={`flex items-center justify-between gap-2 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                                     isActive
-                                        ? 'bg-blue-600/20 text-blue-200 border border-blue-500/50 shadow-sm'
+                                        ? 'bg-surface text-ink border border-line-strong font-semibold'
                                         : isClickable
-                                        ? 'text-slate-300 hover:bg-slate-800/80 border border-transparent'
-                                        : 'text-slate-600 opacity-50 cursor-not-allowed border border-transparent'
+                                        ? 'text-ink-secondary hover:text-ink hover:bg-hover border border-transparent'
+                                        : 'text-ink-subtle opacity-50 cursor-not-allowed border border-transparent'
                                 }`}
                             >
                                 <span className="flex items-center gap-2 truncate">
-                                    <span className={`p-1 rounded-lg ${isActive ? 'bg-blue-500/20 text-blue-300' : 'bg-slate-800 text-slate-400'}`}>
+                                    <span className={isActive ? 'text-accent shrink-0' : 'text-ink-muted shrink-0'}>
                                         {getStageIcon(tab.id)}
                                     </span>
                                     <span className="truncate">
@@ -592,9 +594,7 @@ export default function SetupWizard() {
                                     </span>
                                 </span>
                                 {count !== null && (
-                                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
-                                        isActive ? 'bg-blue-500/30 text-blue-200' : 'bg-slate-800 text-slate-400'
-                                    }`}>
+                                    <span className={`font-mono tabular-nums ${isActive ? 'badge-accent' : 'badge-neutral'}`}>
                                         {count}
                                     </span>
                                 )}
@@ -605,14 +605,14 @@ export default function SetupWizard() {
             )}
 
             {/* Main Studio Workspace */}
-            <div className="bg-slate-900/55 rounded-2xl border border-slate-800/90 shadow-xl p-5 sm:p-6 min-h-[520px]">
+            <div className="surface-panel p-4 sm:p-5 min-h-[520px]">
                 {loadingConfig ? (
-                    <div className="flex flex-col items-center justify-center py-28 text-center space-y-3">
-                        <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
-                        <div className="text-sm font-medium text-slate-200">
+                    <div className="flex flex-col items-center justify-center py-28 text-center space-y-2.5">
+                        <Loader2 className="w-7 h-7 text-accent animate-spin" />
+                        <div className="text-sm font-medium text-ink">
                             Loading warehouse configuration &amp; metadata...
                         </div>
-                        <p className="text-xs text-slate-400 max-w-sm">
+                        <p className="text-xs text-ink-muted max-w-sm">
                             Fetching sources, matching rules, survivorship, and lenses in parallel.
                         </p>
                     </div>

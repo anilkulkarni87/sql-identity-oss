@@ -116,7 +116,7 @@ class IDRDoctor:
         """Measure database connection ping and retrieve platform coordinates."""
         start_t = time.perf_counter()
         try:
-            res = self.adapter.query("SELECT 1 AS ping")
+            self.adapter.query("SELECT 1 AS ping")
             latency_ms = round((time.perf_counter() - start_t) * 1000, 1)
 
             details: Dict[str, Any] = {"latency_ms": latency_ms}
@@ -216,8 +216,7 @@ class IDRDoctor:
             )
 
             # 4. SELECT
-            rows = self.adapter.query(f"SELECT COUNT(*) AS cnt FROM {probe_table}")
-            cnt = rows[0]["cnt"] if rows and isinstance(rows[0], dict) else 1
+            self.adapter.query(f"SELECT COUNT(*) AS cnt FROM {probe_table}")
 
             # 5. DROP TABLE
             self.adapter.execute(f"DROP TABLE {probe_table}")

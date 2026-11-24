@@ -110,8 +110,7 @@ def list_lens_clusters(
                 f"""
                 SELECT DISTINCT
                     c.resolved_id,
-                    c.cluster_size,
-                    0.0 AS confidence_score
+                    c.cluster_size
                 FROM idr_out.identity_lens_clusters_current c
                 JOIN idr_out.identity_lens_membership_current m
                     ON c.lens_id = m.lens_id AND c.resolved_id = m.resolved_id
@@ -133,8 +132,7 @@ def list_lens_clusters(
                 f"""
                 SELECT DISTINCT
                     c.resolved_id,
-                    c.cluster_size,
-                    0.0 AS confidence_score
+                    c.cluster_size
                 FROM idr_out.identity_lens_clusters_current c
                 JOIN idr_out.identity_lens_membership_current m
                     ON c.lens_id = m.lens_id AND c.resolved_id = m.resolved_id
@@ -153,8 +151,7 @@ def list_lens_clusters(
             f"""
             SELECT
                 resolved_id,
-                cluster_size,
-                0.0 AS confidence_score
+                cluster_size
             FROM idr_out.identity_lens_clusters_current
             WHERE lens_id = ?
             ORDER BY cluster_size DESC, resolved_id ASC
@@ -163,7 +160,14 @@ def list_lens_clusters(
             params=[lens_id],
         )
 
-    return [ClusterSummary(**r) for r in rows]
+    return [
+        ClusterSummary(
+            resolved_id=r["resolved_id"],
+            cluster_size=int(r.get("cluster_size") or 0),
+            confidence_score=None,
+        )
+        for r in rows
+    ]
 
 
 @router.get("/api/lenses/{lens_id}/clusters/{resolved_id}", response_model=ClusterDetail)

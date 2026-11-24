@@ -19,12 +19,12 @@ export default function Settings() {
     const [testing, setTesting] = useState(false)
     const [connectingId, setConnectingId] = useState<string | null>(null)
 
-    // AI Assistant (Local Ollama / BYOK) state
-    const [aiProvider, setAiProvider] = useState('ollama')
-    const [aiModel, setAiModel] = useState('llama3.2')
-    const [aiBaseUrl, setAiBaseUrl] = useState('http://localhost:11434/v1')
+    // AI Assistant (Local Ollama / Warehouse Native / BYOK) state
+    const [aiProvider, setAiProvider] = useState('disabled')
+    const [aiModel, setAiModel] = useState('')
+    const [aiBaseUrl, setAiBaseUrl] = useState('')
     const [aiApiKey, setAiApiKey] = useState('')
-    const [aiMaskPii, setAiMaskPii] = useState<boolean>(false)
+    const [aiMaskPii, setAiMaskPii] = useState<boolean>(true)
     const [aiStatusMsg, setAiStatusMsg] = useState<string | null>(null)
     const [aiTesting, setAiTesting] = useState(false)
     const [ollamaModels, setOllamaModels] = useState<string[]>([])
@@ -35,11 +35,17 @@ export default function Settings() {
     })
 
     useEffect(() => {
-        if (aiConfig && aiConfig.enabled) {
+        if (!aiConfig) return
+        if (aiConfig.enabled) {
             setAiProvider(aiConfig.provider || 'ollama')
-            setAiModel(aiConfig.model || 'llama3.2')
-            setAiBaseUrl(aiConfig.base_url || 'http://localhost:11434/v1')
+            setAiModel(aiConfig.model || '')
+            setAiBaseUrl(aiConfig.base_url || '')
             setAiMaskPii(Boolean(aiConfig.mask_pii))
+        } else {
+            setAiProvider('disabled')
+            setAiModel('')
+            setAiBaseUrl('')
+            setAiMaskPii(true)
         }
     }, [aiConfig])
 
@@ -257,7 +263,7 @@ export default function Settings() {
                     </div>
                     <span
                         className={
-                            aiProvider === 'ollama'
+                            aiProvider === 'ollama' || aiProvider === 'warehouse'
                                 ? 'badge-success'
                                 : aiProvider === 'disabled'
                                 ? 'badge-neutral'
@@ -265,7 +271,11 @@ export default function Settings() {
                         }
                     >
                         <Shield className="w-3 h-3" />
-                        {aiProvider === 'ollama'
+                        {aiProvider === 'warehouse'
+                            ? aiMaskPii
+                                ? 'Warehouse Native + PII Masked'
+                                : 'Warehouse Native (Zero Egress)'
+                            : aiProvider === 'ollama'
                             ? aiMaskPii
                                 ? 'Local + PII Masked'
                                 : 'Local Mode (Zero Egress)'
@@ -283,7 +293,11 @@ export default function Settings() {
                                 value={aiProvider}
                                 onChange={(val) => {
                                     setAiProvider(val)
-                                    if (val === 'ollama') {
+                                    if (val === 'warehouse') {
+                                        setAiBaseUrl('')
+                                        setAiModel('')
+                                        setAiMaskPii(false)
+                                    } else if (val === 'ollama') {
                                         setAiBaseUrl('http://localhost:11434/v1')
                                         setAiModel('llama3.2')
                                         setAiMaskPii(false)
@@ -305,6 +319,7 @@ export default function Settings() {
                                     }
                                 }}
                                 options={[
+                                    { value: 'warehouse', label: 'Warehouse Native (Cortex / BigQuery ML / Databricks ai_query / Local Ollama)' },
                                     { value: 'ollama', label: 'Ollama (Local / MacBook)' },
                                     { value: 'openai', label: 'OpenAI' },
                                     { value: 'anthropic', label: 'Anthropic Claude' },
@@ -360,63 +375,75 @@ export default function Settings() {
                                     type="text"
                                     value={aiModel}
                                     onChange={(e) => setAiModel(e.target.value)}
-                                    placeholder="e.g. llama3.2, gpt-4o-mini"
+                                    placeholder={
+                                        aiProvider === 'warehouse'
+                                            ? 'Auto (or Cortex / ai_query / BQ model FQN)'
+                                            : 'e.g. llama3.2, gpt-4o-mini'
+                                    }
                                     disabled={aiProvider === 'disabled'}
                                     className="input-field font-mono text-xs"
                                 />
                             )}
                         </div>
 
-                        <div className="space-y-1">
-                            <label htmlFor="ai-base-url-input" className="text-ink-secondary font-medium block">
-                                Base URL
-                            </label>
-                            <input
-                                id="ai-base-url-input"
-                                type="text"
-                                value={aiBaseUrl}
-                                onChange={(e) => setAiBaseUrl(e.target.value)}
-                                placeholder="http://localhost:11434/v1"
-                                disabled={aiProvider === 'disabled'}
-                                className="input-field font-mono text-xs"
-                            />
-                        </div>
+                        {aiProvider !== 'warehouse' && (
+                            <div className="space-y-1">
+                                <label htmlFor="ai-base-url-input" className="text-ink-secondary font-medium block">
+                                    Base URL
+                                </label>
+                                <input
+                                    id="ai-base-url-input"
+                                    type="text"
+                                    value={aiBaseUrl}
+                                    onChange={(e) => setAiBaseUrl(e.target.value)}
+                                    placeholder="http://localhost:11434/v1"
+                                    disabled={aiProvider === 'disabled'}
+                                    className="input-field font-mono text-xs"
+                                />
+                            </div>
+                        )}
 
+                        {aiProvider !== 'ollama' && aiProvider !== 'warehouse' && aiProvider !== 'disabled' && (
                         <div className="space-y-1">
-                            <label htmlFor="ai-api-key-input" className="text-ink-secondary font-medium block">
-                                API Key{' '}
-                                {aiProvider === 'ollama' && (
-                                    <span className="text-ink-muted">(optional for Ollama)</span>
+                            <div className="flex items-center justify-between">
+                                <label htmlFor="ai-api-key-input" className="text-ink-secondary font-medium block">
+                                    API Key
+                                </label>
+                                {aiConfig?.has_api_key && aiConfig.provider === aiProvider && (
+                                    <span className="text-[11px] font-medium text-status-success">
+                                        Key configured
+                                    </span>
                                 )}
-                            </label>
+                            </div>
                             <input
                                 id="ai-api-key-input"
                                 type="password"
+                                autoComplete="off"
                                 value={aiApiKey}
                                 onChange={(e) => setAiApiKey(e.target.value)}
                                 placeholder={
-                                    aiProvider === 'ollama'
-                                        ? 'Not required for local Ollama'
+                                    aiConfig?.has_api_key && aiConfig.provider === aiProvider
+                                        ? 'Configured (leave blank to keep existing key)'
                                         : 'sk-... (stored in memory only)'
                                 }
-                                disabled={aiProvider === 'disabled'}
                                 className="input-field font-mono text-xs"
                             />
                         </div>
+                        )}
                     </div>
 
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-line">
                         <label className="inline-flex items-center gap-2 text-xs text-ink-secondary cursor-pointer">
                             <input
                                 type="checkbox"
-                                checked={aiProvider !== 'ollama' && aiProvider !== 'disabled' ? true : aiMaskPii}
+                                checked={aiProvider !== 'ollama' && aiProvider !== 'warehouse' && aiProvider !== 'disabled' ? true : aiMaskPii}
                                 onChange={(e) => setAiMaskPii(e.target.checked)}
-                                disabled={aiProvider !== 'ollama'}
+                                disabled={aiProvider !== 'ollama' && aiProvider !== 'warehouse'}
                                 className="rounded border-line-strong text-accent focus:ring-accent"
                             />
                             <span>
                                 Mask PII before sending to AI
-                                {aiProvider !== 'ollama' && aiProvider !== 'disabled' && (
+                                {aiProvider !== 'ollama' && aiProvider !== 'warehouse' && aiProvider !== 'disabled' && (
                                     <span className="text-status-warning ml-1">
                                         (enforced for non-local models)
                                     </span>
@@ -424,49 +451,78 @@ export default function Settings() {
                             </span>
                         </label>
 
-                        <button
-                            type="button"
-                            disabled={aiTesting}
-                            onClick={async () => {
-                                setAiTesting(true)
-                                setAiStatusMsg(null)
-                                try {
-                                    await api.updateAiConfig({
-                                        provider: aiProvider,
-                                        model: aiModel.trim(),
-                                        base_url: aiBaseUrl.trim(),
-                                        api_key: aiApiKey.trim() || undefined,
-                                        mask_pii: aiProvider === 'ollama' ? aiMaskPii : true,
-                                    })
-                                    await queryClient.invalidateQueries({ queryKey: ['aiConfig'] })
-                                    if (aiProvider === 'disabled') {
-                                        setAiStatusMsg('AI Assistant disabled.')
-                                        toast('info', 'AI Assistant disabled')
-                                    } else {
-                                        const res = await api.testAiConnection()
-                                        const msg = `Connected to ${res.provider} (${res.model}) in ${res.latency_ms}ms — PII masking: ${
-                                            res.mask_pii ? 'ON' : 'OFF (local)'
-                                        }`
-                                        setAiStatusMsg(msg)
-                                        toast('success', 'AI Assistant ready', msg)
+                        <div className="flex items-center gap-2">
+                            {aiConfig?.enabled && (
+                                <button
+                                    type="button"
+                                    disabled={aiTesting}
+                                    onClick={async () => {
+                                        setAiTesting(true)
+                                        setAiStatusMsg(null)
+                                        try {
+                                            const res = await api.testAiConnection()
+                                            const msg = `Connected to ${res.provider} (${res.model}) in ${res.latency_ms}ms — PII masking: ${
+                                                res.mask_pii ? 'ON' : 'OFF (local)'
+                                            }`
+                                            setAiStatusMsg(msg)
+                                            toast('success', 'AI Assistant ready', msg)
+                                        } catch (err: any) {
+                                            const errMsg = `AI test failed: ${err.message || String(err)}`
+                                            setAiStatusMsg(errMsg)
+                                            toast('error', 'AI test failed', err.message || String(err))
+                                        } finally {
+                                            setAiTesting(false)
+                                        }
+                                    }}
+                                    className="btn-secondary text-xs"
+                                >
+                                    Test Current
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                disabled={aiTesting}
+                                onClick={async () => {
+                                    setAiTesting(true)
+                                    setAiStatusMsg(null)
+                                    try {
+                                        await api.updateAiConfig({
+                                            provider: aiProvider,
+                                            model: aiModel.trim(),
+                                            base_url: aiBaseUrl.trim(),
+                                            api_key: aiApiKey.trim() || undefined,
+                                            mask_pii: aiProvider === 'ollama' || aiProvider === 'warehouse' ? aiMaskPii : true,
+                                        })
+                                        await queryClient.invalidateQueries({ queryKey: ['aiConfig'] })
+                                        if (aiProvider === 'disabled') {
+                                            setAiStatusMsg('AI Assistant disabled.')
+                                            toast('info', 'AI Assistant disabled')
+                                        } else {
+                                            const res = await api.testAiConnection()
+                                            const msg = `Connected to ${res.provider} (${res.model}) in ${res.latency_ms}ms — PII masking: ${
+                                                res.mask_pii ? 'ON' : 'OFF (local)'
+                                            }`
+                                            setAiStatusMsg(msg)
+                                            toast('success', 'AI Assistant ready', msg)
+                                        }
+                                    } catch (err: any) {
+                                        const errMsg = `AI test failed: ${err.message || String(err)}`
+                                        setAiStatusMsg(errMsg)
+                                        toast('error', 'AI test failed', err.message || String(err))
+                                    } finally {
+                                        setAiTesting(false)
                                     }
-                                } catch (err: any) {
-                                    const errMsg = `AI test failed: ${err.message || String(err)}`
-                                    setAiStatusMsg(errMsg)
-                                    toast('error', 'AI test failed', err.message || String(err))
-                                } finally {
-                                    setAiTesting(false)
-                                }
-                            }}
-                            className="btn-primary text-xs"
-                        >
+                                }}
+                                className="btn-primary text-xs"
+                            >
                             {aiTesting ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
                                 <Bot className="w-3.5 h-3.5" />
                             )}
                             <span>Save &amp; Test AI</span>
-                        </button>
+                            </button>
+                        </div>
                     </div>
 
                     {aiStatusMsg && (
