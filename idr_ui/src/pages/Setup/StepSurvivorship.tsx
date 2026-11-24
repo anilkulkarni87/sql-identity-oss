@@ -59,14 +59,19 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
             });
         });
 
-        (config.survivorship || []).forEach(r => {
-            if (r.attribute) {
-                allAttrs.add(r.attribute);
-                if (!attrSources[r.attribute] && r.source_priority && r.source_priority.length > 0) {
-                    attrSources[r.attribute] = [...r.source_priority];
+        // Only retain survivorship rules for attributes still mapped on at least one active source.
+        // Removing an attribute in Step 1 (Sources & Mappings) automatically prunes it here.
+        const hasAnyMappedSources = (config.sources || []).length > 0;
+        if (!hasAnyMappedSources) {
+            (config.survivorship || []).forEach(r => {
+                if (r.attribute) {
+                    allAttrs.add(r.attribute);
+                    if (!attrSources[r.attribute] && r.source_priority && r.source_priority.length > 0) {
+                        attrSources[r.attribute] = [...r.source_priority];
+                    }
                 }
-            }
-        });
+            });
+        }
 
         const attrList = Array.from(allAttrs).sort();
         setAttributes(attrList);
@@ -107,9 +112,10 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
         });
 
         const missingFromConfig = attrList.some(attr => !existingByAttr.has(attr));
-        if (incomingSig !== lastEmittedSigRef.current || Object.keys(rules).length !== attrList.length) {
+        const orphanedInConfig = (config.survivorship || []).some(r => r.attribute && !allAttrs.has(r.attribute));
+        if (incomingSig !== lastEmittedSigRef.current || Object.keys(rules).length !== attrList.length || orphanedInConfig) {
             setRules(initialRules);
-            if (missingFromConfig && onChange) {
+            if ((missingFromConfig || orphanedInConfig) && onChange) {
                 const list = Object.values(initialRules);
                 lastEmittedSigRef.current = JSON.stringify(list);
                 onChange({
