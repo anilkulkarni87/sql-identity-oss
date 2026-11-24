@@ -532,10 +532,6 @@ export default function StepMap({
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                     {tables.length > 0 && (
                         <>
-                            <label className="inline-flex items-center gap-2 text-xs text-ink-secondary">
-                                <input type="checkbox" checked={aiFuzzy} onChange={e => setAiFuzzy(e.target.checked)} />
-                                Allow fuzzy matching proposals
-                            </label>
                             <button
                                 type="button"
                                 disabled={aiSuggesting}
@@ -558,7 +554,7 @@ export default function StepMap({
                                         }, {mode: 'config', current_config: base, context});
                                         setAiReport(res);
                                         setAiReportOpen(true);
-                                        setAiNotice('Proposal generated. Review the diff and apply it to your draft before starting a preview. Free-text notes stay local; structured policy controls generation.');
+                                        setAiNotice('Proposal generated. Review the diff and apply it to your draft before starting a preview.');
                                     } catch (err: any) {
                                         setValidationError(`AI Suggest failed: ${err?.message || err}`);
                                     } finally {
@@ -596,72 +592,76 @@ export default function StepMap({
             </div>
 
             {tables.length > 0 && (
-                <div className="bg-subtle border border-line-default rounded-md px-3 py-2.5 space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-muted">
-                        <span className="inline-flex items-center gap-1.5">
+                <details className="bg-subtle border border-line-default rounded-md px-3 py-2 text-xs">
+                    <summary className="cursor-pointer select-none flex flex-wrap items-center justify-between gap-2 text-ink-secondary hover:text-ink-primary">
+                        <span className="inline-flex items-center gap-1.5 font-medium">
                             <Bot className="w-3.5 h-3.5 text-accent shrink-0" />
-                            <strong className="text-ink-primary font-semibold">AI-Assisted Configuration</strong>
-                            <span className="px-1.5 py-0.2 rounded bg-accent/15 text-accent border border-accent/30 text-[10px] font-semibold uppercase">
-                                Beta
-                            </span>
-                            <span className="hidden md:inline">
-                                — Profiles schemas &amp; key overlaps locally (zero PII sent) to draft mappings, rules &amp; survivorship.
+                            AI Options (Optional)
+                            <span className="text-[11px] font-normal text-ink-muted">
+                                — Zero-PII profiling · {aiFuzzy ? 'Fuzzy ON' : 'Exact only'} · {aiEventPolicy === 'bridge' ? 'Bridge events' : aiEventPolicy === 'include' ? 'Include events' : 'Exclude events'}
                             </span>
                         </span>
+                        <span className="text-[11px] text-ink-muted">Customize goal, system of record, or constraints</span>
+                    </summary>
+                    <div className="mt-3 pt-2.5 border-t border-line-default/60 space-y-2.5">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <span className="text-[11px] font-semibold text-accent shrink-0">
+                                Goal (optional)
+                            </span>
+                            <input
+                                type="text"
+                                value={aiGoal}
+                                onChange={e => setAiGoal(e.target.value)}
+                                placeholder="e.g., High precision, maximize coverage, or prefer CRM as system of record"
+                                className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
+                            />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                            <label className="inline-flex items-center gap-1.5 text-ink-secondary cursor-pointer">
+                                <input type="checkbox" checked={aiFuzzy} onChange={e => setAiFuzzy(e.target.checked)} />
+                                Allow fuzzy matching proposals
+                            </label>
+                            <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                                <span className="font-medium">Event Tables:</span>
+                                <select
+                                    value={aiEventPolicy}
+                                    onChange={e => setAiEventPolicy(e.target.value as 'bridge' | 'include' | 'exclude')}
+                                    className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
+                                >
+                                    <option value="bridge">Bridge Only</option>
+                                    <option value="include">Include Fully</option>
+                                    <option value="exclude">Exclude Event Tables</option>
+                                </select>
+                            </label>
+                            <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                                <span className="font-medium">System of Record:</span>
+                                <select
+                                    value={aiSystemOfRecord}
+                                    onChange={e => setAiSystemOfRecord(e.target.value)}
+                                    className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent max-w-[200px]"
+                                >
+                                    <option value="">Auto (Master Entity)</option>
+                                    {tables.map(t => (
+                                        <option key={t} value={t}>{t}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label className="inline-flex items-center gap-1.5 text-ink-muted">
+                                <span className="font-medium">Grain:</span>
+                                <select
+                                    value={aiGrain}
+                                    onChange={e => setAiGrain(e.target.value as 'individual' | 'household' | 'account')}
+                                    className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
+                                >
+                                    <option value="individual">Strict Individual</option>
+                                    <option value="household">Household</option>
+                                    <option value="account">Account / B2B</option>
+                                </select>
+                            </label>
+                        </div>
+                        <AIConfigPolicy context={advancedPolicy} tables={tables} onChange={setAdvancedPolicy} />
                     </div>
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                        <span className="text-[11px] font-semibold text-accent shrink-0">
-                            Goal (optional)
-                        </span>
-                        <input
-                            type="text"
-                            value={aiGoal}
-                            onChange={e => setAiGoal(e.target.value)}
-                            placeholder="e.g., High precision, maximize coverage, or prefer CRM as system of record"
-                            className="flex-1 bg-surface border border-line-default rounded px-2.5 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-accent"
-                        />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-line-default/60 text-[11px]">
-                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
-                            <span className="font-medium">Grain:</span>
-                            <select
-                                value={aiGrain}
-                                onChange={e => setAiGrain(e.target.value as 'individual' | 'household' | 'account')}
-                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
-                            >
-                                <option value="individual">Strict Individual</option>
-                                <option value="household">Household</option>
-                                <option value="account">Account / B2B</option>
-                            </select>
-                        </label>
-                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
-                            <span className="font-medium">Event Tables:</span>
-                            <select
-                                value={aiEventPolicy}
-                                onChange={e => setAiEventPolicy(e.target.value as 'bridge' | 'include' | 'exclude')}
-                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent"
-                            >
-                                <option value="bridge">Bridge Only</option>
-                                <option value="include">Include Fully</option>
-                                <option value="exclude">Exclude Event Tables</option>
-                            </select>
-                        </label>
-                        <label className="inline-flex items-center gap-1.5 text-ink-muted">
-                            <span className="font-medium">System of Record:</span>
-                            <select
-                                value={aiSystemOfRecord}
-                                onChange={e => setAiSystemOfRecord(e.target.value)}
-                                className="bg-surface border border-line-default rounded px-2 py-0.5 text-xs text-ink-primary focus:outline-none focus:border-accent max-w-[200px]"
-                            >
-                                <option value="">Auto (Master Entity)</option>
-                                {tables.map(t => (
-                                    <option key={t} value={t}>{t}</option>
-                                ))}
-                            </select>
-                        </label>
-                    </div>
-                    <AIConfigPolicy context={advancedPolicy} tables={tables} onChange={setAdvancedPolicy} />
-                </div>
+                </details>
             )}
 
             {aiSuggesting && (

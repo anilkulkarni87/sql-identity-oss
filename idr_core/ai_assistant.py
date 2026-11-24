@@ -352,6 +352,19 @@ def triage_with_ai(
             "subject_fanout": int(c["subject_fanout"]) if c.get("subject_fanout") is not None else None,
         }
         ctx = _fetch_cluster_context(adapter, rid, max_members=15, max_edges=25)
+        # Zero-PII per-identifier distinct value counts (computed before masking so the judge
+        # can distinguish 1 shared personal email linking duplicate accounts vs multiple distinct emails)
+        id_stats: Dict[str, Dict[str, Any]] = {}
+        vals_by_type: Dict[str, set] = {}
+        for edge in ctx.get("edges") or []:
+            itype = str(edge.get("identifier_type") or "unknown")
+            ival = str(edge.get("identifier_value_norm") or "")
+            vals_by_type.setdefault(itype, set()).add(ival)
+            entry = id_stats.setdefault(itype, {"distinct_values": 0, "edge_count": 0})
+            entry["edge_count"] += 1
+        for itype, vset in vals_by_type.items():
+            id_stats[itype]["distinct_values"] = len(vset)
+        ctx["identifier_summary"] = id_stats
         ctx["structural_signals"] = meta_by_id[rid]
         enriched.append(ctx)
         enriched_by_id[rid] = ctx
@@ -360,13 +373,20 @@ def triage_with_ai(
         payload = _apply_pii_mask(adapter, batch, judge_client)
         prompt = (
             "You are an Identity Resolution quality judge auditing flagged clusters for over-merging.\n"
+            "CRITICAL GUIDELINES:\n"
+            "- Multiple source account IDs (e.g. multiple customer_ids or instore_accounts) linked by a SINGLE "
+            "unique email or phone (identifier_summary shows distinct_values == 1 for that email/phone) is the "
+            "NORMAL signature of duplicate accounts for the SAME person across channels -> recommend 'KEEP'.\n"
+            "- Only recommend 'DO_NOT_LINK' or 'ISOLATE' when there is concrete evidence of over-merging "
+            "(e.g., a transitive bridge chain stitching multiple distinct personal emails/phones together, "
+            "a generic/shared role identifier, or conflicting link paths).\n"
             "Return valid JSON with a top-level 'proposals' array. For each cluster, include:\n"
             "- resolved_id (string)\n"
             "- action: one of 'KEEP' | 'DO_NOT_LINK' | 'ISOLATE' | 'ADD_EXCLUSION'\n"
             "- judge_confidence: calibrated float between 0.0 and 1.0 (use < 0.80 if uncertain)\n"
             "- entity_key_a (optional string, required for DO_NOT_LINK or ISOLATE)\n"
             "- entity_key_b (optional string, required for DO_NOT_LINK)\n"
-            "- reason (1 concise sentence explaining the structural/identifier evidence)\n\n"
+            "- reason (1 concise sentence citing the exact identifier_summary/structural evidence)\n\n"
             f"Flagged Clusters:\n{json.dumps(payload, default=str)}"
         )
         raw = judge_client.chat(

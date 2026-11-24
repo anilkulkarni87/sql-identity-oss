@@ -1,11 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import {
     LayoutDashboard, Network, History, Settings as SettingsIcon,
     Database, SlidersHorizontal, PanelLeftClose, PanelLeftOpen,
-    Menu, X, Sun, Moon, Play, Bot
+    Menu, X, Sun, Moon, Play, Bot, Loader2
 } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, setTokenGetter } from './api/client'
 import { useIDRAuth } from './auth/IDRAuthProvider'
 import { ToastProvider } from './components/Toast'
@@ -77,11 +77,45 @@ function AppShell() {
         setMobileOpen(false)
     }, [location.pathname])
 
+    const queryClient = useQueryClient()
     const { data: connectionStatus } = useQuery({
         queryKey: ['setupStatus'],
         queryFn: () => api.getSetupStatus(),
         refetchInterval: 30000,
     })
+
+    // Global live run progress (persists across all pages and multi-user sessions)
+    const { data: activeRunProgress } = useQuery({
+        queryKey: ['globalRunProgress'],
+        queryFn: () => api.getRunProgress(),
+        enabled: Boolean(connectionStatus?.connected),
+        refetchInterval: (query) => {
+            const st = String((query.state.data as any)?.status || '').toUpperCase()
+            return st === 'RUNNING' ? 3000 : 12000
+        },
+    })
+    const isRunActive = String(activeRunProgress?.status || '').toUpperCase() === 'RUNNING'
+    const wasRunningRef = useRef(false)
+    useEffect(() => {
+        if (wasRunningRef.current && !isRunActive) {
+            queryClient.invalidateQueries({ queryKey: ['metrics'] })
+            queryClient.invalidateQueries({ queryKey: ['runs'] })
+            queryClient.invalidateQueries({ queryKey: ['search'] })
+            queryClient.invalidateQueries({ queryKey: ['cluster'] })
+            queryClient.invalidateQueries({ queryKey: ['distribution'] })
+            queryClient.invalidateQueries({ queryKey: ['rules'] })
+        }
+        wasRunningRef.current = isRunActive
+    }, [isRunActive, queryClient])
+
+    const activeCompletedStages = (activeRunProgress?.stages || []).filter(
+        (s: any) => s.status === 'completed'
+    ).length
+    const activeTotalStages = (activeRunProgress?.stages || []).length || 8
+    const activeStageLabel =
+        activeRunProgress?.current_stage
+            ? String(activeRunProgress.current_stage).replace(/_/g, ' ')
+            : 'running'
 
     const currentItem = NAV_ITEMS.find((n) => isActive(n.to))
 
@@ -257,6 +291,21 @@ function AppShell() {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
+                        {isRunActive && (
+                            <Link
+                                to="/runs"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-soft border border-accent-border text-accent text-[11px] font-medium hover:bg-accent/20 transition-colors"
+                                title={activeRunProgress?.current_detail || 'Pipeline run in progress'}
+                            >
+                                <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                                <span className="truncate max-w-[220px]">
+                                    Running ({activeCompletedStages}/{activeTotalStages} · {activeStageLabel}
+                                    {typeof activeRunProgress?.elapsed_seconds === 'number'
+                                        ? ` · ${activeRunProgress.elapsed_seconds.toFixed(0)}s`
+                                        : ''})
+                                </span>
+                            </Link>
+                        )}
                         <button
                             type="button"
                             onClick={() => setCopilotOpen(true)}

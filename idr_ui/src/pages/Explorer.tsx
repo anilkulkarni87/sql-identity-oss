@@ -331,7 +331,7 @@ export default function Explorer() {
                 (e.rule_id || '').toLowerCase().includes('fuzzy') ||
                 (e.identifier_type || '').toLowerCase().includes('fuzzy')
             edges.push({
-                id: `edge-${idx}`,
+                id: `${srcId}__${tgtId}__${e.identifier_type}__${idx}`,
                 source: srcId,
                 target: tgtId,
                 label: e.identifier_type,
@@ -1355,6 +1355,7 @@ export default function Explorer() {
 
                             <div className="flex-1 min-h-[500px]">
                                 <IdentityGraph
+                                    key={selectedCluster || 'none'}
                                     nodes={graphNodes}
                                     edges={graphEdges}
                                     selectedNodeId={selectedNode?.id}
