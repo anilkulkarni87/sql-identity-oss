@@ -1749,9 +1749,8 @@ def apply_config_to_warehouse(
 
     validate_config(cfg)
     if cfg.get("ai_assistance"):
-        from .ai_config import AIConfigContext, candidate_errors, policy_errors
-        context = AIConfigContext.model_validate(cfg["ai_assistance"])
-        errors = candidate_errors(cfg) + policy_errors(cfg, context, cfg)
+        from .ai_config import candidate_errors
+        errors = candidate_errors(cfg)
         if errors:
             raise ValueError("; ".join(errors))
 

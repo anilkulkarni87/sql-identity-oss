@@ -171,13 +171,17 @@ def test_manual_preview_does_not_invent_an_ai_matching_policy(warehouse):
     assert result["review"]["telemetry"]["total_entities"] == 3
 
 
-def test_preview_still_respects_explicit_matching_policy(warehouse):
-    from idr_core.ai_review import PreviewValidationError
+def test_preview_allows_human_edited_rules_while_ai_policy_flags_them(warehouse):
+    from idr_core.ai_config import policy_errors
 
     cfg = config()
-    cfg["ai_assistance"] = AIConfigContext(grain="individual").model_dump()
-    with pytest.raises(PreviewValidationError, match="allowed matching identifiers"):
-        AIReviewService(warehouse).preview(cfg)
+    ctx = AIConfigContext(grain="individual")
+    cfg["ai_assistance"] = ctx.model_dump()
+    # AI policy still flags phone under individual grain for AI proposals...
+    assert any("allowed matching identifiers" in e for e in policy_errors(cfg, ctx, cfg))
+    # ...but explicit human edits in preview are never hard-blocked.
+    result = AIReviewService(warehouse).preview(cfg)
+    assert result["status"] == "DRY_RUN_COMPLETE"
 
 
 def test_explicit_exclusions_survive_materialization(warehouse):
@@ -830,8 +834,13 @@ def test_bridge_aggregate_requires_field_and_strategy_approval(warehouse):
     cfg["survivorship"] = [{"attribute": "total_amount", "strategy": "AGG_SUM"}]
     context = AIConfigContext(grain="household", table_roles={"raw.events": "EVENT_FACT"})
     cfg["ai_assistance"] = context.model_dump()
-    with pytest.raises(ValueError, match="explicit aggregate approval in Survivorship"):
-        apply_config_to_warehouse(warehouse, cfg)
+    # AI policy still flags unapproved bridge aggregates for AI proposals...
+    assert any(
+        "explicit aggregate approval in Survivorship" in e
+        for e in policy_errors(cfg, context, cfg)
+    )
+    # ...while explicit human saves and runs succeed without fighting AI policy locks.
+    apply_config_to_warehouse(warehouse, cfg)
     context.approved_event_aggregates = {"raw.events": {"total_amount": "AGG_SUM"}}
     cfg["ai_assistance"] = context.model_dump()
     assert policy_errors(cfg, context, cfg) == []
@@ -849,10 +858,12 @@ def test_bridge_aggregate_requires_field_and_strategy_approval(warehouse):
     ]
     changed = copy.deepcopy(cfg)
     changed["survivorship"][0]["strategy"] = "RECENCY"
-    with pytest.raises(ValueError, match="explicit aggregate approval"):
-        apply_config_to_warehouse(warehouse, changed)
+    assert any(
+        "explicit aggregate approval" in e for e in policy_errors(changed, context, changed)
+    )
+    apply_config_to_warehouse(warehouse, changed)
     assert warehouse.query("SELECT strategy FROM idr_meta.survivorship_rule") == [
-        {"strategy": "AGG_SUM"}
+        {"strategy": "RECENCY"}
     ]
     profile = IDRDataProfiler(warehouse).profile_tables_safe(["raw.customers", "raw.events"])
     profile.table_map()["raw.events"].table_role = "EVENT_FACT"

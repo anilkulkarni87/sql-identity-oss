@@ -172,18 +172,6 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
         });
     };
 
-    const approveBridgeAggregate = (table: string, attr: string, strategy: string, approved: boolean) => {
-        const current = latestConfigRef.current;
-        if (!current.ai_assistance || !['AGG_SUM', 'AGG_MIN', 'AGG_MAX'].includes(strategy)) return;
-        const permissions = {...current.ai_assistance.approved_event_aggregates};
-        const attributes = {...permissions[table]};
-        if (approved) attributes[attr] = strategy as 'AGG_SUM' | 'AGG_MIN' | 'AGG_MAX';
-        else delete attributes[attr];
-        if (Object.keys(attributes).length) permissions[table] = attributes;
-        else delete permissions[table];
-        onChange?.({...current, survivorship: Object.values(rules), ai_assistance: {...current.ai_assistance, approved_event_aggregates: permissions}});
-    };
-
     const updateRule = (attr: string, field: keyof SurvivorshipRule, value: any) => {
         commitRules({
             ...rules,
@@ -322,10 +310,6 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                     const currentStrategy = rule.strategy || 'RECENCY';
                     const validSources = sourcesByAttr[attr] || [];
                     const sqlType = typeByAttr[attr];
-                    const bridgeSources = config.ai_assistance?.event_policy === 'bridge'
-                        ? (config.sources || []).filter(source => (source.attributes || []).some(a => a.name === attr) && config.ai_assistance?.table_roles?.[source.table] === 'EVENT_FACT')
-                        : [];
-                    const isAggregate = ['AGG_SUM', 'AGG_MIN', 'AGG_MAX'].includes(currentStrategy);
                     const category = classifySqlType(sqlType);
 
                     const applicableStrategies = strategies.filter(s => {
@@ -368,16 +352,6 @@ export default function StepSurvivorship({ config, onChange, onNext, onBack }: S
                                     buttonClassName="text-xs py-1.5 min-w-[240px] bg-slate-950"
                                 />
                             </div>
-
-                            {bridgeSources.map(source => <div key={source.table} className="rounded border border-amber-500/40 bg-amber-500/5 p-3 text-xs space-y-2">
-                                <p>{source.table} is a bridge source. Profile contributions require explicit approval for this field and aggregation.</p>
-                                {isAggregate ? <label className="flex items-center gap-2">
-                                    <input type="checkbox" checked={config.ai_assistance?.approved_event_aggregates?.[source.table]?.[attr] === currentStrategy}
-                                        onChange={e => approveBridgeAggregate(source.table, attr, currentStrategy, e.target.checked)} />
-                                    Allow {currentStrategy.replace('AGG_', '').toLowerCase()} of {attr} from this source
-                                </label> : <p>Choose Sum, Min or Max to approve an aggregate, or change Event handling to Include fully in Sources &amp; Mappings.</p>}
-                                {currentStrategy === 'AGG_SUM' && <p>Confirm each business record is counted once and overlapping sources are excluded. Approval does not deduplicate amounts.</p>}
-                            </div>)}
 
                             {(currentStrategy === 'PRIORITY' || currentStrategy === 'PRIORITY_RECENCY' || currentStrategy === 'LATEST_FROM_SOURCE') && (
                                 <div className="space-y-2 bg-slate-950/70 p-3 rounded-lg border border-slate-800 text-xs">

@@ -359,20 +359,8 @@ class AIReviewService:
     def preview(self, config, options=None, progress=None, ground_truth=None):
         try:
             validate_config(config)
-            # Existing manual configs have no AI policy. Never impose inferred
-            # individual-grain defaults on an explicitly requested engine preview.
-            context = (
-                AIConfigContext.model_validate(config["ai_assistance"])
-                if config.get("ai_assistance")
-                else None
-            )
         except ValueError as exc:
             raise PreviewValidationError(f"Invalid draft configuration: {exc}") from exc
-        errors = policy_errors(config, context, config) if context else []
-        if errors:
-            raise PreviewValidationError(
-                "Draft conflicts with its matching policy: " + "; ".join(errors)
-            )
         if not config.get("sources") or not (config.get("rules") or config.get("fuzzy_rules")):
             raise PreviewValidationError("Preview requires usable sources and matching rules")
         if ground_truth is None:

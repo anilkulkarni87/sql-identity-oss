@@ -32,14 +32,6 @@ class ProfilePreviewOptions(BaseModel):
 
 def validate_profiles(config):
     validate_config(config)
-    if config.get("ai_assistance"):
-        from .ai_config import AIConfigContext, policy_errors
-
-        errors = policy_errors(
-            config, AIConfigContext.model_validate(config["ai_assistance"]), config
-        )
-        if errors:
-            raise ValueError("; ".join(errors))
     sources = config.get("sources", [])
     fields = []
     for rule in config.get("survivorship", []):
