@@ -1,7 +1,12 @@
 # Pure structural/formatting commits to ignore in `git blame`
 # Configure locally via: git config blame.ignoreRevsFile .git-blame-ignore-revs
 # GitHub automatically respects this file in the blame UI.
-#
-# Add full 40-char commit SHAs below when landing zero-behavior-change module extractions
-# (e.g., post-merge extraction of `idr_core/dbt_exporter.py`, `idr_core/config_sync.py`,
-# and `idr_ui/src/pages/Explorer/*` subcomponents).
+
+# Decompose idr_core/config.py (2,188 lines) into cohesive <=800-line idr_core/config/ package
+7ff0e554e1b97421fe3dbaf6b5b17a5c287ab268
+
+# Decompose Explorer.tsx (2,027 lines) into focused <=800-line Explorer/ subcomponents
+8c5ad2be6793feb4ba48e3a59085b23b8645460e
+
+# Consolidate sprint/grab-bag and MCP tests into domain-aligned test suites
+91c168e6af3ee8c4b7369eb50143425d1c35f0bf
