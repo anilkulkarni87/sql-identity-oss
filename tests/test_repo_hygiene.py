@@ -29,7 +29,6 @@ MAX_DOMAIN_TEST_LINES = 1050
 # Ratcheted line ceilings for existing source files currently > MAX_NEW_SOURCE_LINES.
 # Lower these ceilings when extracting submodules; do NOT raise them to cram in new features.
 LEGACY_SOURCE_CEILINGS: Dict[str, int] = {
-    "idr_core/config.py": 2200,
     "idr_core/cli.py": 1840,
     "idr_core/rule_generator.py": 1825,
     "idr_core/stages/graph.py": 1690,
@@ -159,11 +158,15 @@ def test_domain_aligned_test_file_naming_and_size():
 @pytest.mark.hygiene
 @pytest.mark.unit
 def test_idr_core_config_public_api_contract():
-    """Guard `idr_core.config` exports so future package decomposition stays 100% compatible."""
+    """Guard `idr_core.config` exports and modular submodules without circular imports."""
+    import importlib
+
     import idr_core.config as cfg
 
     expected_exports = [
         "DEFAULT_EXCLUSIONS",
+        "HAS_YAML",
+        "META_CONFIG_TABLES",
         "apply_config_to_warehouse",
         "build_where_clause",
         "compute_dry_run_summary",
@@ -187,6 +190,18 @@ def test_idr_core_config_public_api_contract():
     ]
     missing = [name for name in expected_exports if not hasattr(cfg, name)]
     assert not missing, f"idr_core.config is missing public exports: {missing}"
+
+    for submod in (
+        "idr_core.config.validators",
+        "idr_core.config.sql_helpers",
+        "idr_core.config.loader",
+        "idr_core.config.roundtrip_sql",
+        "idr_core.config.dbt_export",
+        "idr_core.config.warehouse_sync",
+        "idr_core.config.graph_diff",
+    ):
+        mod = importlib.import_module(submod)
+        assert mod is not None
 
 
 @pytest.mark.hygiene
