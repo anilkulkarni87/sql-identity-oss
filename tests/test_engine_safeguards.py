@@ -3,7 +3,13 @@
 import pytest
 
 from idr_core.adapters.duckdb import DuckDBAdapter
-from idr_core.config import apply_config_to_warehouse, sql_to_config
+from idr_core.config import (
+    apply_config_to_warehouse,
+    config_to_sql,
+    resolve_entity_key_expr,
+    sql_to_config,
+    validate_config,
+)
 from idr_core.runner import IDRRunner, RunConfig
 from idr_core.schema_manager import SchemaManager
 
@@ -425,3 +431,110 @@ def test_atomic_run_lock_rejects_concurrent_holder():
     res = run(a)
     assert res.status == 'FAILED'
     assert 'Concurrent IDR run in progress' in (res.error or '')
+
+
+@pytest.mark.e2e
+def test_duplicate_and_null_entity_keys_dedup_e2e(duckdb_adapter):
+    duckdb_adapter.execute("CREATE SCHEMA raw")
+    duckdb_adapter.execute("""
+        CREATE TABLE raw.events (
+            id VARCHAR,
+            email VARCHAR,
+            first_name VARCHAR,
+            updated_at TIMESTAMP
+        )
+    """)
+    duckdb_adapter.execute("""
+        INSERT INTO raw.events VALUES
+            ('u1', 'old@example.com', 'OldName', TIMESTAMP '2026-01-01 00:00:00'),
+            ('u1', 'new@example.com', 'NewName', TIMESTAMP '2026-01-02 00:00:00'),
+            (NULL, 'nullkey@example.com', 'Ghost', TIMESTAMP '2026-01-03 00:00:00'),
+            ('u2', 'new@example.com', 'Other', TIMESTAMP '2026-01-02 00:00:00')
+    """)
+
+    cfg = {
+        "sources": [
+            {
+                "id": "events",
+                "table": "raw.events",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "deduplicate": True,
+                "dedup_order_by": "updated_at DESC",
+                "identifiers": [{"type": "email", "expr": "email"}],
+                "attributes": [{"name": "first_name", "expr": "first_name"}],
+            }
+        ],
+        "rules": [{"id": "r_email", "type": "EXACT", "match_keys": ["email"], "priority": 1}],
+        "survivorship": [{"attribute": "first_name", "strategy": "RECENCY"}],
+    }
+    validate_config(cfg)
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        duckdb_adapter.execute(stmt)
+
+    reconstructed = sql_to_config(duckdb_adapter)
+    assert reconstructed["sources"][0]["deduplicate"] is True
+    assert reconstructed["sources"][0]["dedup_order_by"] == "updated_at DESC"
+
+    result = IDRRunner(duckdb_adapter, RunConfig(run_mode="FULL")).run()
+    assert result.status == "SUCCESS"
+    assert result.entities_processed == 2
+    assert duckdb_adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current") == 1
+    assert duckdb_adapter.query_one("SELECT first_name FROM idr_out.golden_profiles") in (
+        "NewName",
+        "Other",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("dialect", ["duckdb", "snowflake", "bigquery", "databricks"])
+def test_entity_key_auto_resolution_across_dialects(dialect):
+    src = {
+        "id": "web_events",
+        "table": "raw.web_events",
+        "entity_key": "AUTO",
+        "key_columns": ["email", "session_id"],
+    }
+    expr = resolve_entity_key_expr(src, dialect=dialect)
+    assert "CONCAT_WS('|'" in expr
+    if dialect == "bigquery":
+        assert "TO_HEX(SHA256(" in expr
+    elif dialect in ("snowflake", "databricks"):
+        assert "SHA2(" in expr
+    else:
+        assert "SHA256(" in expr
+
+
+@pytest.mark.e2e
+def test_entity_key_auto_e2e_duckdb(duckdb_adapter):
+    duckdb_adapter.execute("CREATE SCHEMA raw")
+    duckdb_adapter.execute(
+        "CREATE TABLE raw.leads (email VARCHAR, source_tag VARCHAR, ts TIMESTAMP)"
+    )
+    duckdb_adapter.execute("""
+        INSERT INTO raw.leads VALUES
+            ('a@test.io', 'ad1', TIMESTAMP '2026-01-01 00:00:00'),
+            ('a@test.io', 'ad2', TIMESTAMP '2026-01-02 00:00:00')
+    """)
+    cfg = {
+        "sources": [
+            {
+                "id": "leads",
+                "table": "raw.leads",
+                "entity_key": "AUTO",
+                "key_columns": ["email", "source_tag"],
+                "watermark_column": "ts",
+                "identifiers": [{"type": "email", "expr": "email"}],
+                "attributes": [{"name": "source_tag", "expr": "source_tag"}],
+            }
+        ],
+        "rules": [{"id": "r_email", "type": "EXACT", "match_keys": ["email"], "priority": 1}],
+    }
+    validate_config(cfg)
+    for stmt in config_to_sql(cfg, dialect="duckdb"):
+        duckdb_adapter.execute(stmt)
+
+    result = IDRRunner(duckdb_adapter, RunConfig(run_mode="FULL")).run()
+    assert result.status == "SUCCESS"
+    assert result.entities_processed == 2
+    assert duckdb_adapter.query_one("SELECT COUNT(*) FROM idr_out.identity_clusters_current") == 1

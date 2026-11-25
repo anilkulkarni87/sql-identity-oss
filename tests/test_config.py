@@ -13,7 +13,7 @@ import pytest
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from idr_core.config import config_to_sql, validate_config
+from idr_core.config import config_to_sql, sql_to_config, validate_config
 
 # ============================================================
 # Fixtures
@@ -421,3 +421,89 @@ class TestValidateConfig:
     def test_empty_config_raises(self):
         with pytest.raises(ValueError):
             validate_config({})
+
+
+def _sample_large_config():
+    return {
+        "sources": [
+            {
+                "id": f"src_{i}",
+                "table": f"raw.customers_{i}",
+                "entity_type": "PERSON",
+                "entity_key": "id",
+                "watermark_column": "updated_at",
+                "identifiers": [
+                    {"type": "email", "expr": "email"},
+                    {"type": "phone", "expr": "phone"},
+                ],
+                "attributes": [
+                    {"name": "first_name", "expr": "first_name"},
+                    {"name": "last_name", "expr": "last_name"},
+                    {"name": "city", "expr": "city"},
+                ],
+            }
+            for i in range(6)
+        ],
+        "rules": [
+            {"id": "r_email", "type": "EXACT", "match_keys": ["email"], "priority": 1},
+            {"id": "r_phone", "type": "EXACT", "match_keys": ["phone"], "priority": 2},
+        ],
+        "survivorship": [
+            {"attribute": "first_name", "strategy": "RECENCY", "recency_field": "updated_at"},
+            {"attribute": "last_name", "strategy": "RECENCY", "recency_field": "updated_at"},
+            {"attribute": "city", "strategy": "RECENCY", "recency_field": "updated_at"},
+        ],
+    }
+
+
+@pytest.mark.integration
+def test_config_to_sql_batched_reduces_statements_and_roundtrips(duckdb_adapter):
+    cfg = _sample_large_config()
+    unbatched = config_to_sql(cfg, dialect="duckdb", batched=False)
+    batched = config_to_sql(cfg, dialect="duckdb", batched=True)
+
+    assert len(unbatched) == 41
+    assert len(batched) == 5
+
+    for stmt in batched:
+        duckdb_adapter.execute(stmt)
+
+    reloaded = sql_to_config(duckdb_adapter)
+    assert len(reloaded["sources"]) == 6
+    assert len(reloaded["rules"]) == 2
+    assert len(reloaded["survivorship"]) == 3
+
+
+@pytest.mark.unit
+def test_config_to_sql_batched_multidialect_and_dedup():
+    cfg = _sample_large_config()
+    cfg["survivorship"].append(
+        {"attribute": "city", "strategy": "FREQUENCY", "recency_field": None}
+    )
+
+    for dialect in ("snowflake", "bigquery", "databricks"):
+        stmts = config_to_sql(cfg, dialect=dialect, batched=True)
+        assert len(stmts) == 5
+        assert all("MERGE INTO" in s and "UNION ALL" in s for s in stmts)
+        surv_stmt = [s for s in stmts if "idr_meta.survivorship_rule" in s][0]
+        assert surv_stmt.count("'city' AS attribute_name") == 1
+
+
+@pytest.mark.integration
+def test_execute_save_config_reports_progress_and_uses_batches(duckdb_adapter):
+    from idr_api.routers.setup import _execute_save_config
+
+    cfg = _sample_large_config()
+    events = []
+
+    res = _execute_save_config(
+        duckdb_adapter,
+        cfg,
+        progress_cb=lambda step, label, pct, detail: events.append((step, pct)),
+    )
+    assert res["status"] == "ok"
+    assert res["batches_executed"] == 5
+    assert events[0][0] == "validating"
+    assert events[-1] == ("done", 100)
+    reloaded = sql_to_config(duckdb_adapter)
+    assert len(reloaded["sources"]) == 6

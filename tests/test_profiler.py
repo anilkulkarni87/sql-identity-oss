@@ -249,5 +249,22 @@ def test_profiler_opportunistic_catalog_descriptions_and_pk_hints():
     assert email_entry["description"] == "Customer login email"
 
 
+@pytest.mark.integration
+def test_profiler_flags_duplicate_entity_keys(duckdb_adapter):
+    duckdb_adapter.execute("CREATE SCHEMA raw")
+    duckdb_adapter.execute(
+        "CREATE TABLE raw.dup_tbl (customer_id INT, email VARCHAR, updated_at TIMESTAMP)"
+    )
+    duckdb_adapter.execute("""
+        INSERT INTO raw.dup_tbl VALUES
+            (1, 'a@b.com', TIMESTAMP '2026-01-01 00:00:00'),
+            (1, 'a@b.com', TIMESTAMP '2026-01-02 00:00:00')
+    """)
+    res = IDRDataProfiler(duckdb_adapter).profile_and_generate_config(["raw.dup_tbl"])
+    src = res["suggested_config"]["sources"][0]
+    assert src.get("deduplicate") is True
+    assert res["profiling_diagnostics"]["raw.dup_tbl"]["duplicate_entity_keys_detected"] is True
+
+
 
 

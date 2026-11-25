@@ -53,9 +53,6 @@ FROZEN_LEGACY_TEST_FILES: Dict[str, Tuple[int, int]] = {
     "tests/test_enterprise_features.py": (26, 1630),
     "tests/test_production_readiness.py": (19, 1075),
     "tests/test_bugfixes_and_preflight.py": (13, 700),
-    "tests/test_tasks_1_2_3.py": (9, 350),
-    "tests/test_batched_save_and_gdpr_suppression.py": (4, 190),
-    "tests/test_sustainability_foundations.py": (4, 330),
 }
 
 # Banned sprint / PR / grab-bag naming patterns for any newly created test file.
