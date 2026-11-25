@@ -215,3 +215,25 @@ def test_shared_seeded_duckdb_fixture_smoke(seeded_duckdb_adapter):
     assert len(rows) == 2
     assert (rows[0]["cluster_size"], rows[0]["subject_count"], rows[0]["child_count"]) == (3, 2, 1)
     assert (rows[1]["cluster_size"], rows[1]["subject_count"], rows[1]["child_count"]) == (2, 1, 1)
+
+
+@pytest.mark.hygiene
+@pytest.mark.unit
+def test_explorer_cluster_switch_state_reset_guards():
+    """Ensure switching `selectedCluster` clears destructive RTBF/override state and remounts AI forensics."""
+    explorer_src = (REPO_ROOT / "idr_ui/src/pages/Explorer.tsx").read_text(encoding="utf-8")
+
+    reset_match = re.search(
+        r"useEffect\(\(\)\s*=>\s*\{([^}]*)\},\s*\[selectedCluster\]\)",
+        explorer_src,
+        flags=re.DOTALL,
+    )
+    assert reset_match is not None, "Explorer.tsx must have a useEffect([selectedCluster]) reset hook"
+    reset_body = reset_match.group(1)
+    assert "setRtbfPreview(null)" in reset_body, "selectedCluster transition must clear stale rtbfPreview"
+    assert (
+        "setConfirmOverrideKey(null)" in reset_body
+    ), "selectedCluster transition must clear stale confirmOverrideKey"
+    assert (
+        "<AiClusterForensicsBar key={selectedCluster}" in explorer_src
+    ), "AiClusterForensicsBar must be keyed by selectedCluster to prevent in-flight race conditions"

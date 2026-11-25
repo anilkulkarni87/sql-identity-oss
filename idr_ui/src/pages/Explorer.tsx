@@ -74,6 +74,8 @@ export default function Explorer() {
     useEffect(() => {
         setSelectedNode(null)
         setExpandedGraphGroups(new Set())
+        setRtbfPreview(null)
+        setConfirmOverrideKey(null)
     }, [selectedCluster])
 
     useEffect(() => {
@@ -539,7 +541,7 @@ export default function Explorer() {
 
             {selectedCluster && clusterDetail && (
                 <div className="space-y-3">
-                    <AiClusterForensicsBar resolvedId={selectedCluster} />
+                    <AiClusterForensicsBar key={selectedCluster} resolvedId={selectedCluster} />
 
                     <CrosswalkLineageStrip
                         resolvedId={clusterDetail.resolved_id}
@@ -548,11 +550,11 @@ export default function Explorer() {
                     />
 
                     <RtbfPreviewBanner
-                        selectedCluster={selectedCluster}
+                        selectedCluster={rtbfPreview?.resolved_ids?.[0] || selectedCluster}
                         preview={rtbfPreview}
                         purging={rtbfLoading === 'purge'}
                         disabled={rtbfLoading !== null}
-                        onConfirm={() => void handleConfirmRtbf(selectedCluster)}
+                        onConfirm={() => void handleConfirmRtbf(rtbfPreview?.resolved_ids?.[0] || selectedCluster)}
                         onCancel={() => setRtbfPreview(null)}
                     />
 
