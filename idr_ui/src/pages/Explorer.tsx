@@ -1,28 +1,36 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import IdentityGraph, { GraphNodeData, GraphEdgeData, GraphLayoutName } from '../components/IdentityGraph'
 import {
-    Search, X, Check, Copy, Eye, EyeOff, Hash, ShieldAlert,
-    Trash2, GitBranch, Loader2, RefreshCw, Bot, ChevronDown, ChevronUp
+    Bot,
+    Check,
+    Copy,
+    GitBranch,
+    Loader2,
+    RefreshCw,
+    Search,
+    Trash2,
+    X,
 } from 'lucide-react'
 import { api } from '../api/client'
+import IdentityGraph, {
+    GraphEdgeData,
+    GraphLayoutName,
+    GraphNodeData,
+} from '../components/IdentityGraph'
 import { useToast } from '../components/Toast'
+import { formatSourceName, getEntityColor } from '../utils/colors'
 import { useDebounce } from '../utils/useDebounce'
-import {
-    getEntityColor,
-    formatSourceName,
-    getIdentifierBadge,
-    formatAttributeKey,
-} from '../utils/colors'
+import AiClusterForensicsBar from './Explorer/AiClusterForensicsBar'
+import ClusterInspector from './Explorer/ClusterInspector'
+import CrosswalkLineageStrip from './Explorer/CrosswalkLineageStrip'
+import ExplorerClusterLists from './Explorer/ExplorerClusterLists'
+import LensDiffModal from './Explorer/LensDiffModal'
+import { RtbfPreviewBanner, RtbfReceiptBanner } from './Explorer/RtbfPurgeBanners'
+import TriageQueuePanel from './Explorer/TriageQueuePanel'
+import { InspectorTab, PrivacyForgetResponse } from './Explorer/types'
 
-interface ClusterSummary {
-    resolved_id: string
-    cluster_size: number
-    confidence_score: number | null
-}
-
-type InspectorTab = 'golden' | 'edges' | 'entity'
+const GROUP_THRESHOLD = 12
 
 export default function Explorer() {
     const { toast } = useToast()
@@ -32,79 +40,7 @@ export default function Explorer() {
 
     const [searchQuery, setSearchQuery] = useState('')
     const debouncedSearchQuery = useDebounce(searchQuery, 250)
-
-    // 3-Tier AI Triage Queue state
     const [triageOpen, setTriageOpen] = useState(false)
-    const [triageLoading, setTriageLoading] = useState(false)
-    const [triageMaxConf, setTriageMaxConf] = useState('0.75')
-    const [triageEscalateProvider, setTriageEscalateProvider] = useState('')
-    const [triageEscalateModel, setTriageEscalateModel] = useState('')
-    const [triageResult, setTriageResult] = useState<Awaited<ReturnType<typeof api.runAiTriage>> | null>(null)
-    const [triageError, setTriageError] = useState<string | null>(null)
-    const [applyingOverrideKey, setApplyingOverrideKey] = useState<string | null>(null)
-    const [appliedOverrides, setAppliedOverrides] = useState<Record<string, boolean>>({})
-
-    const handleRunTriage = async () => {
-        setTriageLoading(true)
-        setTriageError(null)
-        try {
-            const parsedMax = Number(triageMaxConf)
-            const hasEscalation = Boolean(triageEscalateProvider || triageEscalateModel.trim())
-            const res = await api.runAiTriage(
-                Number.isFinite(parsedMax) ? parsedMax : 0.75,
-                8,
-                hasEscalation
-                    ? {
-                          ...(triageEscalateProvider ? { escalateProvider: triageEscalateProvider } : {}),
-                          ...(triageEscalateModel.trim() ? { escalateModel: triageEscalateModel.trim() } : {}),
-                          escalationThreshold: 0.8,
-                      }
-                    : undefined
-            )
-            setTriageResult(res)
-        } catch (err: any) {
-            const msg = String(err?.message || err)
-            setTriageError(msg)
-            toast('error', 'AI Triage failed', msg)
-        } finally {
-            setTriageLoading(false)
-        }
-    }
-
-    const handleApplyTriageOverride = async (proposal: {
-        resolved_id: string
-        action: string
-        entity_key_a?: string
-        entity_key_b?: string
-        reason: string
-    }) => {
-        const overrideType = proposal.action as 'DO_NOT_LINK' | 'ISOLATE' | 'FORCE_LINK'
-        if (!proposal.entity_key_a || (overrideType !== 'ISOLATE' && !proposal.entity_key_b)) {
-            toast('error', 'Missing entity key', 'Inspect the cluster to select specific entity keys for override.')
-            return
-        }
-        const key = `${proposal.resolved_id}:${proposal.action}:${proposal.entity_key_a}`
-        setApplyingOverrideKey(key)
-        try {
-            await api.manageOverride({
-                action: 'add',
-                override_type: overrideType,
-                entity_key_a: proposal.entity_key_a,
-                entity_key_b: proposal.entity_key_b,
-                reason: `AI Triage (${proposal.resolved_id}): ${proposal.reason}`,
-            })
-            setAppliedOverrides(prev => ({ ...prev, [key]: true }))
-            toast(
-                'success',
-                'Override saved to idr_meta.identity_override',
-                `${overrideType} recorded. Re-run the pipeline to apply it to the graph.`
-            )
-        } catch (err: any) {
-            toast('error', 'Failed to save override', String(err?.message || err))
-        } finally {
-            setApplyingOverrideKey(null)
-        }
-    }
 
     const selectedCluster = searchParams.get('cluster')
     const [resultsCollapsed, setResultsCollapsed] = useState<boolean>(Boolean(selectedCluster))
@@ -120,15 +56,6 @@ export default function Explorer() {
     const [diffModalOpen, setDiffModalOpen] = useState(false)
     const [diffLensA, setDiffLensA] = useState<string>('')
     const [diffLensB, setDiffLensB] = useState<string>('')
-    const [aiExplanation, setAiExplanation] = useState<string | null>(null)
-    const [aiExplaining, setAiExplaining] = useState(false)
-    const [aiCustomPrompt, setAiCustomPrompt] = useState('')
-
-    useEffect(() => {
-        setAiExplanation(null)
-        setAiCustomPrompt('')
-        setSelectedNode(null)
-    }, [selectedCluster])
 
     const [selectedNode, setSelectedNode] = useState<GraphNodeData | null>(null)
     const [activeTab, setActiveTab] = useState<InspectorTab>('golden')
@@ -136,18 +63,18 @@ export default function Explorer() {
     const [hiddenSources, setHiddenSources] = useState<Set<string>>(new Set())
     const [groupHighVolume, setGroupHighVolume] = useState(true)
     const [expandedGraphGroups, setExpandedGraphGroups] = useState<Set<string>>(new Set())
-    const [expandedEntityGroups, setExpandedEntityGroups] = useState<Set<string>>(new Set())
-    const [hideEmptyAttrs, setHideEmptyAttrs] = useState(true)
-    const [attrFilter, setAttrFilter] = useState('')
-    const [edgeSearch, setEdgeSearch] = useState('')
     const [copiedKey, setCopiedKey] = useState<string | null>(null)
     const [confirmOverrideKey, setConfirmOverrideKey] = useState<string | null>(null)
-    const [crosswalkExpanded, setCrosswalkExpanded] = useState(false)
 
-    const [rtbfPreview, setRtbfPreview] = useState<any | null>(null)
-    const [rtbfReceipt, setRtbfReceipt] = useState<any | null>(null)
+    const [rtbfPreview, setRtbfPreview] = useState<PrivacyForgetResponse | null>(null)
+    const [rtbfReceipt, setRtbfReceipt] = useState<PrivacyForgetResponse | null>(null)
     const [rtbfLoading, setRtbfLoading] = useState<'preview' | 'purge' | null>(null)
     const rtbfInFlightRef = useRef(false)
+
+    useEffect(() => {
+        setSelectedNode(null)
+        setExpandedGraphGroups(new Set())
+    }, [selectedCluster])
 
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
@@ -182,12 +109,6 @@ export default function Explorer() {
     })
     const availableLenses = lensesData?.lenses || []
 
-    const { data: lensDiffData, isLoading: diffLoading } = useQuery({
-        queryKey: ['lens-diff', diffLensA, diffLensB],
-        queryFn: () => api.diffLenses(diffLensA, diffLensB, 25),
-        enabled: diffModalOpen && !!diffLensA && !!diffLensB && diffLensA !== diffLensB,
-    })
-
     const { data: searchResults, isLoading: searching } = useQuery({
         queryKey: ['search', selectedLens, debouncedSearchQuery],
         queryFn: () =>
@@ -217,10 +138,13 @@ export default function Explorer() {
         enabled: !!selectedCluster,
     })
 
-    useEffect(() => {
-        setExpandedGraphGroups(new Set())
-        setExpandedEntityGroups(new Set())
-    }, [selectedCluster])
+    const handleSelectClusterFromList = (resolvedId: string) => {
+        setSelectedCluster(resolvedId)
+        setResultsCollapsed(true)
+        setSelectedNode(null)
+        setHiddenSources(new Set())
+        setActiveTab('golden')
+    }
 
     const handleSelectNode = (node: GraphNodeData | null) => {
         if (node?.isGroup) {
@@ -237,8 +161,6 @@ export default function Explorer() {
             setActiveTab('entity')
         }
     }
-
-    const GROUP_THRESHOLD = 12
 
     const uniqueSources = useMemo(() => {
         if (!clusterDetail?.entities) return []
@@ -363,75 +285,6 @@ export default function Explorer() {
         return { graphNodes: nodes, graphEdges: edges }
     }, [clusterDetail, visibleEntities, collapsedSources, uniqueSources, sourceCounts])
 
-    const displayedEdges = useMemo(() => {
-        if (!clusterDetail?.edges) return []
-        let list = clusterDetail.edges
-        if (selectedNode) {
-            list = list.filter(
-                (e) => e.left_entity_key === selectedNode.id || e.right_entity_key === selectedNode.id
-            )
-        }
-        if (edgeSearch.trim()) {
-            const q = edgeSearch.toLowerCase()
-            list = list.filter(
-                (e) =>
-                    e.identifier_value.toLowerCase().includes(q) ||
-                    e.identifier_type.toLowerCase().includes(q) ||
-                    (e.rule_id || '').toLowerCase().includes(q) ||
-                    e.left_entity_key.toLowerCase().includes(q) ||
-                    e.right_entity_key.toLowerCase().includes(q)
-            )
-        }
-        return list
-    }, [clusterDetail, selectedNode, edgeSearch])
-
-    const goldenProfileCategories = useMemo(() => {
-        if (!clusterDetail?.golden_profile) return null
-
-        const categories: Record<string, Array<{ key: string; label: string; value: unknown }>> = {
-            'Identity & Contact': [],
-            'Commerce & Transactions': [],
-            'Engagement & Activity': [],
-            'Location & Address': [],
-            'Additional Attributes': [],
-        }
-
-        const filterLower = attrFilter.trim().toLowerCase()
-        let totalEmpty = 0
-
-        for (const [rawKey, rawVal] of Object.entries(clusterDetail.golden_profile)) {
-            const isEmpty =
-                rawVal === null || rawVal === undefined || rawVal === '' || rawVal === '-' || rawVal === '—'
-            if (isEmpty) totalEmpty++
-            if (hideEmptyAttrs && isEmpty) continue
-
-            const label = formatAttributeKey(rawKey)
-            if (
-                filterLower &&
-                !rawKey.toLowerCase().includes(filterLower) &&
-                !label.toLowerCase().includes(filterLower) &&
-                !String(rawVal).toLowerCase().includes(filterLower)
-            ) {
-                continue
-            }
-
-            const k = rawKey.toLowerCase()
-            if (/name|email|phone|gender|birth|dob|segment|tier|customer|account/.test(k)) {
-                categories['Identity & Contact'].push({ key: rawKey, label, value: rawVal })
-            } else if (/address|street|city|state|zip|postal|country/.test(k)) {
-                categories['Location & Address'].push({ key: rawKey, label, value: rawVal })
-            } else if (/amount|spend|value|price|subtotal|discount|cost|points|payment|order|store|balance/.test(k)) {
-                categories['Commerce & Transactions'].push({ key: rawKey, label, value: rawVal })
-            } else if (/channel|visit|timestamp|date|event|device|browser|\bos\b|\bip\b|ip_address|session|fraud|score|verified/.test(k)) {
-                categories['Engagement & Activity'].push({ key: rawKey, label, value: rawVal })
-            } else {
-                categories['Additional Attributes'].push({ key: rawKey, label, value: rawVal })
-            }
-        }
-
-        return { categories, totalEmpty }
-    }, [clusterDetail?.golden_profile, hideEmptyAttrs, attrFilter])
-
     const toggleSourceFilter = (sourceId: string) => {
         setHiddenSources((prev) => {
             const next = new Set(prev)
@@ -468,8 +321,9 @@ export default function Explorer() {
                     ? `${entityKeyA} will be isolated on the next pipeline run.`
                     : `${entityKeyA} ↔ ${entityKeyB} will be unlinked on the next pipeline run.`
             )
-        } catch (err: any) {
-            toast('error', 'Failed to save override', String(err?.message || err))
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err)
+            toast('error', 'Failed to save override', msg)
         }
     }
 
@@ -488,8 +342,9 @@ export default function Explorer() {
                 `Excluded ${identifierType}: ${identifierValue}`,
                 'Re-run in INCR mode to split affected clusters.'
             )
-        } catch (err: any) {
-            toast('error', 'Failed to save exclusion', String(err?.message || err))
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err)
+            toast('error', 'Failed to save exclusion', msg)
         }
     }
 
@@ -505,8 +360,9 @@ export default function Explorer() {
             })
             setRtbfPreview(res)
             setRtbfReceipt(null)
-        } catch (err: any) {
-            toast('error', 'GDPR preview failed', String(err?.message || err))
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err)
+            toast('error', 'GDPR preview failed', msg)
         } finally {
             rtbfInFlightRef.current = false
             setRtbfLoading(null)
@@ -534,8 +390,9 @@ export default function Explorer() {
                 'GDPR purge & suppression complete',
                 `${res.entities_purged} entities purged and suppressed from future runs.`
             )
-        } catch (err: any) {
-            toast('error', 'GDPR purge failed', String(err?.message || err))
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err)
+            toast('error', 'GDPR purge failed', msg)
         } finally {
             rtbfInFlightRef.current = false
             setRtbfLoading(null)
@@ -544,7 +401,6 @@ export default function Explorer() {
 
     return (
         <div className="space-y-4">
-            {/* Compact Header + Lens Picker + Search */}
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
                 <div>
                     <h1 className="text-[18px] font-semibold tracking-[-0.015em] text-ink">
@@ -576,31 +432,29 @@ export default function Explorer() {
                                 ))}
                             </select>
 
-                            {availableLenses.length >= 1 && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        if (availableLenses.length >= 2) {
-                                            setDiffLensA(availableLenses[0].id)
-                                            setDiffLensB(availableLenses[1].id)
-                                        } else {
-                                            setDiffLensA('default')
-                                            setDiffLensB(availableLenses[0].id)
-                                        }
-                                        setDiffModalOpen(true)
-                                    }}
-                                    className="btn-secondary text-xs"
-                                >
-                                    <GitBranch className="w-3.5 h-3.5 text-accent" />
-                                    Compare Lenses
-                                </button>
-                            )}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (availableLenses.length >= 2) {
+                                        setDiffLensA(availableLenses[0].id)
+                                        setDiffLensB(availableLenses[1].id)
+                                    } else {
+                                        setDiffLensA('default')
+                                        setDiffLensB(availableLenses[0].id)
+                                    }
+                                    setDiffModalOpen(true)
+                                }}
+                                className="btn-secondary text-xs"
+                            >
+                                <GitBranch className="w-3.5 h-3.5 text-accent" />
+                                Compare Lenses
+                            </button>
                         </>
                     )}
 
                     <button
                         type="button"
-                        onClick={() => setTriageOpen(prev => !prev)}
+                        onClick={() => setTriageOpen((prev) => !prev)}
                         className={`btn-secondary text-xs ${triageOpen ? 'border-accent text-accent bg-accent-soft' : ''}`}
                         title="3-Tier AI Triage Queue (SQL Tier 0 -> LLM Tier 1 -> optional Tier 2 escalation)"
                     >
@@ -636,324 +490,34 @@ export default function Explorer() {
                 </div>
             </div>
 
-            {/* Collapsible 3-Tier AI Triage Queue Panel */}
-            {triageOpen && (
-                <div className="surface-panel p-4 space-y-3 text-xs">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                            <div className="font-semibold text-ink flex items-center gap-1.5">
-                                <Bot className="w-4 h-4 text-accent" />
-                                3-Tier AI Triage Queue
-                                <span className="badge-accent text-[10px]">SQL Tier 0 → LLM Judge</span>
-                            </div>
-                            <p className="text-ink-muted text-[11px] mt-0.5">
-                                Filters healthy clusters in warehouse SQL ($0, zero PII) and judges only borderline or multi-subject clusters. Approved splits write to <code className="font-mono">idr_meta.identity_override</code>.
-                            </p>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => setTriageOpen(false)}
-                            aria-label="Close AI Triage Queue"
-                            className="p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
-                        >
-                            <X className="w-4 h-4" />
-                        </button>
-                    </div>
+            <TriageQueuePanel
+                open={triageOpen}
+                onClose={() => setTriageOpen(false)}
+                onInspectCluster={(resolvedId) => {
+                    setSelectedCluster(resolvedId)
+                    setResultsCollapsed(true)
+                }}
+            />
 
-                    <div className="flex flex-wrap items-end gap-2.5 pt-1">
-                        <label className="space-y-1">
-                            <span className="text-[11px] text-ink-muted block">Tier-0 Max Confidence</span>
-                            <input
-                                type="number"
-                                step="0.05"
-                                min="0.1"
-                                max="1.0"
-                                value={triageMaxConf}
-                                onChange={(e) => setTriageMaxConf(e.target.value)}
-                                className="input-field text-xs py-1 w-28 font-mono"
-                            />
-                        </label>
-                        <label className="space-y-1">
-                            <span className="text-[11px] text-ink-muted block">Tier-2 Provider (optional)</span>
-                            <select
-                                aria-label="Tier-2 Escalation Provider"
-                                value={triageEscalateProvider}
-                                onChange={(e) => setTriageEscalateProvider(e.target.value)}
-                                className="input-field text-xs py-1 w-40"
-                            >
-                                <option value="">Auto-detect</option>
-                                <option value="anthropic">Anthropic</option>
-                                <option value="openai">OpenAI</option>
-                                <option value="gemini">Google Gemini</option>
-                                <option value="warehouse">Warehouse Native</option>
-                                <option value="ollama">Ollama (Local)</option>
-                            </select>
-                        </label>
-                        <label className="space-y-1">
-                            <span className="text-[11px] text-ink-muted block">Tier-2 Escalation Model (optional)</span>
-                            <input
-                                type="text"
-                                value={triageEscalateModel}
-                                onChange={(e) => setTriageEscalateModel(e.target.value)}
-                                placeholder="e.g. claude-3-5-sonnet-latest or gpt-4o"
-                                className="input-field text-xs py-1 w-60 font-mono"
-                            />
-                        </label>
-                        <button
-                            type="button"
-                            onClick={handleRunTriage}
-                            disabled={triageLoading}
-                            className="btn-primary text-xs py-1.5"
-                        >
-                            {triageLoading ? (
-                                <>
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    Running Cascade…
-                                </>
-                            ) : (
-                                <>
-                                    <Bot className="w-3.5 h-3.5" />
-                                    Run 3-Tier Triage
-                                </>
-                            )}
-                        </button>
-                    </div>
+            <ExplorerClusterLists
+                isConnected={isConnected}
+                hasSetupStatus={Boolean(setupStatus)}
+                searching={searching}
+                selectedLens={selectedLens}
+                searchQuery={searchQuery}
+                selectedCluster={selectedCluster}
+                resultsCollapsed={resultsCollapsed}
+                onToggleResultsCollapsed={() => setResultsCollapsed((v) => !v)}
+                searchResults={searchResults}
+                topClusters={topClusters}
+                onSelectCluster={handleSelectClusterFromList}
+            />
 
-                    {triageError && (
-                        <div className="rounded-md border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-status-danger text-xs">
-                            {triageError}
-                        </div>
-                    )}
+            <RtbfReceiptBanner
+                receipt={rtbfReceipt}
+                onDismiss={() => setRtbfReceipt(null)}
+            />
 
-                    {triageResult?.cascade_summary && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                            <div className="rounded-md border border-line bg-subtle px-3 py-2">
-                                <div className="text-[11px] text-ink-muted">Multi-Entity Clusters</div>
-                                <div className="text-sm font-mono font-semibold text-ink mt-0.5">
-                                    {triageResult.cascade_summary.total_multi_entity_clusters.toLocaleString()}
-                                </div>
-                            </div>
-                            <div className="rounded-md border border-line bg-subtle px-3 py-2">
-                                <div className="text-[11px] text-ink-muted">SQL Tier 0 Auto-Passed ($0)</div>
-                                <div className="text-sm font-mono font-semibold text-status-success mt-0.5">
-                                    {triageResult.cascade_summary.tier0_auto_passed.toLocaleString()}{' '}
-                                    <span className="text-[11px] font-normal">
-                                        ({triageResult.cascade_summary.sql_filter_savings_pct}%)
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="rounded-md border border-line bg-subtle px-3 py-2">
-                                <div className="text-[11px] text-ink-muted">Tier 1 Judged ({triageResult.model || 'LLM'})</div>
-                                <div className="text-sm font-mono font-semibold text-ink mt-0.5">
-                                    {triageResult.cascade_summary.tier1_reviewed.toLocaleString()}
-                                </div>
-                            </div>
-                            <div className="rounded-md border border-line bg-subtle px-3 py-2">
-                                <div className="text-[11px] text-ink-muted">Tier 2 Escalated</div>
-                                <div className="text-sm font-mono font-semibold text-accent mt-0.5">
-                                    {triageResult.cascade_summary.tier2_escalated.toLocaleString()}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {triageResult && triageResult.proposals.length === 0 && (
-                        <div className="rounded-md border border-line bg-subtle px-3 py-2.5 text-ink-secondary">
-                            {triageResult.message || 'No borderline clusters flagged.'}
-                        </div>
-                    )}
-
-                    {triageResult && triageResult.proposals.length > 0 && (
-                        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                            {triageResult.proposals.map((p, idx) => {
-                                const key = `${p.resolved_id}:${p.action}:${p.entity_key_a || ''}`
-                                const canOverride =
-                                    (p.action === 'ISOLATE' && Boolean(p.entity_key_a)) ||
-                                    ((p.action === 'DO_NOT_LINK' || p.action === 'FORCE_LINK') &&
-                                        Boolean(p.entity_key_a) &&
-                                        Boolean(p.entity_key_b))
-                                const isApplied = Boolean(appliedOverrides[key])
-                                return (
-                                    <div
-                                        key={`${p.resolved_id}-${idx}`}
-                                        className="rounded-md border border-line bg-subtle px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                                    >
-                                        <div className="space-y-1 min-w-0">
-                                            <div className="flex flex-wrap items-center gap-1.5">
-                                                <span className="font-mono font-semibold text-ink">{p.resolved_id}</span>
-                                                <span
-                                                    className={
-                                                        p.action === 'KEEP'
-                                                            ? 'badge-success'
-                                                            : p.action === 'DO_NOT_LINK' || p.action === 'ISOLATE'
-                                                            ? 'badge-danger'
-                                                            : 'badge-warning'
-                                                    }
-                                                >
-                                                    {p.action}
-                                                </span>
-                                                <span
-                                                    className="badge-neutral font-mono text-[10px]"
-                                                    title={
-                                                        p.escalation_reason === 'structural_disagreement'
-                                                            ? 'Escalated to Tier 2: Tier-1 verdict conflicted with SQL structural fanout/identifier evidence'
-                                                            : p.escalation_reason
-                                                            ? `Escalated (${p.escalation_reason})`
-                                                            : undefined
-                                                    }
-                                                >
-                                                    {p.escalated ? 'TIER 2' : 'TIER 1'}
-                                                    {p.judge_confidence !== undefined ? ` · ${Math.round(p.judge_confidence * 100)}%` : ''}
-                                                    {p.escalation_reason === 'structural_disagreement' ? ' · Guardrail' : ''}
-                                                </span>
-                                                {p.subject_fanout !== null && p.subject_fanout !== undefined && (
-                                                    <span className="badge-neutral font-mono text-[10px]">
-                                                        fanout {p.subject_fanout}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <p className="text-ink-secondary">{p.reason}</p>
-                                        </div>
-                                        <div className="flex items-center gap-1.5 shrink-0">
-                                            {p.resolved_id && p.resolved_id !== 'parse_error' && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelectedCluster(p.resolved_id)
-                                                        setResultsCollapsed(true)
-                                                    }}
-                                                    className="btn-secondary text-[11px] py-1 px-2"
-                                                >
-                                                    Inspect
-                                                </button>
-                                            )}
-                                            {canOverride && (
-                                                <button
-                                                    type="button"
-                                                    disabled={applyingOverrideKey === key || isApplied}
-                                                    onClick={() => handleApplyTriageOverride(p)}
-                                                    className="btn-primary text-[11px] py-1 px-2 disabled:opacity-50"
-                                                >
-                                                    {isApplied ? 'Override Saved' : applyingOverrideKey === key ? 'Saving…' : 'Apply Override'}
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {!selectedLens && searchQuery.trim().length > 0 && searchQuery.trim().length < 3 && (
-                <p className="text-xs text-ink-muted">
-                    Type at least 3 characters to query the identity index.
-                </p>
-            )}
-
-            {/* Search Results Table */}
-            {(selectedLens || searchQuery.trim().length >= 3) && (
-                <div className="surface-panel overflow-hidden">
-                    <div className="px-3 py-2 bg-subtle border-b border-line flex items-center justify-between text-xs text-ink-muted">
-                        <span>
-                            {setupStatus && !isConnected
-                                ? 'Warehouse disconnected — connect in Identity Studio to search.'
-                                : searching
-                                    ? 'Querying identity index…'
-                                    : `${searchResults?.length || 0} matching clusters`}
-                        </span>
-                        {searchResults && searchResults.length > 0 && (
-                            selectedCluster ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setResultsCollapsed((v) => !v)}
-                                    className="text-accent hover:underline font-medium"
-                                >
-                                    {resultsCollapsed ? `Show all ${searchResults.length} results` : 'Hide list'}
-                                </button>
-                            ) : (
-                                <span>Select a cluster to inspect</span>
-                            )
-                        )}
-                    </div>
-                    {(!resultsCollapsed || !selectedCluster) && (
-                    <div className="max-h-52 overflow-y-auto divide-y divide-line">
-                        {searchResults && searchResults.length === 0 && !searching ? (
-                            <div className="px-3 py-5 text-center text-xs text-ink-muted">
-                                No clusters matched &ldquo;{searchQuery}&rdquo;.
-                            </div>
-                        ) : (
-                            searchResults?.map((result: ClusterSummary) => {
-                                const isSelected = selectedCluster === result.resolved_id
-                                return (
-                                    <button
-                                        key={result.resolved_id}
-                                        type="button"
-                                        onClick={() => {
-                                            setSelectedCluster(result.resolved_id)
-                                            setResultsCollapsed(true)
-                                            setSelectedNode(null)
-                                            setHiddenSources(new Set())
-                                            setAiExplanation(null)
-                                            setActiveTab('golden')
-                                        }}
-                                        className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 transition-colors ${isSelected
-                                                ? 'bg-selected text-ink'
-                                                : 'bg-surface hover:bg-subtle text-ink-secondary'
-                                            }`}
-                                    >
-                                        <div className="flex items-center gap-2 min-w-0">
-                                            <Hash className="w-3.5 h-3.5 text-accent shrink-0" />
-                                            <span className="font-mono text-xs font-medium text-ink truncate">
-                                                {result.resolved_id}
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0 font-mono tabular-nums">
-                                            {result.confidence_score != null && (
-                                                <span className="badge-success">
-                                                    {(result.confidence_score * 100).toFixed(1)}%
-                                                </span>
-                                            )}
-                                            <span className="badge-neutral">
-                                                {result.cluster_size.toLocaleString()} entities
-                                            </span>
-                                        </div>
-                                    </button>
-                                )
-                            })
-                        )}
-                    </div>
-                    )}
-                </div>
-            )}
-
-            {/* GDPR RTBF Audit Receipt */}
-            {rtbfReceipt && (
-                <div className="p-3.5 rounded-md bg-status-success-soft border border-status-success-border text-xs space-y-1.5">
-                    <div className="flex items-center justify-between font-semibold text-status-success">
-                        <span>GDPR / CCPA Purge Complete ({rtbfReceipt.request_id})</span>
-                        <button
-                            type="button"
-                            onClick={() => setRtbfReceipt(null)}
-                            aria-label="Dismiss purge receipt"
-                            className="p-1 rounded hover:bg-surface/50"
-                        >
-                            <X className="w-3.5 h-3.5" />
-                        </button>
-                    </div>
-                    <p className="text-ink-secondary">
-                        Purged <strong className="font-mono tabular-nums text-ink">{rtbfReceipt.entities_purged}</strong> entities and{' '}
-                        <strong className="font-mono tabular-nums text-ink">{rtbfReceipt.edges_purged}</strong> edges across{' '}
-                        <code className="font-mono">idr_out.*</code> and <code className="font-mono">idr_work.*</code>.
-                    </p>
-                    <p className="font-mono text-[11px] text-ink-muted break-all">
-                        SHA-256 Audit Receipt: {rtbfReceipt.target_hash}
-                    </p>
-                </div>
-            )}
-
-            {/* Cluster Loading / Error States */}
             {selectedCluster && clusterLoading && (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4" aria-busy="true">
                     <div className="lg:col-span-7 h-[560px] surface-panel animate-pulse bg-subtle" />
@@ -973,301 +537,26 @@ export default function Explorer() {
                 </div>
             )}
 
-            {/* Split Workbench: Graph Left (7 cols) + Tabbed Inspector Right (5 cols) */}
             {selectedCluster && clusterDetail && (
                 <div className="space-y-3">
-                    {/* AI Cluster Explanation Bar */}
-                    <div className="surface-panel px-3.5 py-2 flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 text-xs text-ink-secondary">
-                            <Bot className="w-4 h-4 text-accent" />
-                            <span>AI Cluster Forensics</span>
-                        </div>
-                        <div className="flex flex-1 sm:flex-initial items-center gap-2 min-w-[260px] max-w-xl">
-                            <input
-                                type="text"
-                                aria-label="Ask AI about this cluster"
-                                value={aiCustomPrompt}
-                                onChange={(e) => setAiCustomPrompt(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !aiExplaining) {
-                                        e.preventDefault()
-                                        document.getElementById('btn-explain-cluster-ai')?.click()
-                                    }
-                                }}
-                                placeholder="Ask a question about this cluster (or click Explain)…"
-                                className="input-field py-1 text-xs flex-1"
-                            />
-                            <button
-                                id="btn-explain-cluster-ai"
-                                type="button"
-                                disabled={aiExplaining}
-                                onClick={async () => {
-                                    setAiExplaining(true)
-                                    setAiExplanation(null)
-                                    try {
-                                        const res = await api.explainClusterAi(selectedCluster, aiCustomPrompt)
-                                        setAiExplanation(
-                                            `[${res.provider}:${res.model} · PII Masking: ${res.pii_masked ? 'ON' : 'OFF (local)'
-                                            }]\n\n${res.explanation}`
-                                        )
-                                    } catch (err: any) {
-                                        setAiExplanation(
-                                            `AI Explain unavailable: ${err.message || String(err)} (Configure Ollama or a BYOK key in Settings.)`
-                                        )
-                                    } finally {
-                                        setAiExplaining(false)
-                                    }
-                                }}
-                                className="btn-secondary text-xs shrink-0"
-                            >
-                                {aiExplaining ? (
-                                    <>
-                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                        Analyzing…
-                                    </>
-                                ) : aiCustomPrompt.trim() ? (
-                                    'Ask AI'
-                                ) : (
-                                    'Explain with AI'
-                                )}
-                            </button>
-                        </div>
-                    </div>
+                    <AiClusterForensicsBar resolvedId={selectedCluster} />
 
-                    {aiExplanation && (
-                        <div className="p-3.5 pr-8 rounded-md bg-subtle border border-line text-xs text-ink space-y-1.5 relative leading-relaxed">
-                            <button
-                                type="button"
-                                onClick={() => setAiExplanation(null)}
-                                aria-label="Close AI explanation"
-                                className="absolute top-2 right-2 p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
-                            >
-                                <X className="w-3.5 h-3.5" />
-                            </button>
-                            {aiExplanation.split('\n').map((rawLine, lineIdx) => {
-                                const line = rawLine.trimEnd()
-                                if (!line.trim()) return <div key={lineIdx} className="h-1" />
-                                const renderInline = (text: string) =>
-                                    text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) => {
-                                        if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
-                                            return <strong key={i} className="font-semibold text-ink">{part.slice(2, -2)}</strong>
-                                        }
-                                        if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
-                                            return <code key={i} className="px-1 py-0.5 rounded bg-surface border border-line font-mono text-[11px]">{part.slice(1, -1)}</code>
-                                        }
-                                        return <span key={i}>{part}</span>
-                                    })
-                                const headingMatch = line.match(/^#{1,4}\s+(.*)$/)
-                                if (headingMatch) {
-                                    return <div key={lineIdx} className="font-semibold text-ink pt-1">{renderInline(headingMatch[1])}</div>
-                                }
-                                const bulletMatch = line.match(/^[-*]\s+(.*)$/)
-                                if (bulletMatch) {
-                                    return (
-                                        <div key={lineIdx} className="flex items-start gap-1.5 pl-1">
-                                            <span className="text-ink-muted select-none">•</span>
-                                            <span>{renderInline(bulletMatch[1])}</span>
-                                        </div>
-                                    )
-                                }
-                                return <p key={lineIdx}>{renderInline(line)}</p>
-                            })}
-                        </div>
-                    )}
+                    <CrosswalkLineageStrip
+                        resolvedId={clusterDetail.resolved_id}
+                        history={clusterDetail.crosswalk_history}
+                        onSelectCluster={(id) => setSelectedCluster(id)}
+                    />
 
-                    {/* Crosswalk Lineage Strip (Compact Summary + Expandable Scrollable Table) */}
-                    {clusterDetail.crosswalk_history && clusterDetail.crosswalk_history.length > 0 && (() => {
-                        const history = clusterDetail.crosswalk_history
-                        const mergedCnt = history.filter((c) => c.change_type === 'MERGED').length
-                        const splitCnt = history.filter((c) => c.change_type === 'SPLIT').length
-                        const totalMoved = history.reduce((acc, c) => acc + (Number(c.entities_moved) || 0), 0)
-                        const bySource: Record<string, number> = {}
-                        for (const cw of history) {
-                            const prev = String(cw.previous_resolved_id || '')
-                            const src = prev.includes(':') ? prev.split(':', 1)[0] : 'cluster'
-                            bySource[src] = (bySource[src] || 0) + 1
-                        }
-                        const sourceBreakdown = Object.entries(bySource)
-                            .sort((a, b) => b[1] - a[1])
-                            .slice(0, 5)
+                    <RtbfPreviewBanner
+                        selectedCluster={selectedCluster}
+                        preview={rtbfPreview}
+                        purging={rtbfLoading === 'purge'}
+                        disabled={rtbfLoading !== null}
+                        onConfirm={() => void handleConfirmRtbf(selectedCluster)}
+                        onCancel={() => setRtbfPreview(null)}
+                    />
 
-                        return (
-                            <div className="surface-panel overflow-hidden">
-                                <div className="px-3.5 py-2 bg-accent-soft flex flex-wrap items-center justify-between gap-2 text-xs">
-                                    <div className="flex flex-wrap items-center gap-2 min-w-0">
-                                        <span className="inline-flex items-center gap-1.5 font-semibold text-accent">
-                                            <GitBranch className="w-3.5 h-3.5" />
-                                            Crosswalk Lineage
-                                        </span>
-                                        <span className="font-mono tabular-nums text-[11px] px-2 py-0.5 rounded bg-surface border border-line text-ink font-medium">
-                                            {history.length} {history.length === 1 ? 'transition' : 'transitions'} · {totalMoved.toLocaleString()} {totalMoved === 1 ? 'entity' : 'entities'} moved
-                                        </span>
-                                        {mergedCnt > 0 && (
-                                            <span className="badge-Exact font-mono tabular-nums">
-                                                {mergedCnt} MERGED
-                                            </span>
-                                        )}
-                                        {splitCnt > 0 && (
-                                            <span className="badge-warning font-mono tabular-nums">
-                                                {splitCnt} SPLIT
-                                            </span>
-                                        )}
-                                        {sourceBreakdown.map(([src, cnt]) => (
-                                            <span
-                                                key={src}
-                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface border border-line text-[11px] text-ink-secondary"
-                                            >
-                                                <span>{formatSourceName(src)}</span>
-                                                <span className="font-mono tabular-nums text-ink-muted">×{cnt}</span>
-                                            </span>
-                                        ))}
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setCrosswalkExpanded((v) => !v)}
-                                        aria-expanded={crosswalkExpanded}
-                                        className="btn-secondary text-xs px-2.5 py-1 min-h-[26px]"
-                                    >
-                                        {crosswalkExpanded ? (
-                                            <>
-                                                <ChevronUp className="w-3.5 h-3.5" />
-                                                Hide Transitions
-                                            </>
-                                        ) : (
-                                            <>
-                                                <ChevronDown className="w-3.5 h-3.5" />
-                                                Inspect {history.length} {history.length === 1 ? 'Transition' : 'Transitions'}
-                                            </>
-                                        )}
-                                    </button>
-                                </div>
-
-                                {crosswalkExpanded && (
-                                    <div className="max-h-56 overflow-y-auto border-t border-line bg-surface">
-                                        <table className="data-table">
-                                            <thead className="sticky top-0 bg-subtle z-10">
-                                                <tr>
-                                                    <th className="w-24">Type</th>
-                                                    <th className="w-36">Origin Source</th>
-                                                    <th>Previous Cluster ID</th>
-                                                    <th>Target Cluster</th>
-                                                    <th className="text-right w-24">Moved</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {history.map((cw, idx) => {
-                                                    const prev = String(cw.previous_resolved_id || '')
-                                                    const curr = String(cw.current_resolved_id || '')
-                                                    const [prevSrc, prevKey] = prev.includes(':')
-                                                        ? prev.split(':', 2)
-                                                        : ['cluster', prev]
-                                                    const isCurrentTarget = curr === clusterDetail.resolved_id
-                                                    return (
-                                                        <tr key={idx}>
-                                                            <td>
-                                                                <span className={cw.change_type === 'SPLIT' ? 'badge-warning font-mono' : 'badge-Exact font-mono'}>
-                                                                    {cw.change_type}
-                                                                </span>
-                                                            </td>
-                                                            <td className="text-xs text-ink-secondary">
-                                                                {formatSourceName(prevSrc)}
-                                                            </td>
-                                                            <td className="font-mono text-xs text-ink" title={prev}>
-                                                                {prevKey}
-                                                            </td>
-                                                            <td className="font-mono text-xs">
-                                                                {isCurrentTarget ? (
-                                                                    <span className="inline-flex items-center gap-1 text-accent font-medium">
-                                                                        <span>→</span>
-                                                                        <span>Current Cluster</span>
-                                                                    </span>
-                                                                ) : (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => setSelectedCluster(curr)}
-                                                                        className="text-accent hover:underline truncate max-w-[240px] inline-block"
-                                                                        title={curr}
-                                                                    >
-                                                                        → {curr}
-                                                                    </button>
-                                                                )}
-                                                            </td>
-                                                            <td className="text-right font-mono text-xs tabular-nums text-ink-secondary">
-                                                                {cw.entities_moved}
-                                                            </td>
-                                                        </tr>
-                                                    )
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                )}
-                            </div>
-                        )
-                    })()}
-
-                    {/* RTBF Dry-Run Confirmation Banner */}
-                    {rtbfPreview && (
-                        <div className="p-4 rounded-md bg-status-danger-soft border border-status-danger-border text-xs space-y-2.5">
-                            <div className="flex items-center justify-between gap-2">
-                                <span className="font-semibold text-status-danger flex items-center gap-1.5">
-                                    <Trash2 className="w-4 h-4" />
-                                    Confirm GDPR / CCPA Cascading Purge
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setRtbfPreview(null)}
-                                    className="text-ink-muted hover:text-ink font-medium"
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                            <p className="text-ink-secondary leading-relaxed">
-                                Permanently purges cluster <code className="font-mono text-ink">{selectedCluster}</code> (
-                                <strong className="font-mono tabular-nums text-ink">{rtbfPreview.entities_purged}</strong> entities,{' '}
-                                <strong className="font-mono tabular-nums text-ink">{rtbfPreview.edges_purged}</strong> edges),
-                                writes SHA-256 suppression hashes to <code className="font-mono">idr_meta.privacy_suppression</code>,
-                                and logs an audit receipt.
-                            </p>
-                            {rtbfPreview.entity_keys && rtbfPreview.entity_keys.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5 p-2 rounded bg-surface border border-line">
-                                    {rtbfPreview.entity_keys.slice(0, 6).map((ek: string) => (
-                                        <span key={ek} className="font-mono text-[11px] text-ink-secondary px-1.5 py-0.5 rounded bg-subtle border border-line">
-                                            {ek}
-                                        </span>
-                                    ))}
-                                    {rtbfPreview.entity_keys.length > 6 && (
-                                        <span className="font-mono text-[11px] text-ink-muted px-1 py-0.5">
-                                            +{rtbfPreview.entity_keys.length - 6} more
-                                        </span>
-                                    )}
-                                </div>
-                            )}
-                            <div className="flex items-center gap-2 pt-0.5">
-                                <button
-                                    type="button"
-                                    onClick={() => handleConfirmRtbf(selectedCluster)}
-                                    disabled={rtbfLoading !== null}
-                                    className="btn-danger"
-                                >
-                                    {rtbfLoading === 'purge' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                                    {rtbfLoading === 'purge' ? 'Purging…' : 'Confirm & Purge Cluster'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setRtbfPreview(null)}
-                                    disabled={rtbfLoading !== null}
-                                    className="btn-secondary"
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Workbench Grid */}
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-                        {/* LEFT PANE: Graph Canvas + Source Filter Strip */}
                         <section className="lg:col-span-7 surface-panel overflow-hidden flex flex-col">
                             <div className="px-3.5 py-2.5 border-b border-line flex flex-wrap items-center justify-between gap-2 bg-surface">
                                 <div className="flex items-center gap-2 min-w-0">
@@ -1330,7 +619,7 @@ export default function Explorer() {
                                     </span>
                                     <button
                                         type="button"
-                                        onClick={() => handlePreviewRtbf(clusterDetail.resolved_id)}
+                                        onClick={() => void handlePreviewRtbf(clusterDetail.resolved_id)}
                                         disabled={rtbfLoading !== null}
                                         className="btn-danger text-xs px-2 py-1 min-h-[28px]"
                                         title="GDPR / CCPA Right to be Forgotten preview"
@@ -1358,10 +647,11 @@ export default function Explorer() {
                                                 type="button"
                                                 onClick={() => toggleSourceFilter(sourceId)}
                                                 aria-pressed={!isHidden}
-                                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs border transition-colors ${isHidden
+                                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs border transition-colors ${
+                                                    isHidden
                                                         ? 'bg-subtle text-ink-subtle border-line line-through opacity-65'
                                                         : 'bg-surface text-ink-secondary border-line-strong hover:bg-subtle'
-                                                    }`}
+                                                }`}
                                             >
                                                 <span
                                                     className="w-2 h-2 rounded-full shrink-0"
@@ -1382,10 +672,11 @@ export default function Explorer() {
                                                     setGroupHighVolume((v) => !v)
                                                     setExpandedGraphGroups(new Set())
                                                 }}
-                                                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${groupHighVolume
+                                                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                                                    groupHighVolume
                                                         ? 'bg-accent-soft text-accent border-accent-border'
                                                         : 'bg-surface text-ink-muted border-line hover:text-ink'
-                                                    }`}
+                                                }`}
                                                 title="Collapse source tables with >12 entities into a single expandable hub node"
                                             >
                                                 {groupHighVolume ? 'Grouped (>12)' : 'Expand all'}
@@ -1417,611 +708,32 @@ export default function Explorer() {
                             </div>
                         </section>
 
-                        {/* RIGHT PANE: Tabbed Inspector */}
-                        <section className="lg:col-span-5 surface-panel overflow-hidden flex flex-col max-h-[640px]">
-                            <div role="tablist" aria-label="Cluster inspector tabs" className="px-2 pt-2 bg-subtle border-b border-line flex items-center gap-1 shrink-0">
-                                {(
-                                    [
-                                        { id: 'golden', label: 'Golden Record' },
-                                        { id: 'edges', label: `Edges (${displayedEdges.length})` },
-                                        { id: 'entity', label: selectedNode ? 'Selected Entity' : 'Entities' },
-                                    ] as const
-                                ).map((tab) => {
-                                    const isActive = activeTab === tab.id
-                                    return (
-                                        <button
-                                            key={tab.id}
-                                            role="tab"
-                                            type="button"
-                                            aria-selected={isActive}
-                                            onClick={() => setActiveTab(tab.id)}
-                                            className={`px-3 py-1.5 text-xs font-medium rounded-t-md border-t border-x transition-colors ${isActive
-                                                    ? 'bg-surface text-ink border-line -mb-px pb-[7px]'
-                                                    : 'bg-transparent text-ink-muted hover:text-ink border-transparent'
-                                                }`}
-                                        >
-                                            {tab.label}
-                                        </button>
-                                    )
-                                })}
-                            </div>
-
-                            {/* TAB 1: Golden Record (Dense Key-Value Table) */}
-                            {activeTab === 'golden' && (
-                                <div className="flex-1 flex flex-col min-h-0">
-                                    <div className="p-2.5 border-b border-line flex items-center gap-2 shrink-0">
-                                        <div className="relative flex-1">
-                                            <Search className="w-3.5 h-3.5 text-ink-subtle absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                            <input
-                                                type="text"
-                                                aria-label="Filter golden record attributes"
-                                                placeholder="Filter attributes…"
-                                                value={attrFilter}
-                                                onChange={(e) => setAttrFilter(e.target.value)}
-                                                className="input-field pl-8 py-1 text-xs"
-                                            />
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setHideEmptyAttrs((v) => !v)}
-                                            className="btn-secondary text-xs px-2 py-1 min-h-[28px] shrink-0"
-                                        >
-                                            {hideEmptyAttrs ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                            <span className="tabular-nums">
-                                                {hideEmptyAttrs ? `${goldenProfileCategories?.totalEmpty || 0} hidden` : 'All'}
-                                            </span>
-                                        </button>
-                                    </div>
-
-                                    <div className="flex-1 overflow-y-auto">
-                                        {!goldenProfileCategories ? (
-                                            <div className="p-8 text-center text-xs text-ink-muted">
-                                                No golden profile attributes available for this cluster.
-                                            </div>
-                                        ) : (
-                                            Object.entries(goldenProfileCategories.categories).map(([catName, attrs]) => {
-                                                if (attrs.length === 0) return null
-                                                return (
-                                                    <div key={catName}>
-                                                        <div className="sticky top-0 px-3 py-1.5 bg-subtle border-y border-line text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted">
-                                                            {catName} ({attrs.length})
-                                                        </div>
-                                                        <table className="w-full text-left border-collapse">
-                                                            <tbody className="divide-y divide-line">
-                                                                {attrs.map((attr) => {
-                                                                    const isEmpty =
-                                                                        attr.value === null ||
-                                                                        attr.value === undefined ||
-                                                                        attr.value === '' ||
-                                                                        attr.value === '-' ||
-                                                                        attr.value === '—'
-                                                                    const display = isEmpty ? '—' : String(attr.value)
-                                                                    return (
-                                                                        <tr key={attr.key} className="hover:bg-subtle/60">
-                                                                            <td className="px-3 py-1.5 text-xs text-ink-muted w-[44%] align-top">
-                                                                                <div className="font-medium text-ink-secondary">{attr.label}</div>
-                                                                                <div className="font-mono text-[10px] text-ink-subtle truncate">
-                                                                                    {attr.key}
-                                                                                </div>
-                                                                            </td>
-                                                                            <td className="px-3 py-1.5 text-xs align-top break-words">
-                                                                                <span
-                                                                                    className={
-                                                                                        isEmpty
-                                                                                            ? 'font-mono text-ink-subtle'
-                                                                                            : typeof attr.value === 'boolean'
-                                                                                                ? attr.value
-                                                                                                    ? 'badge-success font-mono'
-                                                                                                    : 'badge-danger font-mono'
-                                                                                                : 'font-mono text-ink tabular-nums'
-                                                                                    }
-                                                                                >
-                                                                                    {display}
-                                                                                </span>
-                                                                            </td>
-                                                                        </tr>
-                                                                    )
-                                                                })}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                )
-                                            })
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* TAB 2: Edges & Rule Provenance */}
-                            {activeTab === 'edges' && (
-                                <div className="flex-1 flex flex-col min-h-0">
-                                    <div className="p-2.5 border-b border-line space-y-2 shrink-0">
-                                        <div className="relative">
-                                            <Search className="w-3.5 h-3.5 text-ink-subtle absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                            <input
-                                                type="text"
-                                                aria-label="Filter edges by value, rule, or entity key"
-                                                placeholder="Filter by value, rule, or entity…"
-                                                value={edgeSearch}
-                                                onChange={(e) => setEdgeSearch(e.target.value)}
-                                                className="input-field pl-8 py-1 text-xs"
-                                            />
-                                        </div>
-                                        {selectedNode && (
-                                            <div className="px-2.5 py-1.5 rounded bg-accent-soft border border-accent-border text-xs flex items-center justify-between gap-2">
-                                                <span className="text-accent truncate">
-                                                    Filtered to <strong>{formatSourceName(selectedNode.source_id)}</strong>
-                                                </span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setSelectedNode(null)}
-                                                    className="text-accent hover:underline font-medium shrink-0"
-                                                >
-                                                    Show all
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div className="flex-1 overflow-y-auto divide-y divide-line">
-                                        {displayedEdges.length === 0 ? (
-                                            <div className="p-8 text-center text-xs text-ink-muted">
-                                                No matching edges found.
-                                            </div>
-                                        ) : (
-                                            displayedEdges.map((edge, i) => {
-                                                const badge = getIdentifierBadge(edge.identifier_type)
-                                                const leftSource = edge.left_entity_key.split(':')[0] || 'Entity'
-                                                const rightSource = edge.right_entity_key.split(':')[0] || 'Entity'
-                                                const leftColor = getEntityColor(leftSource, uniqueSources)
-                                                const rightColor = getEntityColor(rightSource, uniqueSources)
-                                                const confirmKey = `unlink:${edge.left_entity_key}:${edge.right_entity_key}:${i}`
-                                                const isConfirming = confirmOverrideKey === confirmKey
-
-                                                return (
-                                                    <div key={i} className="px-3 py-2.5 hover:bg-subtle/60 transition-colors text-xs space-y-1.5">
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <div className="flex items-center gap-1.5 min-w-0">
-                                                                <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium border ${badge.badgeBg} ${badge.badgeText} ${badge.border}`}>
-                                                                    {edge.identifier_type}
-                                                                </span>
-                                                                <span className="font-mono text-[11px] text-ink-muted truncate">
-                                                                    {edge.rule_id || 'EXACT'}
-                                                                </span>
-                                                            </div>
-
-                                                            <div className="flex items-center gap-1 shrink-0">
-                                                                {edge.identifier_value && !isConfirming && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleExcludeIdentifier(edge.identifier_type, edge.identifier_value)}
-                                                                        className="px-1.5 py-0.5 rounded text-[11px] text-ink-muted hover:text-status-warning hover:bg-status-warning-soft border border-line transition-colors"
-                                                                        title={`Exclude "${edge.identifier_value}" from future matching`}
-                                                                    >
-                                                                        Exclude Value
-                                                                    </button>
-                                                                )}
-                                                                {isConfirming ? (
-                                                                    <>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() =>
-                                                                                handleStewardshipOverride(
-                                                                                    'DO_NOT_LINK',
-                                                                                    edge.left_entity_key,
-                                                                                    edge.right_entity_key
-                                                                                )
-                                                                            }
-                                                                            className="px-2 py-0.5 rounded text-[11px] font-medium bg-status-danger-soft text-status-danger border border-status-danger-border"
-                                                                        >
-                                                                            Confirm Unlink
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => setConfirmOverrideKey(null)}
-                                                                            className="px-1.5 py-0.5 rounded text-[11px] text-ink-muted hover:text-ink"
-                                                                        >
-                                                                            Cancel
-                                                                        </button>
-                                                                    </>
-                                                                ) : (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => setConfirmOverrideKey(confirmKey)}
-                                                                        className="px-2 py-0.5 rounded text-[11px] text-ink-muted hover:text-status-danger hover:bg-status-danger-soft border border-line hover:border-status-danger-border transition-colors"
-                                                                    >
-                                                                        Unlink
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="font-mono text-xs text-ink bg-subtle px-2 py-1 rounded border border-line truncate" title={edge.identifier_value}>
-                                                            {edge.identifier_value}
-                                                        </div>
-
-                                                        <div className="flex items-center justify-between text-[11px] text-ink-muted">
-                                                            <span className="inline-flex items-center gap-1.5 truncate max-w-[46%]" title={edge.left_entity_key}>
-                                                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: leftColor.bg }} />
-                                                                <span className="truncate">{formatSourceName(leftSource)}</span>
-                                                            </span>
-                                                            <span className="text-ink-subtle">↔</span>
-                                                            <span className="inline-flex items-center gap-1.5 truncate max-w-[46%] justify-end" title={edge.right_entity_key}>
-                                                                <span className="truncate">{formatSourceName(rightSource)}</span>
-                                                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: rightColor.bg }} />
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                )
-                                            })
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* TAB 3: Selected Entity / Cluster Entity List */}
-                            {activeTab === 'entity' && (
-                                <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                                    {selectedNode ? (
-                                        <div className="space-y-3">
-                                            <div className="flex items-center justify-between gap-2 pb-2 border-b border-line">
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedNode.color }} />
-                                                    <h2 className="text-[13px] font-semibold text-ink truncate">
-                                                        {formatSourceName(selectedNode.source_id)}
-                                                    </h2>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setSelectedNode(null)}
-                                                    className="btn-ghost text-xs px-2 py-1 min-h-[28px]"
-                                                >
-                                                    All entities
-                                                </button>
-                                            </div>
-
-                                            <dl className="divide-y divide-line border border-line rounded-md overflow-hidden text-xs">
-                                                <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
-                                                    <dt className="text-ink-muted">Source Table</dt>
-                                                    <dd className="font-mono text-ink truncate">{selectedNode.source_id}</dd>
-                                                </div>
-                                                <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
-                                                    <dt className="text-ink-muted">Source Key</dt>
-                                                    <dd className="flex items-center gap-1.5 min-w-0">
-                                                        <span className="font-mono text-ink truncate">{selectedNode.source_key}</span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => copyToClipboard(selectedNode.source_key, 'srcKey')}
-                                                            aria-label="Copy source key"
-                                                            className="p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
-                                                        >
-                                                            {copiedKey === 'srcKey' ? (
-                                                                <Check className="w-3.5 h-3.5 text-status-success" />
-                                                            ) : (
-                                                                <Copy className="w-3.5 h-3.5" />
-                                                            )}
-                                                        </button>
-                                                    </dd>
-                                                </div>
-                                                <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
-                                                    <dt className="text-ink-muted">Entity Key</dt>
-                                                    <dd className="font-mono text-ink truncate">{selectedNode.id}</dd>
-                                                </div>
-                                                <div className="px-3 py-2 bg-surface flex items-center justify-between gap-2">
-                                                    <dt className="text-ink-muted">Graph Degree</dt>
-                                                    <dd className="font-mono tabular-nums font-medium text-ink">
-                                                        {(() => {
-                                                            const deg =
-                                                                selectedNode.degree ??
-                                                                (clusterDetail.edges || []).filter(
-                                                                    (e) =>
-                                                                        e.left_entity_key === selectedNode.id ||
-                                                                        e.right_entity_key === selectedNode.id
-                                                                ).length
-                                                            return `${deg} incident ${deg === 1 ? 'link' : 'links'}`
-                                                        })()}
-                                                    </dd>
-                                                </div>
-                                            </dl>
-
-                                            <div className="p-3 rounded-md bg-subtle border border-line space-y-2">
-                                                <div className="text-xs font-semibold text-ink flex items-center gap-1.5">
-                                                    <ShieldAlert className="w-3.5 h-3.5 text-status-warning" />
-                                                    Stewardship Override
-                                                </div>
-                                                <p className="text-[11px] text-ink-muted">
-                                                    Quarantines this entity into its own singleton cluster on the next pipeline run.
-                                                </p>
-                                                {confirmOverrideKey === `isolate:${selectedNode.id}` ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleStewardshipOverride('ISOLATE', selectedNode.id)}
-                                                            className="btn-danger text-xs"
-                                                        >
-                                                            Confirm Isolate
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setConfirmOverrideKey(null)}
-                                                            className="btn-secondary text-xs"
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setConfirmOverrideKey(`isolate:${selectedNode.id}`)}
-                                                        className="btn-secondary text-xs"
-                                                    >
-                                                        Isolate Entity
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2.5">
-                                            <p className="text-xs text-ink-muted">
-                                                Click a node on the graph or select an entity below to inspect its keys and incident edges.
-                                            </p>
-                                            {(() => {
-                                                const bySource: Record<string, GraphNodeData[]> = {}
-                                                for (const n of visibleEntities) {
-                                                    bySource[n.source_id] = [...(bySource[n.source_id] || []), n]
-                                                }
-                                                // Show core/smaller tables first so high-volume event tables don't bury Customers/Orders
-                                                const grouped = Object.entries(bySource).sort(
-                                                    (a, b) => a[1].length - b[1].length || a[0].localeCompare(b[0])
-                                                )
-                                                return grouped.map(([srcId, items]) => {
-                                                    const isLarge = items.length > 15
-                                                    const isExpanded = !isLarge || expandedEntityGroups.has(srcId)
-                                                    const color = items[0]?.color || '#64748b'
-                                                    return (
-                                                        <div key={srcId} className="border border-line rounded-md overflow-hidden">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() =>
-                                                                    setExpandedEntityGroups((prev) => {
-                                                                        const next = new Set(prev)
-                                                                        if (isExpanded) next.delete(srcId)
-                                                                        else next.add(srcId)
-                                                                        return next
-                                                                    })
-                                                                }
-                                                                className="w-full px-3 py-1.5 bg-subtle hover:bg-hover flex items-center justify-between gap-2 text-xs font-medium text-ink transition-colors"
-                                                            >
-                                                                <span className="inline-flex items-center gap-2 min-w-0">
-                                                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                                                                    <span className="truncate">{formatSourceName(srcId)}</span>
-                                                                    <span className="font-mono tabular-nums text-[11px] text-ink-muted">
-                                                                        ({items.length})
-                                                                    </span>
-                                                                </span>
-                                                                {isLarge && (
-                                                                    <span className="text-[11px] text-accent">
-                                                                        {isExpanded ? 'Collapse' : 'Show all'}
-                                                                    </span>
-                                                                )}
-                                                            </button>
-                                                            {isExpanded && (
-                                                                <div className="divide-y divide-line">
-                                                                    {items.map((node) => (
-                                                                        <button
-                                                                            key={node.id}
-                                                                            type="button"
-                                                                            onClick={() => handleSelectNode(node)}
-                                                                            className="w-full px-3 py-1.5 text-left bg-surface hover:bg-subtle flex items-center justify-between gap-2 text-xs transition-colors"
-                                                                        >
-                                                                            <span className="font-mono text-[11px] text-ink truncate">
-                                                                                {node.source_key}
-                                                                            </span>
-                                                                            <span className="text-[11px] text-ink-subtle shrink-0">Inspect →</span>
-                                                                        </button>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    )
-                                                })
-                                            })()}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </section>
+                        <ClusterInspector
+                            clusterDetail={clusterDetail}
+                            uniqueSources={uniqueSources}
+                            visibleEntities={visibleEntities}
+                            selectedNode={selectedNode}
+                            activeTab={activeTab}
+                            onTabChange={setActiveTab}
+                            onSelectNode={handleSelectNode}
+                            confirmOverrideKey={confirmOverrideKey}
+                            onConfirmOverrideKeyChange={setConfirmOverrideKey}
+                            copiedKey={copiedKey}
+                            onCopy={copyToClipboard}
+                            onStewardshipOverride={(type, keyA, keyB) => void handleStewardshipOverride(type, keyA, keyB)}
+                            onExcludeIdentifier={(type, val) => void handleExcludeIdentifier(type, val)}
+                        />
                     </div>
                 </div>
             )}
 
-            {/* Cold-Start: Top Resolved Clusters or Empty State */}
-            {!selectedCluster && !selectedLens && searchQuery.trim().length < 3 && (
-                topClusters && topClusters.length > 0 ? (
-                    <div className="surface-panel overflow-hidden">
-                        <div className="px-3.5 py-2.5 bg-subtle border-b border-line flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                                <h2 className="text-[13px] font-semibold text-ink">Notable Resolved Clusters</h2>
-                                <p className="text-[11px] text-ink-muted">
-                                    Select a multi-entity cluster below to inspect its graph and Golden Record, or search any identifier above.
-                                </p>
-                            </div>
-                            <span className="badge-neutral font-mono tabular-nums">
-                                Top {topClusters.length}
-                            </span>
-                        </div>
-                        <div className="divide-y divide-line">
-                            {topClusters.map((cluster: ClusterSummary) => (
-                                <button
-                                    key={cluster.resolved_id}
-                                    type="button"
-                                    onClick={() => {
-                                        setSelectedCluster(cluster.resolved_id)
-                                        setResultsCollapsed(true)
-                                        setSelectedNode(null)
-                                        setHiddenSources(new Set())
-                                        setAiExplanation(null)
-                                        setActiveTab('golden')
-                                    }}
-                                    className="w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-3 bg-surface hover:bg-subtle transition-colors"
-                                >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                        <Hash className="w-3.5 h-3.5 text-accent shrink-0" />
-                                        <span className="font-mono text-xs font-medium text-ink truncate">
-                                            {cluster.resolved_id}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-2 shrink-0 font-mono tabular-nums">
-                                        {cluster.confidence_score != null && (
-                                            <span
-                                                className={
-                                                    cluster.confidence_score >= 0.8
-                                                        ? 'badge-success'
-                                                        : cluster.confidence_score >= 0.5
-                                                        ? 'badge-warning'
-                                                        : 'badge-danger'
-                                                }
-                                            >
-                                                {(cluster.confidence_score * 100).toFixed(1)}%
-                                            </span>
-                                        )}
-                                        <span className="badge-neutral">
-                                            {cluster.cluster_size.toLocaleString()} {cluster.cluster_size === 1 ? 'entity' : 'entities'}
-                                        </span>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                ) : (
-                    <div className="surface-panel py-16 px-4 text-center">
-                        <Search className="w-8 h-8 mx-auto mb-2.5 text-ink-subtle" />
-                        <h2 className="text-sm font-semibold text-ink">Search the identity index</h2>
-                        <p className="text-xs text-ink-muted mt-1 max-w-md mx-auto">
-                            Enter an email address, phone number, customer key, or cluster hash (minimum 3 characters) to inspect its entity graph and Golden Record.
-                        </p>
-                    </div>
-                )
-            )}
-
-            {/* Lens Diff Modal */}
-            {diffModalOpen && (
-                <div role="dialog" aria-modal="true" aria-label="Compare Identity Lenses" className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="fixed inset-0 bg-ink/30" onClick={() => setDiffModalOpen(false)} aria-hidden="true" />
-                    <div className="relative z-10 bg-surface border border-line-strong rounded-md w-full max-w-3xl max-h-[85vh] flex flex-col shadow-popover">
-                        <div className="flex items-center justify-between px-4 py-3 border-b border-line bg-subtle">
-                            <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
-                                <GitBranch className="w-4 h-4 text-accent" />
-                                Compare Identity Lenses
-                            </h2>
-                            <button
-                                type="button"
-                                onClick={() => setDiffModalOpen(false)}
-                                aria-label="Close lens diff modal"
-                                className="p-1 rounded text-ink-muted hover:text-ink hover:bg-hover"
-                            >
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-                        <div className="p-4 space-y-4 overflow-y-auto text-xs">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-ink-secondary font-medium mb-1">Lens A</label>
-                                    <select
-                                        value={diffLensA}
-                                        onChange={(e) => setDiffLensA(e.target.value)}
-                                        className="input-field text-xs"
-                                    >
-                                        <option value="default">Primary Graph (default)</option>
-                                        {availableLenses.map((l) => (
-                                            <option key={l.id} value={l.id}>{l.id}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-ink-secondary font-medium mb-1">Lens B</label>
-                                    <select
-                                        value={diffLensB}
-                                        onChange={(e) => setDiffLensB(e.target.value)}
-                                        className="input-field text-xs"
-                                    >
-                                        <option value="default">Primary Graph (default)</option>
-                                        {availableLenses.map((l) => (
-                                            <option key={l.id} value={l.id}>{l.id}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-
-                            {diffLensA === diffLensB ? (
-                                <p className="text-status-warning">Select two different lenses to compare.</p>
-                            ) : diffLoading ? (
-                                <div className="flex items-center gap-2 text-ink-muted py-6 justify-center">
-                                    <Loader2 className="w-4 h-4 animate-spin text-accent" />
-                                    Computing cross-lens diff…
-                                </div>
-                            ) : lensDiffData ? (
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-3 gap-2 font-mono tabular-nums">
-                                        <div className="surface-subtle p-3">
-                                            <div className="text-[11px] font-sans text-ink-muted">{lensDiffData.lens_a} Clusters</div>
-                                            <div className="text-lg font-semibold text-ink mt-0.5">{lensDiffData.lens_a_clusters}</div>
-                                        </div>
-                                        <div className="surface-subtle p-3">
-                                            <div className="text-[11px] font-sans text-ink-muted">{lensDiffData.lens_b} Clusters</div>
-                                            <div className="text-lg font-semibold text-ink mt-0.5">{lensDiffData.lens_b_clusters}</div>
-                                        </div>
-                                        <div className="surface-subtle p-3">
-                                            <div className="text-[11px] font-sans text-ink-muted">Entities Compared</div>
-                                            <div className="text-lg font-semibold text-ink mt-0.5">{lensDiffData.entities_compared}</div>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted mb-1.5">
-                                            Merged in {lensDiffData.lens_b} only ({lensDiffData.merged_in_b_only.length})
-                                        </h3>
-                                        {lensDiffData.merged_in_b_only.length === 0 ? (
-                                            <p className="text-ink-muted">None</p>
-                                        ) : (
-                                            <div className="border border-line rounded-md divide-y divide-line max-h-40 overflow-y-auto">
-                                                {lensDiffData.merged_in_b_only.map((row, i) => (
-                                                    <div key={i} className="px-3 py-1.5 flex justify-between gap-2 bg-surface">
-                                                        <span className="font-mono text-accent">{row.entity_key}</span>
-                                                        <span className="text-ink-muted font-mono truncate">
-                                                            {row.resolved_a} → {row.resolved_b}
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div>
-                                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted mb-1.5">
-                                            Merged in {lensDiffData.lens_a} only ({lensDiffData.merged_in_a_only.length})
-                                        </h3>
-                                        {lensDiffData.merged_in_a_only.length === 0 ? (
-                                            <p className="text-ink-muted">None</p>
-                                        ) : (
-                                            <div className="border border-line rounded-md divide-y divide-line max-h-40 overflow-y-auto">
-                                                {lensDiffData.merged_in_a_only.map((row, i) => (
-                                                    <div key={i} className="px-3 py-1.5 flex justify-between gap-2 bg-surface">
-                                                        <span className="font-mono text-accent">{row.entity_key}</span>
-                                                        <span className="text-ink-muted font-mono truncate">
-                                                            {row.resolved_a} ← {row.resolved_b}
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            ) : null}
-                        </div>
-                    </div>
-                </div>
-            )}
+            <LensDiffModal
+                open={diffModalOpen}
+                availableLenses={availableLenses}
+                initialLensA={diffLensA}
+                initialLensB={diffLensB}
+                onClose={() => setDiffModalOpen(false)}
+            />
         </div>
     )
 }

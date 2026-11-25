@@ -40,7 +40,6 @@ LEGACY_SOURCE_CEILINGS: Dict[str, int] = {
     "idr_core/stages/extraction.py": 965,
     "idr_api/routers/setup.py": 855,
     "idr_mcp/server.py": 1700,
-    "idr_ui/src/pages/Explorer.tsx": 2040,
     "idr_ui/src/pages/Setup/StepReview.tsx": 1350,
     "idr_ui/src/pages/Setup/StepMap.tsx": 1295,
     "idr_ui/src/pages/Setup/StepRules.tsx": 1265,
